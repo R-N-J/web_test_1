@@ -6,6 +6,7 @@ import { calculateFOV } from "./Visibility";
 import { Entity, tryMoveEntity } from "./Entity";
 import { Item, Inventory } from "./Item";
 import { MessageLog } from "./MessageLog";
+import { findPath } from "./Pathfinding";
 
 // --- CONFIGURATION ---
 const WIDTH = 60;
@@ -316,7 +317,7 @@ spawnItems(gameMap, 8);
 
 // --- 3. THE GAME LOOP (MONSTER TURN) ---
 
-function monsterTurn(): void {
+function monsterTurn_old(): void {
   monsters.forEach(monster => {
     // 1. Skip if monster is dead
     if (monster.hp <= 0) return;
@@ -391,6 +392,67 @@ function monsterTurn(): void {
   });
 
   // Clean up the list of monsters (important for performance and rendering)
+  monsters = monsters.filter(m => m.hp > 0);
+
+  // Redraw the scene after all monsters have acted
+  render();
+}
+
+function monsterTurn(): void {
+  monsters.forEach(monster => {
+    // 1. Skip if monster is dead or player is dead
+    if (monster.hp <= 0 || player.hp <= 0) return;
+
+    // Determine distance to player
+    const dxToPlayer = player.x - monster.x;
+    const dyToPlayer = player.y - monster.y;
+    const distSq = dxToPlayer ** 2 + dyToPlayer ** 2;
+
+    // 2. COMBAT LOGIC: Attack if adjacent
+    if (distSq <= 2) {
+      // ATTACK logic (same as before)
+      player.hp -= monster.damage;
+      log.addMessage(`${monster.name} attacks Hero for ${monster.damage} damage!`, "red");
+
+      if (player.hp <= 0) {
+        alert("Game Over! You were slain.");
+        log.addMessage(`You were slain by a ${monster.name}.`, "red");
+      }
+
+    } else if (gameMap.get(monster.x, monster.y)?.isVisible) {
+      // 3. MOVEMENT LOGIC (Tracking Player - If Visible)
+
+      // --- NEW: A* PATHFINDING ---
+      const path = findPath(gameMap, monster.x, monster.y, player.x, player.y);
+
+      if (path && path.length > 0) {
+        // Path found: move to the next step in the path
+        const nextStep = path[0];
+
+        // Note: We use the simpler tryMoveEntity just to update the monster's position,
+        // but the move is guaranteed to be valid by A*.
+        tryMoveEntity(monster, gameMap, nextStep.x - monster.x, nextStep.y - monster.y);
+
+      } else {
+        // Path blocked or no path exists (e.g., player is behind a closed door)
+        log.addMessage(`${monster.name} seems confused.`, "gray");
+      }
+
+    } else {
+      // 4. MOVEMENT LOGIC (Random Wander - If Player is NOT Visible)
+
+      // Choose a random cardinal direction (same as before)
+      const randomDirs: Direction[] = [
+        { x: 1, y: 0 }, { x: -1, y: 0 },
+        { x: 0, y: 1 }, { x: 0, y: -1 }
+      ];
+      const randomDir = randomDirs[Math.floor(Math.random() * randomDirs.length)];
+
+      tryMoveEntity(monster, gameMap, randomDir.x, randomDir.y);
+    }
+  });
+
+  // Clean up the list of monsters
   monsters = monsters.filter(m => m.hp > 0);
 
   // Redraw the scene after all monsters have acted
