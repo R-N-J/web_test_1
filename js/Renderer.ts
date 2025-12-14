@@ -110,4 +110,29 @@ export class AsciiRenderer {
     this.ctx.fillStyle = "#000";
     this.ctx.fillRect(0, 0, width * tileSize, height * tileSize);
   }
+
+
+  /**
+   * Draws a full string starting at grid coordinates (x, y), clearing the rest of the line.
+   */
+  public drawTextLine(x: number, y: number, text: string, fg: string, bg: string = "#000") {
+    const ts = this.options.tileSize;
+
+    // 1. Clear the entire horizontal line for a clean background
+    this.ctx.fillStyle = bg;
+    this.ctx.fillRect(x * ts, y * ts, this.options.width * ts, ts);
+
+    // 2. Draw the text (using the standard drawChar logic, but simpler)
+    this.ctx.font = `${ts}px ${this.options.font}`;
+    this.ctx.textAlign = "left"; // Align log text to the left
+    this.ctx.textBaseline = "middle";
+    this.ctx.fillStyle = fg;
+
+    // We add a slight offset (ts / 2) to center the text vertically within the tile height
+    this.ctx.fillText(text, x * ts, y * ts + (ts / 2));
+
+    // Reset textAlign for single char drawing if needed later (usually not necessary)
+    this.ctx.textAlign = "center";
+  }
+
 }

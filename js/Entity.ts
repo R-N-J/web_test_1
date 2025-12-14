@@ -10,7 +10,9 @@ export interface Entity {
   name: string;
   hp: number;
   maxHp: number;
-  damage: number;
+  damage: number;       // The total current damage (base + equipment)
+  damageBase: number;   // NEW: Base damage without equipment
+  defenseBase: number;  // NEW: Base defense
 }
 
 // Basic movement logic for a simple Monster AI
