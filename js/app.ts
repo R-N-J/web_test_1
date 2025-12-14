@@ -37,6 +37,7 @@ const MAP_HEIGHT = HEIGHT - UI_ROWS;       // dungeon height on screen
 // Initialize and Generate Map
 const gameMap = new DungeonMap(WIDTH, MAP_HEIGHT);
 generateRandomWalk(gameMap, 0.40);
+placeLevelFeatures(gameMap); // NEW: Place stairs and doors
 
 // Game State
 
@@ -156,6 +157,52 @@ function spawnItems(map: DungeonMap, count: number): void {
   }
 }
 
+function placeLevelFeatures(map: DungeonMap): void {
+  console.log("Placing level features...");
+  const floorTiles: { x: number, y: number }[] = [];
+  // 1. Find all available floor tiles
+  for (let y = 1; y < map.height - 1; y++) {
+    for (let x = 1; x < map.width - 1; x++) {
+      if (map.get(x, y)?.type === 'FLOOR') {
+        floorTiles.push({ x, y });
+      }
+    }
+  }
+
+  if (floorTiles.length === 0) return;
+
+  // 2. Place Stairs Down (Place first to ensure it gets a spot)
+  const stairsIndex = Math.floor(Math.random() * floorTiles.length);
+  const stairsPos = floorTiles.splice(stairsIndex, 1)[0];
+  map.set(stairsPos.x, stairsPos.y, { type: 'STAIRS_DOWN', isVisible: false, isExplored: false });
+
+  // 3. Place a few Doors (optional: replace a wall with a door)
+  const doorCount = 3;
+  for (let i = 0; i < doorCount; i++) {
+    // Find a random wall tile adjacent to a floor (simple implementation)
+    const wallTiles: { x: number, y: number }[] = [];
+    for (let y = 1; y < map.height - 1; y++) {
+      for (let x = 1; x < map.width - 1; x++) {
+        const tile = map.get(x, y);
+        if (tile?.type === 'WALL') {
+          // Check if adjacent to a floor tile to make it useful
+          if (map.get(x + 1, y)?.type === 'FLOOR' || map.get(x - 1, y)?.type === 'FLOOR' ||
+            map.get(x, y + 1)?.type === 'FLOOR' || map.get(x, y - 1)?.type === 'FLOOR') {
+            wallTiles.push({ x, y });
+          }
+        }
+      }
+    }
+
+    if (wallTiles.length > 0) {
+      const doorIndex = Math.floor(Math.random() * wallTiles.length);
+      const doorPos = wallTiles[doorIndex];
+      map.set(doorPos.x, doorPos.y, { type: 'DOOR_CLOSED', isVisible: false, isExplored: false });
+    }
+  }
+}
+
+
 // Add listener for interaction keys (e for Equip, u for Use)
 window.addEventListener("keydown", (event) => {
   let actionTaken = false;
@@ -188,7 +235,69 @@ window.addEventListener("keydown", (event) => {
       }
       break;
     }
-  }
+    case 'o': { // NEW: Open Door
+      // Check all surrounding 8 tiles for a closed door
+      const nearbyDoors = [
+        {x: player.x, y: player.y - 1}, {x: player.x, y: player.y + 1},
+        {x: player.x - 1, y: player.y}, {x: player.x + 1, y: player.y},
+        {x: player.x - 1, y: player.y - 1}, {x: player.x + 1, y: player.y - 1},
+        {x: player.x - 1, y: player.y + 1}, {x: player.x + 1, y: player.y + 1},
+      ];
+
+      let doorOpened = false;
+      for (const {x, y} of nearbyDoors) {
+        const tile = gameMap.get(x, y);
+        if (tile && tile.type === 'DOOR_CLOSED') {
+          // Change the tile type to open
+          gameMap.set(x, y, {...tile, type: 'DOOR_OPEN'});
+          log.addMessage("You open the door.", "orange");
+          doorOpened = true;
+          actionTaken = true;
+          break;
+        }
+      }
+      if (!doorOpened) {
+        log.addMessage("There is no closed door nearby.", "gray");
+      }
+      break;
+    }
+
+    case 'c': { // NEW: Close Door
+        // Check all surrounding 8 tiles for an open door
+        const nearbyDoors = [
+          { x: player.x, y: player.y - 1 }, { x: player.x, y: player.y + 1 },
+          { x: player.x - 1, y: player.y }, { x: player.x + 1, y: player.y },
+          { x: player.x - 1, y: player.y - 1 }, { x: player.x + 1, y: player.y - 1 },
+          { x: player.x - 1, y: player.y + 1 }, { x: player.x + 1, y: player.y + 1 },
+        ];
+
+        let doorClosed = false;
+
+        for (const { x, y } of nearbyDoors) {
+          const tile = gameMap.get(x, y);
+          if (!tile || tile.type !== 'DOOR_OPEN') continue;
+
+          const occupiedByPlayer = (player.x === x && player.y === y);
+          const occupiedByMonster = monsters.some(m => m.hp > 0 && m.x === x && m.y === y);
+
+          if (occupiedByPlayer || occupiedByMonster) {
+            continue; // Can't close a door on someone's toes
+          }
+
+          gameMap.set(x, y, { ...tile, type: 'DOOR_CLOSED' });
+          log.addMessage("You close the door.", "orange");
+          doorClosed = true;
+          break;
+        }
+
+        if (doorClosed) {
+          actionTaken = true;
+        } else {
+          log.addMessage("There is no open door nearby (or it's blocked).", "gray");
+        }
+        break;
+      }
+    }
 
   if (actionTaken) {
     // Any item interaction counts as a player turn
@@ -320,6 +429,18 @@ function render() {
         char = '.';
         color = '#888';
         bgColor = 'black';
+      } else if (tileState.type === 'STAIRS_DOWN') { // NEW
+        char = '>';
+        color = 'yellow';
+        bgColor = 'black';
+      } else if (tileState.type === 'DOOR_CLOSED') { // NEW
+        char = '+';
+        color = 'brown';
+        bgColor = 'black';
+      } else if (tileState.type === 'DOOR_OPEN') { // NEW
+        char = '-';  // or | for horizontal
+        color = 'brown';
+        bgColor = 'black';
       }
 
       // --- APPLY FOV AND MEMORY STYLING ---
@@ -390,6 +511,9 @@ new InputHandler((delta: Direction) => {
   const newX = player.x + delta.x;
   const newY = player.y + delta.y;
 
+  const targetTile = gameMap.get(newX, newY);
+
+
   // 1. Check for Monster at Target Location
   const targetMonster = monsters.find(m => m.x === newX && m.y === newY && m.hp > 0);
 
@@ -407,7 +531,8 @@ new InputHandler((delta: Direction) => {
 
     monsterTurn(); // Monster Turn immediately follows player's attack
 
-  } else if (gameMap.get(newX, newY)?.type === 'FLOOR') {
+    // 2. Check for Movement (Floor or Open Door)
+  } else if (targetTile?.type === 'FLOOR' || targetTile?.type === 'DOOR_OPEN') {
     // B. MOVEMENT
     player.x = newX;
     player.y = newY;
@@ -421,11 +546,49 @@ new InputHandler((delta: Direction) => {
     }
 
     monsterTurn(); // Monster Turn immediately follows player's move
-  }
+
+    // 3. NEW: Check for Stairs
+    } else if (targetTile?.type === 'STAIRS_DOWN') {
+      goDownStairs(); // Call new function to handle level change
+      monsterTurn();
+
+      // 4. NEW: Check for Closed Door (Blocks movement)
+    } else if (targetTile?.type === 'DOOR_CLOSED') {
+      log.addMessage("The door is closed. Press 'o' to open it.", "gray");
+    }
+
   // Hitting a WALL results in no action, which correctly prevents monsterTurn()
 });
 
+// --- NEW: Level Progression Function (main.ts) ---
 
+let currentLevel = 1;
+
+function goDownStairs(): void {
+  currentLevel++;
+  log.addMessage(`You descend to Level ${currentLevel}!`, "yellow");
+
+  // Reset the map and entities
+
+  // 1. Regenerate Map
+  generateRandomWalk(gameMap, 0.40);
+  placeLevelFeatures(gameMap); // IMPORTANT: put stairs/doors back on the new level
+
+
+  // 2. Find new start position and move player there
+  const startTile = findStartingFloorTile(gameMap);
+  player.x = startTile.x;
+  player.y = startTile.y;
+
+  // 3. Clear and respawn enemies/items
+  monsters = [];
+  itemsOnMap.length = 0; // Efficiently clear the array
+  spawnMonsters(gameMap, 5 + currentLevel); // Increase difficulty slightly
+  spawnItems(gameMap, 8);
+
+  // Force a full render to show the new map
+  render();
+}
 
 // --- 6. START THE GAME ---
 refreshPlayerDerivedStats();

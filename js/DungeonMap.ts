@@ -1,5 +1,5 @@
 // Define what a Tile is
-export type TileType = 'WALL' | 'FLOOR';
+export type TileType = 'WALL' | 'FLOOR' | 'STAIRS_DOWN' | 'DOOR_CLOSED' | 'DOOR_OPEN';
 
 export interface TileState {
   type: TileType;       // The actual type of the tile
@@ -13,10 +13,10 @@ export class DungeonMap {
   constructor(public width: number, public height: number) {
     // Initialize the entire map as solid rock (WALL)
     this.mapData = Array(height).fill(null).map(() => Array(width).fill(null).map(() => ({
-      type: 'WALL',
-      isVisible: false,
-      isExplored: false
-    }))
+        type: 'WALL',
+        isVisible: false,
+        isExplored: false
+      }))
     );
   }
 
@@ -45,6 +45,13 @@ const DIRECTIONS: { x: number; y: number }[] = [
 ];
 
 export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.45): void {
+  // RESET MAP FIRST (prevents floors accumulating across levels and freezing the while-loop)
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      map.mapData[y][x] = { type: 'WALL', isVisible: false, isExplored: false };
+    }
+  }
+
   const totalTiles = map.width * map.height;
   const targetFloors = Math.floor(totalTiles * floorPercentage);
   let carvedFloors = 0;
