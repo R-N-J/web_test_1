@@ -13,6 +13,13 @@ const WIDTH = 60;
 const HEIGHT = 40;
 const FOV_RADIUS = 10;
 
+// Message Log Initialization
+const log = new MessageLog();
+
+// Reserve rows at the bottom for UI (messages + status bar)
+const UI_ROWS = log.DISPLAY_LINES + 1;     // 3 message lines + 1 status line
+const MAP_HEIGHT = HEIGHT - UI_ROWS;       // dungeon height on screen
+
 // --- 1. INITIALIZATION ---
 
 // Initialize Renderer (Canvas setup)
@@ -24,24 +31,14 @@ const display = new AsciiRenderer({
 });
 
 
-
-// Message Log Initialization
-const log = new MessageLog();
-log.addMessage("Welcome to the Dungeons!", "#0f0"); // Initial welcome message
-
-
-// Reserve rows at the bottom for UI (messages + status bar)
-const UI_ROWS = log.DISPLAY_LINES + 1;     // 3 message lines + 1 status line
-const MAP_HEIGHT = HEIGHT - UI_ROWS;       // dungeon height on screen
-
-
 // Initialize and Generate Map
 const gameMap = new DungeonMap(WIDTH, MAP_HEIGHT);
 generateRandomWalk(gameMap, 0.40);
 placeLevelFeatures(gameMap); // NEW: Place stairs and doors
 
 // Game State
-
+// FOV and lighting
+const playerFOVRadius = FOV_RADIUS;
 // Initialize Player
 const startTile = findStartingFloorTile(gameMap);
 const player: Entity = {
@@ -56,10 +53,19 @@ const player: Entity = {
   damageBase: 5,
   defenseBase: 1
 };
+let currentLevel = 1;
 
 let monsters: Entity[] = [];
 const inventory = new Inventory(log);
 const itemsOnMap: Item[] = [];
+
+// Helper function to get all 8 adjacent positions around a point
+const getAdjacentPositions = (x: number, y: number) => [
+  {x, y: y - 1}, {x, y: y + 1},
+  {x: x - 1, y}, {x: x + 1, y},
+  {x: x - 1, y: y - 1}, {x: x + 1, y: y - 1},
+  {x: x - 1, y: y + 1}, {x: x + 1, y: y + 1},
+];
 
 function getPlayerAttackTotal(): number {
   return player.damageBase + inventory.getAttackBonus();
@@ -72,9 +78,6 @@ function getPlayerDefenseTotal(): number {
 function refreshPlayerDerivedStats(): void {
   player.damage = getPlayerAttackTotal();
 }
-
-
-
 
 
 // --- 2. MONSTER & PLAYER SETUP UTILITIES ---
@@ -175,7 +178,13 @@ function placeLevelFeatures(map: DungeonMap): void {
   // 2. Place Stairs Down (Place first to ensure it gets a spot)
   const stairsIndex = Math.floor(Math.random() * floorTiles.length);
   const stairsPos = floorTiles.splice(stairsIndex, 1)[0];
-  map.set(stairsPos.x, stairsPos.y, { type: 'STAIRS_DOWN', isVisible: false, isExplored: false });
+  map.set(stairsPos.x, stairsPos.y, {
+    type: 'STAIRS_DOWN',
+    isVisible: false,
+    isExplored: false,
+    blocksMovement: false,
+    blocksSight: false
+  });
 
   // 3. Place a few Doors (optional: replace a wall with a door)
   const doorCount = 3;
@@ -198,7 +207,13 @@ function placeLevelFeatures(map: DungeonMap): void {
     if (wallTiles.length > 0) {
       const doorIndex = Math.floor(Math.random() * wallTiles.length);
       const doorPos = wallTiles[doorIndex];
-      map.set(doorPos.x, doorPos.y, { type: 'DOOR_CLOSED', isVisible: false, isExplored: false });
+      map.set(doorPos.x, doorPos.y, {
+        type: 'DOOR_CLOSED',
+        isVisible: false,
+        isExplored: false,
+        blocksMovement: true,
+        blocksSight: true
+      });
     }
   }
 }
@@ -211,16 +226,23 @@ window.addEventListener("keydown", (event) => {
   switch (event.key.toLowerCase()) {
     case 'e': { // Equip
       // For simplicity, finds and equips the first available weapon/armor in inventory
-      const equipCandidates = inventory.items.filter(i => i.slot === 'weapon' || i.slot === 'chest' || i.slot === 'legs' || i.slot === 'feet' || i.slot === 'head' || i.slot === 'offhand');
+      const equipCandidates = inventory.items.filter(i =>
+        i.slot === 'weapon' || i.slot === 'chest' || i.slot === 'legs' ||
+        i.slot === 'feet' || i.slot === 'head' || i.slot === 'offhand'
+      );
       if (equipCandidates.length > 0) {
         const index = inventory.items.findIndex(i => i === equipCandidates[0]);
         inventory.equipItem(index, player);
         // After equipping, update the player's total damage stat
         refreshPlayerDerivedStats();
         actionTaken = true;
+
       } else {
         console.log("Nothing to equip.");
+        log.addMessage("Nothing to equip.");
+
       }
+      render(); // update log/UI immediately
       break;
     }
 
@@ -233,170 +255,96 @@ window.addEventListener("keydown", (event) => {
         actionTaken = true;
       } else {
         console.log("Nothing to use.");
+        log.addMessage("Nothing to use.");
       }
+      render(); // update log/UI immediately
       break;
     }
-    case 'o': { // NEW: Open Door
-      // Check all surrounding 8 tiles for a closed door
-      const nearbyDoors = [
-        {x: player.x, y: player.y - 1}, {x: player.x, y: player.y + 1},
-        {x: player.x - 1, y: player.y}, {x: player.x + 1, y: player.y},
-        {x: player.x - 1, y: player.y - 1}, {x: player.x + 1, y: player.y - 1},
-        {x: player.x - 1, y: player.y + 1}, {x: player.x + 1, y: player.y + 1},
-      ];
 
+    case 'o': { // Open Door
       let doorOpened = false;
-      for (const {x, y} of nearbyDoors) {
+      const nearbyTiles = getAdjacentPositions(player.x, player.y);
+
+      for (const {x, y} of nearbyTiles) {
         const tile = gameMap.get(x, y);
         if (tile && tile.type === 'DOOR_CLOSED') {
-          // Change the tile type to open
-          gameMap.set(x, y, {...tile, type: 'DOOR_OPEN'});
-          log.addMessage("You open the door.", "orange");
+          gameMap.set(x, y, {...tile, type: 'DOOR_OPEN', blocksMovement: false, blocksSight: false});
+          log.addMessage('You open the door.');
           doorOpened = true;
-          actionTaken = true;
           break;
         }
       }
       if (!doorOpened) {
-        log.addMessage("There is no closed door nearby.", "gray");
+        log.addMessage('No closed door nearby to open.');
       }
+      actionTaken = doorOpened;
+      render(); // update log/UI immediately
       break;
     }
 
-    case 'c': { // NEW: Close Door
-        // Check all surrounding 8 tiles for an open door
-        const nearbyDoors = [
-          { x: player.x, y: player.y - 1 }, { x: player.x, y: player.y + 1 },
-          { x: player.x - 1, y: player.y }, { x: player.x + 1, y: player.y },
-          { x: player.x - 1, y: player.y - 1 }, { x: player.x + 1, y: player.y - 1 },
-          { x: player.x - 1, y: player.y + 1 }, { x: player.x + 1, y: player.y + 1 },
-        ];
+    case 'c': { // Close Door
+      let doorClosed = false;
+      const nearbyTiles = getAdjacentPositions(player.x, player.y);
 
-        let doorClosed = false;
-
-        for (const { x, y } of nearbyDoors) {
-          const tile = gameMap.get(x, y);
-          if (!tile || tile.type !== 'DOOR_OPEN') continue;
-
-          const occupiedByPlayer = (player.x === x && player.y === y);
-          const occupiedByMonster = monsters.some(m => m.hp > 0 && m.x === x && m.y === y);
-
-          if (occupiedByPlayer || occupiedByMonster) {
-            continue; // Can't close a door on someone's toes
-          }
-
-          gameMap.set(x, y, { ...tile, type: 'DOOR_CLOSED' });
-          log.addMessage("You close the door.", "orange");
+      for (const {x, y} of nearbyTiles) {
+        const tile = gameMap.get(x, y);
+        if (tile?.type === 'DOOR_OPEN') {
+          gameMap.set(x, y, { ...tile, type: 'DOOR_CLOSED', blocksMovement: true, blocksSight: true });
+          log.addMessage('You close the door.');
           doorClosed = true;
+          actionTaken = true;
           break;
         }
-
-        if (doorClosed) {
-          actionTaken = true;
-        } else {
-          log.addMessage("There is no open door nearby (or it's blocked).", "gray");
-        }
-        break;
       }
-    }
 
-  if (actionTaken) {
-    // Any item interaction counts as a player turn
-    monsterTurn();
-    event.preventDefault(); // Stop browser scrolling
+      if (!doorClosed) {
+        log.addMessage("There is no open door nearby (or it's blocked).", "gray");
+      }
+      if (actionTaken) {
+        // Any item interaction counts as a player turn
+        monsterTurn();
+        event.preventDefault(); // Stop browser scrolling
+      }
+      break;
+    }
   }
 });
 
 
 
-// Spawn initial monsters
-spawnMonsters(gameMap, 5);
-// Spawn items alongside monsters
-spawnItems(gameMap, 8);
+/**
+ * Initializes the game state, generates the initial map, and positions the player
+ */
+function initializeGame() {
+  // 1. Set up initial the game state
+  currentLevel = 1;  // Reset to level 1 when starting a new game
 
+  // 2. Generate initial map
+  generateRandomWalk(gameMap, 0.40);
+  placeLevelFeatures(gameMap);
+
+  // 3. Position player
+  const startTile = findStartingFloorTile(gameMap);
+  player.x = startTile.x;
+  player.y = startTile.y;
+
+  // 4. Initialize entities
+  monsters.length = 0; // Clear any existing monsters
+  itemsOnMap.length = 0; // Clear any existing items
+  spawnMonsters(gameMap, 5);  // Initial number of monsters
+  spawnItems(gameMap, 8);     // Initial number of items
+
+  // 5. Initialize game systems
+  refreshPlayerDerivedStats();
+  calculateFOV(gameMap, player.x, player.y, playerFOVRadius);
+
+  // 6. Initial game message
+  log.addMessage("Welcome to the Dungeons!", "#0f0"); // Initial welcome message
+  log.addMessage("Find the stairs (>) to descend deeper.", "white");
+}
 
 // --- 3. THE GAME LOOP (MONSTER TURN) ---
 
-function monsterTurn_old(): void {
-  monsters.forEach(monster => {
-    // 1. Skip if monster is dead
-    if (monster.hp <= 0) return;
-
-    const dxToPlayer = player.x - monster.x;
-    const dyToPlayer = player.y - monster.y;
-    // 2. Check for player proximity (Attack if adjacent)
-    const distSq = (monster.x - player.x) ** 2 + (monster.y - player.y) ** 2;
-
-    if (distSq <= 2) {
-      // ATTACK (apply player defense)
-      const defense = getPlayerDefenseTotal();
-      const damageTaken = Math.max(0, monster.damage - defense);
-      const prevHp = player.hp;
-
-      player.hp = Math.max(0, player.hp - damageTaken);
-
-      console.log(
-        `${monster.name} attacks ${player.name} for ${damageTaken} damage (ATK ${monster.damage}, DEF ${defense}). ` +
-        `${player.name} HP: ${prevHp} -> ${player.hp}`
-      );
-
-      log.addMessage(
-        `${monster.name} attacks ${player.name} for ${damageTaken} damage (DEF ${defense}). ` +
-        `${player.name} HP: ${player.hp}/${player.maxHp}`,
-        "red"
-      );
-
-      if (player.hp <= 0) {
-        alert("Game Over! You were slain.");
-        log.addMessage(`You were slain by a ${monster.name}.`, "red");
-        // In a full game, you'd trigger a proper death scene here
-      }
-
-
-    } else if (gameMap.get(monster.x, monster.y)?.isVisible) {
-      // 3. MOVEMENT LOGIC (Tracking Player - If Visible)
-
-      // Calculate the direction signs
-      const dx = Math.sign(dxToPlayer);
-      const dy = Math.sign(dyToPlayer);
-
-      let moved = false;
-
-      // Prioritize Diagonal Movement (feels more responsive)
-      if (dx !== 0 && dy !== 0) {
-        moved = tryMoveEntity(monster, gameMap, dx, dy);
-      }
-
-      // If diagonal failed or was not needed, try primary axis
-      if (!moved && dx !== 0) {
-        moved = tryMoveEntity(monster, gameMap, dx, 0);
-      }
-
-      // If X move failed, or monster only needed Y, try Y axis
-      if (!moved && dy !== 0) {
-        tryMoveEntity(monster, gameMap, 0, dy);
-      }
-
-    } else {
-      // 4. MOVEMENT LOGIC (Random Wander - If Player is NOT Visible)
-
-      // Choose a random cardinal direction
-      const randomDirs: Direction[] = [
-        { x: 1, y: 0 }, { x: -1, y: 0 },
-        { x: 0, y: 1 }, { x: 0, y: -1 }
-      ];
-      const randomDir = randomDirs[Math.floor(Math.random() * randomDirs.length)];
-
-      tryMoveEntity(monster, gameMap, randomDir.x, randomDir.y);
-    }
-  });
-
-  // Clean up the list of monsters (important for performance and rendering)
-  monsters = monsters.filter(m => m.hp > 0);
-
-  // Redraw the scene after all monsters have acted
-  render();
-}
 
 function monsterTurn(): void {
   monsters.forEach(monster => {
@@ -560,7 +508,7 @@ function render() {
   //  "black");
 
 
-  display.drawTextLine(0, statusBarRow, `HP: ${player.hp}/${player.maxHp} | ATK: ${getPlayerAttackTotal()} | DEF: ${getPlayerDefenseTotal()} | INV: ${inventory.items.length}`, "white", "black");
+  display.drawTextLine(0, statusBarRow, `L${currentLevel} | HP: ${player.hp}/${player.maxHp} | ATK: ${getPlayerAttackTotal()} | DEF: ${getPlayerDefenseTotal()} | INV: ${inventory.items.length}`, "white", "black");
 
 }
 
@@ -624,7 +572,7 @@ new InputHandler((delta: Direction) => {
 
 // --- NEW: Level Progression Function (main.ts) ---
 
-let currentLevel = 1;
+
 
 function goDownStairs(): void {
   currentLevel++;
@@ -648,10 +596,14 @@ function goDownStairs(): void {
   spawnMonsters(gameMap, 5 + currentLevel); // Increase difficulty slightly
   spawnItems(gameMap, 8);
 
+  // Recalculate FOV after level transition
+  calculateFOV(gameMap, player.x, player.y, playerFOVRadius);
+
   // Force a full render to show the new map
   render();
 }
 
 // --- 6. START THE GAME ---
 refreshPlayerDerivedStats();
+initializeGame(); // Initialize the first level
 render();

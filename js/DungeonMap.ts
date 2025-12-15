@@ -5,6 +5,8 @@ export interface TileState {
   type: TileType;       // The actual type of the tile
   isVisible: boolean;   // Is it currently lit up (line-of-sight)?
   isExplored: boolean;  // Has the player ever seen it? (Fog of War)
+  blocksMovement: boolean;  // Can entities move through this tile?
+  blocksSight: boolean;     // Does this tile block line of sight?
 }
 
 export class DungeonMap {
@@ -15,7 +17,9 @@ export class DungeonMap {
     this.mapData = Array(height).fill(null).map(() => Array(width).fill(null).map(() => ({
         type: 'WALL',
         isVisible: false,
-        isExplored: false
+        isExplored: false,
+        blocksMovement: true,
+        blocksSight: true
       }))
     );
   }
@@ -48,7 +52,7 @@ export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.
   // RESET MAP FIRST (prevents floors accumulating across levels and freezing the while-loop)
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
-      map.mapData[y][x] = { type: 'WALL', isVisible: false, isExplored: false };
+    map.mapData[y][x] = { type: 'WALL', isVisible: false, isExplored: false, blocksMovement: true, blocksSight: true };
     }
   }
 
@@ -61,7 +65,13 @@ export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.
   let walkerY = Math.floor(map.height / 2);
 
   // Carve the starting position
-  map.set(walkerX, walkerY, { type: 'FLOOR', isVisible: false, isExplored: false });
+  map.set(walkerX, walkerY, { 
+    type: 'FLOOR', 
+    isVisible: false, 
+    isExplored: false, 
+    blocksMovement: false,
+    blocksSight: false
+  });
   carvedFloors++;
 
   while (carvedFloors < targetFloors) {
@@ -80,7 +90,7 @@ export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.
 
       // 4. Carve the new tile
       if (map.get(walkerX, walkerY)?.type === 'WALL') {
-        map.set(walkerX, walkerY, { type: 'FLOOR', isVisible: false, isExplored: false });
+        map.set(walkerX, walkerY, { type: 'FLOOR', isVisible: false, isExplored: false, blocksMovement: false, blocksSight: false });
         carvedFloors++;
       }
     }
@@ -89,12 +99,12 @@ export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.
 
   // Optional Step: Add a boundary of walls to ensure the dungeon is closed
   for (let x = 0; x < map.width; x++) {
-    map.set(x, 0, { type: 'WALL', isVisible: false, isExplored: false });
-    map.set(x, map.height - 1, { type: 'WALL', isVisible: false, isExplored: false });
+    map.set(x, 0, { type: 'WALL', isVisible: false, isExplored: false, blocksMovement: true, blocksSight: true });
+    map.set(x, map.height - 1, { type: 'WALL', isVisible: false, isExplored: false, blocksMovement: true, blocksSight: true });
   }
   for (let y = 0; y < map.height; y++) {
-    map.set(0, y, { type: 'WALL', isVisible: false, isExplored: false });
-    map.set(map.width - 1, y, { type: 'WALL', isVisible: false, isExplored: false });
+    map.set(0, y, { type: 'WALL', isVisible: false, isExplored: false, blocksMovement: true, blocksSight: true });
+    map.set(map.width - 1, y, { type: 'WALL', isVisible: false, isExplored: false, blocksMovement: true, blocksSight: true });
   }
 }
 
