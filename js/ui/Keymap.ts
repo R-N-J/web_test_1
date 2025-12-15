@@ -5,6 +5,10 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
   const moveDelta = InputHandler.getMovementDelta(event);
   if (moveDelta) return { type: "MOVE", delta: moveDelta };
 
+  if (event.code === "Numpad5" || event.key === "5") {
+    return { type: "WAIT" };
+  }
+
   switch (event.key.toLowerCase()) {
     case "e":
       return { type: "EQUIP" };

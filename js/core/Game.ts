@@ -72,6 +72,9 @@ export class Game {
     switch (action.type) {
       case "MOVE":
         return this.tryMoveOrInteract(action.delta);
+      case "WAIT":
+        this.state.log.addMessage("You wait.", "gray");
+        return true;
       case "EQUIP":
         return this.tryEquip();
       case "USE_CONSUMABLE":
