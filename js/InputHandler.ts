@@ -1,38 +1,28 @@
 export type Direction = { x: number; y: number };
 
 export class InputHandler {
-  // We accept a callback function: "What should I do when the player moves?"
-  constructor(onInput: (delta: Direction) => void) {
+  constructor(onKeyDown: (event: KeyboardEvent) => void) {
     window.addEventListener("keydown", (event) => {
-      let delta: Direction = { x: 0, y: 0 };
-
-      switch (event.key) {
-        // Arrow Keys
-        case "ArrowUp":
-        case "k": // Vim keys for UP
-          delta = { x: 0, y: -1 };
-          break;
-        case "ArrowDown":
-        case "j": // Vim keys for DOWN
-          delta = { x: 0, y: 1 };
-          break;
-        case "ArrowLeft":
-        case "h": // Vim keys for LEFT
-          delta = { x: -1, y: 0 };
-          break;
-        case "ArrowRight":
-        case "l": // Vim keys for RIGHT
-          delta = { x: 1, y: 0 };
-          break;
-        default:
-          return; // Ignore other keys
-      }
-
-      // Prevent the browser from scrolling when using arrow keys
-      event.preventDefault();
-
-      // Trigger the callback
-      onInput(delta);
+      onKeyDown(event);
     });
+  }
+
+  public static getMovementDelta(event: KeyboardEvent): Direction | null {
+    switch (event.key) {
+      case "ArrowUp":
+      case "k":
+        return { x: 0, y: -1 };
+      case "ArrowDown":
+      case "j":
+        return { x: 0, y: 1 };
+      case "ArrowLeft":
+      case "h":
+        return { x: -1, y: 0 };
+      case "ArrowRight":
+      case "l":
+        return { x: 1, y: 0 };
+      default:
+        return null;
+    }
   }
 }

@@ -12,6 +12,17 @@ import { findPath } from "./Pathfinding";
 const WIDTH = 60;
 const HEIGHT = 40;
 const FOV_RADIUS = 10;
+const playerFOVRadius = FOV_RADIUS;
+
+
+// Helper function to get all 8 adjacent positions around a point
+const getAdjacentPositions = (x: number, y: number) => [
+  {x, y: y - 1}, {x, y: y + 1},
+  {x: x - 1, y}, {x: x + 1, y},
+  {x: x - 1, y: y - 1}, {x: x + 1, y: y - 1},
+  {x: x - 1, y: y + 1}, {x: x + 1, y: y + 1}
+];
+
 
 // Message Log Initialization
 const log = new MessageLog();
@@ -30,42 +41,178 @@ const display = new AsciiRenderer({
   font: "Courier New, monospace" // Or "Fira Code, monospace" if loaded
 });
 
-
-// Initialize and Generate Map
-const gameMap = new DungeonMap(WIDTH, MAP_HEIGHT);
-generateRandomWalk(gameMap, 0.40);
-placeLevelFeatures(gameMap); // NEW: Place stairs and doors
-
-// Game State
-// FOV and lighting
-const playerFOVRadius = FOV_RADIUS;
-// Initialize Player
-const startTile = findStartingFloorTile(gameMap);
-const player: Entity = {
-  x: startTile.x,
-  y: startTile.y,
-  symbol: '@',
-  color: '#0f0',
-  name: 'Player',
-  hp: 30,
-  maxHp: 30,
-  damage: 5,
-  damageBase: 5,
-  defenseBase: 1
-};
 let currentLevel = 1;
-
 let monsters: Entity[] = [];
 const inventory = new Inventory(log);
 const itemsOnMap: Item[] = [];
 
-// Helper function to get all 8 adjacent positions around a point
-const getAdjacentPositions = (x: number, y: number) => [
-  {x, y: y - 1}, {x, y: y + 1},
-  {x: x - 1, y}, {x: x + 1, y},
-  {x: x - 1, y: y - 1}, {x: x + 1, y: y - 1},
-  {x: x - 1, y: y + 1}, {x: x + 1, y: y + 1},
-];
+// Initialize and Generate Map
+const gameMap = new DungeonMap(WIDTH, MAP_HEIGHT);
+
+
+// Initialize Player (declaration at the top)
+let player: Entity;
+
+// --- 6. START THE GAME ---
+
+new InputHandler(handleKeyDown);  //this is now the ONLY keyboard hook
+initializeGame(); // Initialize the first level
+render();
+
+
+
+
+function playerMoveOrInteract(delta: Direction): boolean {
+  if (player.hp <= 0) return false;
+
+  const newX = player.x + delta.x;
+  const newY = player.y + delta.y;
+
+  const targetTile = gameMap.get(newX, newY);
+  const targetMonster = monsters.find(m => m.x === newX && m.y === newY && m.hp > 0);
+
+  if (targetMonster) {
+    targetMonster.hp -= player.damage;
+    log.addMessage(`Hero attacks ${targetMonster.name} for ${player.damage} damage!`, "yellow");
+
+    if (targetMonster.hp <= 0) {
+      log.addMessage(`${targetMonster.name} is defeated!`, "red");
+    }
+    return true;
+  }
+
+  if (targetTile?.type === 'FLOOR' || targetTile?.type === 'DOOR_OPEN') {
+    player.x = newX;
+    player.y = newY;
+
+    const itemIndex = itemsOnMap.findIndex(item => item.x === player.x && item.y === player.y);
+    if (itemIndex > -1) {
+      const item = itemsOnMap[itemIndex];
+      inventory.addItem(item);
+      itemsOnMap.splice(itemIndex, 1);
+    }
+    return true;
+  }
+
+  if (targetTile?.type === 'STAIRS_DOWN') {
+    goDownStairs();
+    return true;
+  }
+
+  if (targetTile?.type === 'DOOR_CLOSED') {
+    log.addMessage("The door is closed. Press 'o' to open it.", "gray");
+    render(); // show message immediately, but no turn taken
+    return false;
+  }
+
+  return false;
+}
+
+function tryOpenDoor(): boolean {
+  const nearbyTiles = getAdjacentPositions(player.x, player.y);
+  for (const { x, y } of nearbyTiles) {
+    const tile = gameMap.get(x, y);
+    if (tile?.type === 'DOOR_CLOSED') {
+      gameMap.set(x, y, { ...tile, type: 'DOOR_OPEN', blocksMovement: false, blocksSight: false });
+      log.addMessage("You open the door.");
+      return true;
+    }
+  }
+  log.addMessage("No closed door nearby to open.");
+  render();
+  return false;
+}
+
+function tryCloseDoor(): boolean {
+  const nearbyTiles = getAdjacentPositions(player.x, player.y);
+
+  for (const { x, y } of nearbyTiles) {
+    const tile = gameMap.get(x, y);
+    if (tile?.type !== 'DOOR_OPEN') continue;
+
+    const occupiedByPlayer = (player.x === x && player.y === y);
+    const occupiedByMonster = monsters.some(m => m.hp > 0 && m.x === x && m.y === y);
+    if (occupiedByPlayer || occupiedByMonster) continue;
+
+    gameMap.set(x, y, { ...tile, type: 'DOOR_CLOSED', blocksMovement: true, blocksSight: true });
+    log.addMessage("You close the door.");
+    return true;
+  }
+
+  log.addMessage("There is no open door nearby (or it's blocked).", "gray");
+  render();
+  return false;
+}
+
+function tryEquip(): boolean {
+  const equipCandidates = inventory.items.filter(i =>
+    i.slot === 'weapon' || i.slot === 'chest' || i.slot === 'legs' ||
+    i.slot === 'feet' || i.slot === 'head' || i.slot === 'offhand'
+  );
+
+  if (equipCandidates.length === 0) {
+    log.addMessage("Nothing to equip.");
+    render();
+    return false;
+  }
+
+  const index = inventory.items.findIndex(i => i === equipCandidates[0]);
+  inventory.equipItem(index, player);
+  refreshPlayerDerivedStats();
+  return true;
+}
+
+function tryUseConsumable(): boolean {
+  const consumableCandidates = inventory.items.filter(i => i.slot === 'consumable');
+
+  if (consumableCandidates.length === 0) {
+    log.addMessage("Nothing to use.");
+    render();
+    return false;
+  }
+
+  const index = inventory.items.findIndex(i => i === consumableCandidates[0]);
+  inventory.useConsumable(index, player);
+  return true;
+}
+
+function handleKeyDown(event: KeyboardEvent): void {
+  // Ignore repeats if you want “one press = one turn”
+  if (event.repeat) return;
+
+  const moveDelta = InputHandler.getMovementDelta(event);
+
+  let actionTakesTurn = false;
+
+  if (moveDelta) {
+    actionTakesTurn = playerMoveOrInteract(moveDelta);
+  } else {
+    switch (event.key.toLowerCase()) {
+      case 'e':
+        actionTakesTurn = tryEquip();
+        break;
+      case 'u':
+        actionTakesTurn = tryUseConsumable();
+        break;
+      case 'o':
+        actionTakesTurn = tryOpenDoor();
+        break;
+      case 'c':
+        actionTakesTurn = tryCloseDoor();
+        break;
+      default:
+        return; // ignore unrelated keys
+    }
+  }
+
+  // prevent browser scrolling etc. for keys we handle
+  event.preventDefault();
+
+  if (actionTakesTurn) {
+    monsterTurn(); // monsterTurn() ends with render()
+  }
+}
+
 
 function getPlayerAttackTotal(): number {
   return player.damageBase + inventory.getAttackBonus();
@@ -77,10 +224,9 @@ function getPlayerDefenseTotal(): number {
 
 function refreshPlayerDerivedStats(): void {
   player.damage = getPlayerAttackTotal();
+  player.defense = getPlayerDefenseTotal();
 }
 
-
-// --- 2. MONSTER & PLAYER SETUP UTILITIES ---
 
 function spawnMonsters(map: DungeonMap, count: number): void {
   const floorTiles: { x: number, y: number }[] = [];
@@ -112,7 +258,8 @@ function spawnMonsters(map: DungeonMap, count: number): void {
       maxHp: 5,
       damage: 3,
       damageBase: 3,  // Base damage without equipment
-      defenseBase: 0  // Base defense
+      defenseBase: 0,  // Base defense
+      defense: 0
     });
   }
 }
@@ -219,99 +366,6 @@ function placeLevelFeatures(map: DungeonMap): void {
 }
 
 
-// Add listener for interaction keys (e for Equip, u for Use)
-window.addEventListener("keydown", (event) => {
-  let actionTaken = false;
-
-  switch (event.key.toLowerCase()) {
-    case 'e': { // Equip
-      // For simplicity, finds and equips the first available weapon/armor in inventory
-      const equipCandidates = inventory.items.filter(i =>
-        i.slot === 'weapon' || i.slot === 'chest' || i.slot === 'legs' ||
-        i.slot === 'feet' || i.slot === 'head' || i.slot === 'offhand'
-      );
-      if (equipCandidates.length > 0) {
-        const index = inventory.items.findIndex(i => i === equipCandidates[0]);
-        inventory.equipItem(index, player);
-        // After equipping, update the player's total damage stat
-        refreshPlayerDerivedStats();
-        actionTaken = true;
-
-      } else {
-        console.log("Nothing to equip.");
-        log.addMessage("Nothing to equip.");
-
-      }
-      render(); // update log/UI immediately
-      break;
-    }
-
-    case 'u': { // Use (Consumable)
-      // For simplicity, finds and uses the first consumable item in inventory
-      const consumableCandidates = inventory.items.filter(i => i.slot === 'consumable');
-      if (consumableCandidates.length > 0) {
-        const index = inventory.items.findIndex(i => i === consumableCandidates[0]);
-        inventory.useConsumable(index, player);
-        actionTaken = true;
-      } else {
-        console.log("Nothing to use.");
-        log.addMessage("Nothing to use.");
-      }
-      render(); // update log/UI immediately
-      break;
-    }
-
-    case 'o': { // Open Door
-      let doorOpened = false;
-      const nearbyTiles = getAdjacentPositions(player.x, player.y);
-
-      for (const {x, y} of nearbyTiles) {
-        const tile = gameMap.get(x, y);
-        if (tile && tile.type === 'DOOR_CLOSED') {
-          gameMap.set(x, y, {...tile, type: 'DOOR_OPEN', blocksMovement: false, blocksSight: false});
-          log.addMessage('You open the door.');
-          doorOpened = true;
-          break;
-        }
-      }
-      if (!doorOpened) {
-        log.addMessage('No closed door nearby to open.');
-      }
-      actionTaken = doorOpened;
-      render(); // update log/UI immediately
-      break;
-    }
-
-    case 'c': { // Close Door
-      let doorClosed = false;
-      const nearbyTiles = getAdjacentPositions(player.x, player.y);
-
-      for (const {x, y} of nearbyTiles) {
-        const tile = gameMap.get(x, y);
-        if (tile?.type === 'DOOR_OPEN') {
-          gameMap.set(x, y, { ...tile, type: 'DOOR_CLOSED', blocksMovement: true, blocksSight: true });
-          log.addMessage('You close the door.');
-          doorClosed = true;
-          actionTaken = true;
-          break;
-        }
-      }
-
-      if (!doorClosed) {
-        log.addMessage("There is no open door nearby (or it's blocked).", "gray");
-      }
-      if (actionTaken) {
-        // Any item interaction counts as a player turn
-        monsterTurn();
-        event.preventDefault(); // Stop browser scrolling
-      }
-      break;
-    }
-  }
-});
-
-
-
 /**
  * Initializes the game state, generates the initial map, and positions the player
  */
@@ -323,10 +377,23 @@ function initializeGame() {
   generateRandomWalk(gameMap, 0.40);
   placeLevelFeatures(gameMap);
 
-  // 3. Position player
+    // 3. Initialize and position player
   const startTile = findStartingFloorTile(gameMap);
-  player.x = startTile.x;
-  player.y = startTile.y;
+  player = {
+    x: startTile.x,
+    y: startTile.y,
+    symbol: '@',
+    color: '#0f0',
+    name: 'Player',
+    hp: 30,
+    maxHp: 30,
+    damage: 5,
+    damageBase: 5,
+    defense: 1,
+    defenseBase: 1
+  };
+  refreshPlayerDerivedStats();
+
 
   // 4. Initialize entities
   monsters.length = 0; // Clear any existing monsters
@@ -342,9 +409,6 @@ function initializeGame() {
   log.addMessage("Welcome to the Dungeons!", "#0f0"); // Initial welcome message
   log.addMessage("Find the stairs (>) to descend deeper.", "white");
 }
-
-// --- 3. THE GAME LOOP (MONSTER TURN) ---
-
 
 function monsterTurn(): void {
   monsters.forEach(monster => {
@@ -406,8 +470,6 @@ function monsterTurn(): void {
   // Redraw the scene after all monsters have acted
   render();
 }
-
-// --- 4. THE RENDER FUNCTION ---
 
 function render() {
   // 1. CALCULATE FOV
@@ -512,68 +574,6 @@ function render() {
 
 }
 
-
-// --- 5. INPUT HANDLING (PLAYER TURN) ---
-
-new InputHandler((delta: Direction) => {
-  if (player.hp <= 0) return;
-
-  const newX = player.x + delta.x;
-  const newY = player.y + delta.y;
-
-  const targetTile = gameMap.get(newX, newY);
-
-
-  // 1. Check for Monster at Target Location
-  const targetMonster = monsters.find(m => m.x === newX && m.y === newY && m.hp > 0);
-
-  if (targetMonster) {
-    // A. COMBAT (Attack)
-    targetMonster.hp -= player.damage;
-    console.log(`Hero attacks ${targetMonster.name} for ${player.damage} damage!`);
-    log.addMessage(`Hero attacks ${targetMonster.name} for ${player.damage} damage!`, "yellow");
-
-    // Check if monster died
-    if (targetMonster.hp <= 0) {
-      console.log(`${targetMonster.name} is defeated!`);
-      log.addMessage(`${targetMonster.name} is defeated!`, "red");
-    }
-
-    monsterTurn(); // Monster Turn immediately follows player's attack
-
-    // 2. Check for Movement (Floor or Open Door)
-  } else if (targetTile?.type === 'FLOOR' || targetTile?.type === 'DOOR_OPEN') {
-    // B. MOVEMENT
-    player.x = newX;
-    player.y = newY;
-
-    // --- NEW PICKUP LOGIC ---
-    const itemIndex = itemsOnMap.findIndex(item => item.x === player.x && item.y === player.y);
-    if (itemIndex > -1) {
-      const item = itemsOnMap[itemIndex];
-      inventory.addItem(item);
-      itemsOnMap.splice(itemIndex, 1); // Remove from map
-    }
-
-    monsterTurn(); // Monster Turn immediately follows player's move
-
-    // 3. NEW: Check for Stairs
-    } else if (targetTile?.type === 'STAIRS_DOWN') {
-      goDownStairs(); // Call new function to handle level change
-      monsterTurn();
-
-      // 4. NEW: Check for Closed Door (Blocks movement)
-    } else if (targetTile?.type === 'DOOR_CLOSED') {
-      log.addMessage("The door is closed. Press 'o' to open it.", "gray");
-    }
-
-  // Hitting a WALL results in no action, which correctly prevents monsterTurn()
-});
-
-// --- NEW: Level Progression Function (main.ts) ---
-
-
-
 function goDownStairs(): void {
   currentLevel++;
   log.addMessage(`You descend to Level ${currentLevel}!`, "yellow");
@@ -603,7 +603,4 @@ function goDownStairs(): void {
   render();
 }
 
-// --- 6. START THE GAME ---
-refreshPlayerDerivedStats();
-initializeGame(); // Initialize the first level
-render();
+
