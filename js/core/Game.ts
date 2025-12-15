@@ -8,10 +8,19 @@ import { createFreshLevel } from "../systems/LevelSystem";
 import { runMonsterTurn } from "../systems/AISystem/AISystem";
 import { renderGame } from "../systems/RenderSystem";
 import { getLine } from "../systems/visibility";
+import {
+  buildSaveData,
+  hydrateInventory,
+  hydrateLevel,
+  loadFromLocalStorage,
+  saveToLocalStorage
+} from "../systems/save";
 
 export class Game {
   public state!: GameState;
   private isAnimating = false;
+
+  private levels: Record<string, { mapData: GameState["map"]["mapData"]; monsters: GameState["monsters"]; itemsOnMap: GameState["itemsOnMap"] }> = {};
 
   constructor(
     private display: AsciiRenderer,
@@ -31,7 +40,8 @@ export class Game {
 
     log.addMessage("Welcome to the Dungeons!", "#0f0");
     log.addMessage("Find the stairs (>) to descend deeper.", "white");
-    log.addMessage("Press 'f' to fire an arrow (demo).", "gray");
+    //log.addMessage("Press 'f' to fire an arrow (demo).", "gray");
+    log.addMessage("Press 'p' to save, 'r' to load.", "gray");
 
     this.state = {
       width: this.config.WIDTH,
@@ -48,6 +58,7 @@ export class Game {
       projectiles: [],
     };
 
+    this.saveCurrentLevelSnapshot();
     this.render();
   }
 
@@ -84,10 +95,25 @@ export class Game {
       case "CLOSE_DOOR":
         return this.tryToggleDoor("CLOSE");
       case "FIRE_ARROW":
-        return await this.fireArrow(); // NEW
+        return await this.fireArrow();
+      case "SAVE_GAME":
+        this.saveGame();
+        return false;
+      case "LOAD_GAME":
+        this.loadGame();
+        return false;
       default:
         return false;
     }
+  }
+
+  private saveCurrentLevelSnapshot(): void {
+    const s = this.state;
+    this.levels[String(s.currentLevel)] = {
+      mapData: s.map.mapData,
+      monsters: s.monsters,
+      itemsOnMap: s.itemsOnMap,
+    };
   }
 
   private adjacent8(): Array<{ x: number; y: number }> {
@@ -137,6 +163,11 @@ export class Game {
 
     if (tile?.type === "STAIRS_DOWN") {
       this.goDownStairs();
+      return true;
+    }
+
+    if (tile?.type === "STAIRS_UP") {
+      this.goUpStairs();
       return true;
     }
 
@@ -212,28 +243,133 @@ export class Game {
 
   private goDownStairs(): void {
     const s = this.state;
-    s.currentLevel++;
+
+    this.saveCurrentLevelSnapshot();
+
+    const nextLevel = s.currentLevel + 1;
+    s.currentLevel = nextLevel;
 
     s.log.addMessage(`You descend to Level ${s.currentLevel}!`, "yellow");
 
-    const fresh = createFreshLevel({
-      width: this.config.WIDTH,
-      mapHeight: this.config.MAP_HEIGHT,
-      level: s.currentLevel,
-      inventory: s.inventory,
-    });
+    const cached = this.levels[String(nextLevel)];
+    if (cached) {
+      const hydrated = hydrateLevel(this.config.WIDTH, this.config.MAP_HEIGHT, cached);
+      s.map = hydrated.map;
+      s.monsters = hydrated.monsters;
+      s.itemsOnMap = hydrated.itemsOnMap;
+    } else {
+      const fresh = createFreshLevel({
+        width: this.config.WIDTH,
+        mapHeight: this.config.MAP_HEIGHT,
+        level: nextLevel,
+        inventory: s.inventory,
+      });
+      s.map = fresh.map;
+      s.monsters = fresh.monsters;
+      s.itemsOnMap = fresh.itemsOnMap;
 
-    s.map = fresh.map;
-    s.player.x = fresh.player.x;
-    s.player.y = fresh.player.y;
-    s.monsters = fresh.monsters;
-    s.itemsOnMap = fresh.itemsOnMap;
+      this.saveCurrentLevelSnapshot();
+    }
+
+    // Place player at STAIRS_UP on the new level if available, otherwise first floor.
+    this.placePlayerOnTileOrFloor("STAIRS_UP");
+  }
+
+  private goUpStairs(): void {
+    const s = this.state;
+
+    if (s.currentLevel <= 1) {
+      s.log.addMessage("You are already on Level 1.", "gray");
+      return;
+    }
+
+    this.saveCurrentLevelSnapshot();
+
+    const prevLevel = s.currentLevel - 1;
+    s.currentLevel = prevLevel;
+
+    s.log.addMessage(`You ascend to Level ${s.currentLevel}!`, "yellow");
+
+    const cached = this.levels[String(prevLevel)];
+    if (!cached) {
+      s.log.addMessage("No saved data for that level (unexpected).", "red");
+      return;
+    }
+
+    const hydrated = hydrateLevel(this.config.WIDTH, this.config.MAP_HEIGHT, cached);
+    s.map = hydrated.map;
+    s.monsters = hydrated.monsters;
+    s.itemsOnMap = hydrated.itemsOnMap;
+
+    // Place player at STAIRS_DOWN when returning upward.
+    this.placePlayerOnTileOrFloor("STAIRS_DOWN");
+  }
+  private placePlayerOnTileOrFloor(type: "STAIRS_UP" | "STAIRS_DOWN"): void {
+    const s = this.state;
+
+    for (let y = 0; y < s.map.height; y++) {
+      for (let x = 0; x < s.map.width; x++) {
+        if (s.map.get(x, y)?.type === type) {
+          s.player.x = x;
+          s.player.y = y;
+          return;
+        }
+      }
+    }
+
+    // fallback: find any floor
+    for (let y = 0; y < s.map.height; y++) {
+      for (let x = 0; x < s.map.width; x++) {
+        if (s.map.get(x, y)?.type === "FLOOR") {
+          s.player.x = x;
+          s.player.y = y;
+          return;
+        }
+      }
+    }
+  }
+
+  private saveGame(): void {
+    this.saveCurrentLevelSnapshot();
+    const data = buildSaveData(this.state, this.levels);
+    saveToLocalStorage(data);
+    this.state.log.addMessage("Game saved.", "green");
+  }
+
+  private loadGame(): void {
+    const loaded = loadFromLocalStorage();
+    if (!loaded) {
+      this.state.log.addMessage("No save found.", "gray");
+      return;
+    }
+
+    const log = this.state.log; // keep current log instance
+    const inventory = hydrateInventory(log, loaded.inventory);
+
+    this.levels = loaded.levels;
+
+    const current = this.levels[String(loaded.currentLevel)];
+    if (!current) {
+      this.state.log.addMessage("Save is missing current level data.", "red");
+      return;
+    }
+
+    const hydrated = hydrateLevel(this.config.WIDTH, this.config.MAP_HEIGHT, current);
+
+    this.state.currentLevel = loaded.currentLevel;
+    this.state.player = loaded.player;
+    this.state.inventory = inventory;
+    this.state.map = hydrated.map;
+    this.state.monsters = hydrated.monsters;
+    this.state.itemsOnMap = hydrated.itemsOnMap;
+
+    this.state.log.addMessage("Game loaded.", "green");
   }
 
   private async fireArrow(): Promise<boolean> {
     const s = this.state;
 
-    // Find closest visible monster
+    // Find the closest visible monster
     const visibleMonsters = s.monsters.filter(m => m.hp > 0 && s.map.get(m.x, m.y)?.isVisible);
     if (visibleMonsters.length === 0) {
       s.log.addMessage("No visible target to shoot.", "gray");

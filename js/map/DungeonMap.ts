@@ -1,5 +1,11 @@
 // Define what a Tile is
-export type TileType = 'WALL' | 'FLOOR' | 'STAIRS_DOWN' | 'DOOR_CLOSED' | 'DOOR_OPEN';
+export type TileType =
+  | 'WALL'
+  | 'FLOOR'
+  | 'STAIRS_DOWN'
+  | 'STAIRS_UP'
+  | 'DOOR_CLOSED'
+  | 'DOOR_OPEN';
 
 export interface TileState {
   type: TileType;       // The actual type of the tile
@@ -65,10 +71,10 @@ export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.
   let walkerY = Math.floor(map.height / 2);
 
   // Carve the starting position
-  map.set(walkerX, walkerY, { 
-    type: 'FLOOR', 
-    isVisible: false, 
-    isExplored: false, 
+  map.set(walkerX, walkerY, {
+    type: 'FLOOR',
+    isVisible: false,
+    isExplored: false,
     blocksMovement: false,
     blocksSight: false
   });

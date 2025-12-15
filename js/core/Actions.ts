@@ -7,4 +7,6 @@ export type Action =
   | { type: 'USE_CONSUMABLE' }
   | { type: 'OPEN_DOOR' }
   | { type: 'CLOSE_DOOR' }
-  | { type: "FIRE_ARROW" };
+  | { type: "FIRE_ARROW" }
+  | { type: "SAVE_GAME" }
+  | { type: "LOAD_GAME" };

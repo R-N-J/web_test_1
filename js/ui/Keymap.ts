@@ -20,6 +20,10 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
       return { type: "CLOSE_DOOR" };
     case "f":
       return { type: "FIRE_ARROW" };
+    case "p":
+      return { type: "SAVE_GAME" };
+    case "r":
+      return { type: "LOAD_GAME" };
     default:
       return null;
   }

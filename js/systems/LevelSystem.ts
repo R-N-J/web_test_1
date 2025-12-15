@@ -18,7 +18,7 @@ export function createFreshLevel(params: {
 
   const map = new DungeonMap(width, mapHeight);
   generateRandomWalk(map, 0.40);
-  placeLevelFeatures(map);
+  placeLevelFeatures(map, level);
 
   const start = findStartingFloorTile(map);
 
@@ -46,7 +46,7 @@ export function createFreshLevel(params: {
   return { map, player, monsters, itemsOnMap };
 }
 
-export function placeLevelFeatures(map: DungeonMap): void {
+export function placeLevelFeatures(map: DungeonMap, level: number): void {
   const floorTiles: Array<{ x: number; y: number }> = [];
 
   for (let y = 1; y < map.height - 1; y++) {
@@ -57,8 +57,21 @@ export function placeLevelFeatures(map: DungeonMap): void {
   if (floorTiles.length === 0) return;
 
   // Stairs
-  const stairsPos = floorTiles.splice(Math.floor(Math.random() * floorTiles.length), 1)[0];
-  map.set(stairsPos.x, stairsPos.y, {
+  // STAIRS_UP for levels > 1
+  if (level > 1) {
+    const upPos = floorTiles.splice(Math.floor(Math.random() * floorTiles.length), 1)[0];
+    map.set(upPos.x, upPos.y, {
+      type: "STAIRS_UP",
+      isVisible: false,
+      isExplored: false,
+      blocksMovement: false,
+      blocksSight: false,
+    });
+  }
+
+  // STAIRS_DOWN
+  const downPos = floorTiles.splice(Math.floor(Math.random() * floorTiles.length), 1)[0];
+  map.set(downPos.x, downPos.y, {
     type: "STAIRS_DOWN",
     isVisible: false,
     isExplored: false,

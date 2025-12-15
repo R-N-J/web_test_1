@@ -20,6 +20,7 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
       if (tile.type === "WALL") char = "#";
       if (tile.type === "FLOOR") char = ".";
       if (tile.type === "STAIRS_DOWN") char = ">";
+      if (tile.type === "STAIRS_UP") char = "<";
       if (tile.type === "DOOR_CLOSED") char = "+";
       if (tile.type === "DOOR_OPEN") char = "-";
 
@@ -27,7 +28,7 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
         bg = "#000";
         fg = tile.type === "WALL" ? "#ccc" : "#fff";
         if (tile.type === "DOOR_CLOSED" || tile.type === "DOOR_OPEN") fg = "brown";
-        if (tile.type === "STAIRS_DOWN") fg = "yellow";
+        if (tile.type === "STAIRS_DOWN" || tile.type === "STAIRS_UP") fg = "yellow";
       }
 
       display.draw(x, y, char, fg, bg);
