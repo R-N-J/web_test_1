@@ -2,7 +2,8 @@ import type { Action, Direction } from "./Actions";
 import type { GameState } from "./GameState";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
 import type { CONFIG } from "./Config";
-import { Inventory } from "../items/Item";
+import { Inventory,type Item } from "../items/Item";
+import type { Entity } from "../entities/Entity";
 import { MessageLog } from "./MessageLog";
 import { createFreshLevel } from "../systems/LevelSystem";
 import { runMonsterTurn } from "../systems/AISystem/AISystem";
@@ -126,6 +127,8 @@ export class Game {
     ];
   }
 
+  //Return true if the player attacks a monster or moves to a valid tile
+  //Return false if the player tries to move to an invalid tile or interact with something that's not handled
   private tryMoveOrInteract(delta: Direction): boolean {
     const s = this.state;
     if (s.player.hp <= 0) return false;
@@ -139,7 +142,10 @@ export class Game {
     if (monster) {
       monster.hp -= s.player.damage;
       s.log.addMessage(`Hero attacks ${monster.name} for ${s.player.damage} damage!`, "yellow");
-      if (monster.hp <= 0) s.log.addMessage(`${monster.name} is defeated!`, "red");
+      if (monster.hp <= 0) {
+        s.log.addMessage(`${monster.name} is defeated!`, "red");
+        this.dropCorpse(monster, 1); // 1 = 100% chance; change to e.g. 0.5 for 50%
+      }
       return true;
     }
 
@@ -150,8 +156,12 @@ export class Game {
       const itemIndex = s.itemsOnMap.findIndex(it => it.x === nx && it.y === ny);
       if (itemIndex >= 0) {
         const item = s.itemsOnMap[itemIndex];
-        s.inventory.addItem(item);
-        s.itemsOnMap.splice(itemIndex, 1);
+
+        // Don't auto-pickup corpses (or any "slot: none" map decoration items).
+        if (item.slot !== "none") {
+          s.inventory.addItem(item);
+          s.itemsOnMap.splice(itemIndex, 1);
+        }
       }
       return true;
     }
@@ -241,6 +251,8 @@ export class Game {
     return false;
   }
 
+
+
   private goDownStairs(): void {
     const s = this.state;
 
@@ -304,6 +316,7 @@ export class Game {
     // Place player at STAIRS_DOWN when returning upward.
     this.placePlayerOnTileOrFloor("STAIRS_DOWN");
   }
+
   private placePlayerOnTileOrFloor(type: "STAIRS_UP" | "STAIRS_DOWN"): void {
     const s = this.state;
 
@@ -398,7 +411,8 @@ export class Game {
 
   private async animateArrowPath(
     path: Array<{ x: number; y: number }>,
-    target: { x: number; y: number; hp: number }
+  //  target: { x: number; y: number; hp: number }
+    target: Entity
   ): Promise<void> {
     const s = this.state;
     this.isAnimating = true;
@@ -424,7 +438,10 @@ export class Game {
         if (step.x === target.x && step.y === target.y) {
           target.hp -= 3;
           s.log.addMessage("The arrow hits!", "yellow");
-          if (target.hp <= 0) s.log.addMessage("Target is slain!", "red");
+          if (target.hp <= 0) {
+            s.log.addMessage("Target is slain!", "red");
+            this.dropCorpse(target, 1); // 100% chance
+          }
           break;
         }
       }
@@ -434,5 +451,28 @@ export class Game {
       this.render();
     }
   }
+
+  private dropCorpse(monster: Entity, chance: number = 1): void {
+    if (Math.random() > chance) return;
+
+    const s = this.state;
+
+    const corpse: Item = {
+      x: monster.x,
+      y: monster.y,
+      symbol: "%",
+      color: "#aa8866",
+      name: `${monster.name} corpse`,
+      slot: "none",
+      attackBonus: 0,
+      defenseBonus: 0,
+      healAmount: 0,
+    };
+
+    s.itemsOnMap.push(corpse);
+    s.log.addMessage(`The ${monster.name} drops its corpse.`, "gray");
+  }
+
+
 }
 
