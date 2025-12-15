@@ -1,8 +1,17 @@
 // Item.ts
-import { Entity } from "./Entity";
-import { MessageLog } from "./MessageLog";
+import { Entity } from "../entities/Entity";
+import { MessageLog } from "../core/MessageLog";
 
-export type EquipmentSlot = 'head' | 'chest' | 'legs' | 'feet' | 'weapon' | 'offhand' | 'consumable' | 'none';
+export type EquipmentSlot =
+  | "head"
+  | "chest"
+  | "legs"
+  | "feet"
+  | "weapon"
+  | "offhand"
+  | "consumable"
+  | "none";
+
 
 export interface Item {
   x: number;
@@ -23,8 +32,9 @@ export type EquippableSlot = Exclude<EquipmentSlot, 'consumable' | 'none'>;
 export class Inventory {
     private readonly messageLog: MessageLog;
 
-    private static readonly DEFENSE_SLOTS: Array<Extract<EquippableSlot, 'head' | 'chest' | 'legs' | 'feet'>> =
-        ['head', 'chest', 'legs', 'feet'];
+    private static readonly DEFENSE_SLOTS: Array<
+      Extract<EquippableSlot, "head" | "chest" | "legs" | "feet">
+    > = ["head", "chest", "legs", "feet"];
 
     public items: InventoryItem[] = [];
 

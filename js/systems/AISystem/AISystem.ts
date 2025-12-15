@@ -1,6 +1,6 @@
-import type { GameState } from "../core/GameState";
-import { tryMoveEntity } from "../Entity";
-import { findPath } from "../Pathfinding";
+import type { GameState } from "../../core/GameState";
+import { tryMoveEntity } from "../../entities/Entity";
+import { findPath } from "../pathfinding";
 
 export function runMonsterTurn(state: GameState): void {
   for (const monster of state.monsters) {
@@ -20,11 +20,19 @@ export function runMonsterTurn(state: GameState): void {
 
     // If visible, pathfind toward player
     if (state.map.get(monster.x, monster.y)?.isVisible) {
-      const path = findPath(state.map, monster.x, monster.y, state.player.x, state.player.y);
+      const path = findPath(
+        state.map,
+        { x: monster.x, y: monster.y },
+        { x: state.player.x, y: state.player.y }
+      );
+
       if (path && path.length > 0) {
-        const next = path[0];
-        tryMoveEntity(monster, state.map, next.x - monster.x, next.y - monster.y);
+        const nextStep = path[0];
+        tryMoveEntity(monster, state.map, nextStep.x - monster.x, nextStep.y - monster.y);
+      } else {
+        state.log.addMessage(`${monster.name} seems confused.`, "gray");
       }
+
       continue;
     }
 

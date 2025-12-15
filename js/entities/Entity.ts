@@ -1,5 +1,5 @@
 // Entity.ts
-import { TileState } from './DungeonMap';
+import { TileState } from '../map/DungeonMap';
 //import { Direction } from './InputHandler'; // Assuming you kept Direction type
 
 export interface Entity {

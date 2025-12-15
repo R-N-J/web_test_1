@@ -1,6 +1,7 @@
-import { DungeonMap, generateRandomWalk, findStartingFloorTile } from "../DungeonMap";
-import type { Entity } from "../Entity";
-import type { Item, Inventory } from "../Item";
+import { DungeonMap, generateRandomWalk, findStartingFloorTile } from "../map/DungeonMap";
+import type { Entity } from "../entities/Entity";
+import type { Item, Inventory } from "../items/Item";
+
 
 export function createFreshLevel(params: {
   width: number;

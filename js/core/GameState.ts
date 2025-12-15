@@ -1,7 +1,7 @@
-import type { DungeonMap } from "../DungeonMap";
-import type { Entity } from "../Entity";
-import type { Item, Inventory } from "../Item";
-import type { MessageLog } from "../MessageLog";
+import type { DungeonMap } from "../map/DungeonMap";
+import type { Entity } from "../entities/Entity";
+import type { Item, Inventory } from "../items/Item";
+import type { MessageLog } from "./MessageLog";
 
 export interface GameState {
   width: number;

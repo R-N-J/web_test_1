@@ -1,6 +1,6 @@
 import type { GameState } from "../core/GameState";
-import type { AsciiRenderer } from "../Renderer";
-import { calculateFOV } from "../Visibility";
+import type { AsciiRenderer } from "../ui/AsciiRenderer";
+import { calculateFOV } from "./visibility";
 
 export function renderGame(state: GameState, display: AsciiRenderer): void {
   calculateFOV(state.map, state.player.x, state.player.y, state.fovRadius);

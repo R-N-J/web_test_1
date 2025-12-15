@@ -1,6 +1,6 @@
 // main.ts
-import { AsciiRenderer } from "./Renderer";
-import { InputHandler } from "./InputHandler";
+import { AsciiRenderer } from "./ui/AsciiRenderer";
+import { InputHandler } from "./ui/InputHandler";
 import { keyEventToAction } from "./ui/Keymap";
 import { Game } from "./core/Game";
 import { CONFIG } from "./core/Config";

@@ -1,4 +1,4 @@
-import { MessageLog } from "../MessageLog";
+import { MessageLog } from "./MessageLog";
 
 export const CONFIG = {
   WIDTH: 60,

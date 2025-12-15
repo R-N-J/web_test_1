@@ -1,5 +1,5 @@
 import type { Action } from "../core/Actions";
-import { InputHandler } from "../InputHandler";
+import { InputHandler } from "./InputHandler";
 
 export function keyEventToAction(event: KeyboardEvent): Action | null {
   const moveDelta = InputHandler.getMovementDelta(event);

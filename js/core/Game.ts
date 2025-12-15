@@ -1,12 +1,13 @@
 import type { Action, Direction } from "./Actions";
 import type { GameState } from "./GameState";
-import type { AsciiRenderer } from "../Renderer";
+import type { AsciiRenderer } from "../ui/AsciiRenderer";
 import type { CONFIG } from "./Config";
-import { Inventory } from "../Item";
-import { MessageLog } from "../MessageLog";
+import { Inventory } from "../items/Item";
+import { MessageLog } from "./MessageLog";
 import { createFreshLevel } from "../systems/LevelSystem";
-import { runMonsterTurn } from "../systems/AISystem";
+import { runMonsterTurn } from "../systems/AISystem/AISystem";
 import { renderGame } from "../systems/RenderSystem";
+
 
 export class Game {
   public state!: GameState;
