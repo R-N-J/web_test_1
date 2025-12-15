@@ -14,6 +14,8 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
       return { type: "OPEN_DOOR" };
     case "c":
       return { type: "CLOSE_DOOR" };
+    case "f":
+      return { type: "FIRE_ARROW" };
     default:
       return null;
   }

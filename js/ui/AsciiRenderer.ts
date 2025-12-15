@@ -54,8 +54,10 @@ export class AsciiRenderer {
 
   /**
    * Draws a single character at grid coordinates
+   * If bg is null, background is not painted (allows overlay)
    */
-  public draw(x: number, y: number, char: string, fg: string, bg: string = "#000") {
+  //public draw(x: number, y: number, char: string, fg: string, bg: string = "#000") {
+  public draw(x: number, y: number, char: string, fg: string, bg: string | null = "#000") {
     // Bounds check (optional, but good for safety)
     if (x < 0 || x >= this.options.width || y < 0 || y >= this.options.height) return;
 

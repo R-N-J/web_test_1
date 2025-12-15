@@ -26,5 +26,5 @@ new InputHandler((event) => {
   if (!action) return;
 
   event.preventDefault();
-  game.handleAction(action);
+  void game.handleAction(action); // don't block handler; run async
 });

@@ -5,4 +5,5 @@ export type Action =
   | { type: 'EQUIP' }
   | { type: 'USE_CONSUMABLE' }
   | { type: 'OPEN_DOOR' }
-  | { type: 'CLOSE_DOOR' };
+  | { type: 'CLOSE_DOOR' }
+  | { type: "FIRE_ARROW" };

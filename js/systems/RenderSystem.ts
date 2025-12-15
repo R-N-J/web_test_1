@@ -48,6 +48,11 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
     }
   }
 
+  // Projectiles (overlay, no background)
+  for (const p of state.projectiles) {
+    display.draw(p.x, p.y, p.char, p.color, null);
+  }
+
   // Player
   display.draw(state.player.x, state.player.y, state.player.symbol, state.player.color);
 

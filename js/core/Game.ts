@@ -7,10 +7,11 @@ import { MessageLog } from "./MessageLog";
 import { createFreshLevel } from "../systems/LevelSystem";
 import { runMonsterTurn } from "../systems/AISystem/AISystem";
 import { renderGame } from "../systems/RenderSystem";
-
+import { getLine } from "../systems/visibility";
 
 export class Game {
   public state!: GameState;
+  private isAnimating = false;
 
   constructor(
     private display: AsciiRenderer,
@@ -30,6 +31,7 @@ export class Game {
 
     log.addMessage("Welcome to the Dungeons!", "#0f0");
     log.addMessage("Find the stairs (>) to descend deeper.", "white");
+    log.addMessage("Press 'f' to fire an arrow (demo).", "gray");
 
     this.state = {
       width: this.config.WIDTH,
@@ -43,18 +45,18 @@ export class Game {
       itemsOnMap,
       inventory,
       log,
+      projectiles: [],
     };
 
     this.render();
   }
 
-  public handleAction(action: Action): void {
+  public async handleAction(action: Action): Promise<void> {
     if (!this.state) return;
+    if (this.isAnimating) return; // NEW: lock input while animating
 
-    // one key press = at most one turn
-    const takesTurn = this.playerTurn(action);
+    const takesTurn = await this.playerTurn(action);
 
-    // Always update screen so messages appear immediately
     if (takesTurn) {
       runMonsterTurn(this.state);
     }
@@ -66,7 +68,7 @@ export class Game {
     renderGame(this.state, this.display);
   }
 
-  private playerTurn(action: Action): boolean {
+  private async playerTurn(action: Action): Promise<boolean> {
     switch (action.type) {
       case "MOVE":
         return this.tryMoveOrInteract(action.delta);
@@ -78,6 +80,8 @@ export class Game {
         return this.tryToggleDoor("OPEN");
       case "CLOSE_DOOR":
         return this.tryToggleDoor("CLOSE");
+      case "FIRE_ARROW":
+        return await this.fireArrow(); // NEW
       default:
         return false;
     }
@@ -222,4 +226,74 @@ export class Game {
     s.monsters = fresh.monsters;
     s.itemsOnMap = fresh.itemsOnMap;
   }
+
+  private async fireArrow(): Promise<boolean> {
+    const s = this.state;
+
+    // Find closest visible monster
+    const visibleMonsters = s.monsters.filter(m => m.hp > 0 && s.map.get(m.x, m.y)?.isVisible);
+    if (visibleMonsters.length === 0) {
+      s.log.addMessage("No visible target to shoot.", "gray");
+      return false;
+    }
+
+    visibleMonsters.sort((a, b) => {
+      const da = (a.x - s.player.x) ** 2 + (a.y - s.player.y) ** 2;
+      const db = (b.x - s.player.x) ** 2 + (b.y - s.player.y) ** 2;
+      return da - db;
+    });
+
+    const target = visibleMonsters[0];
+
+    // Build line path (includes start+end)
+    const line = getLine(s.player.x, s.player.y, target.x, target.y);
+
+    // Travel tiles after the player tile
+    const path = line.slice(1);
+
+    // Animate; stop early if a wall/closed door blocks flight
+    await this.animateArrowPath(path, target);
+
+    return true; // firing costs a turn
+  }
+
+  private async animateArrowPath(
+    path: Array<{ x: number; y: number }>,
+    target: { x: number; y: number; hp: number }
+  ): Promise<void> {
+    const s = this.state;
+    this.isAnimating = true;
+
+    try {
+      for (const step of path) {
+        const tile = s.map.get(step.x, step.y);
+        if (!tile) break;
+
+        // Arrow stops at blocking tiles (still “hits” that tile visually for one frame)
+        s.projectiles = [{ x: step.x, y: step.y, char: "→", color: "white" }];
+        this.render();
+
+        // small delay per tile
+        await new Promise<void>(resolve => window.setTimeout(resolve, 60));
+
+        if (tile.blocksMovement || tile.blocksSight) {
+          // blocked by wall/closed door, etc.
+          break;
+        }
+
+        // Hit monster if we reached its coords
+        if (step.x === target.x && step.y === target.y) {
+          target.hp -= 3;
+          s.log.addMessage("The arrow hits!", "yellow");
+          if (target.hp <= 0) s.log.addMessage("Target is slain!", "red");
+          break;
+        }
+      }
+    } finally {
+      s.projectiles = [];
+      this.isAnimating = false;
+      this.render();
+    }
+  }
 }
+

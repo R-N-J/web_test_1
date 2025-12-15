@@ -3,6 +3,14 @@ import type { Entity } from "../entities/Entity";
 import type { Item, Inventory } from "../items/Item";
 import type { MessageLog } from "./MessageLog";
 
+
+export interface Projectile {
+  x: number;
+  y: number;
+  char: string;
+  color: string;
+}
+
 export interface GameState {
   width: number;
   height: number;     // screen height (chars)
@@ -17,4 +25,6 @@ export interface GameState {
   itemsOnMap: Item[];
   inventory: Inventory;
   log: MessageLog;
+  projectiles: Projectile[]; // transient render-layer
+
 }
