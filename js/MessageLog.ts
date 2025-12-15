@@ -8,9 +8,9 @@ export interface Message {
 export class MessageLog {
   private history: Message[] = [];
   private readonly MAX_HISTORY = 100; // Total messages kept in memory
-  public readonly DISPLAY_LINES = 3;  // How many messages to show on screen
-
-  /**
+  public static readonly DISPLAY_LINES = 3;  // How many messages to show on screen
+  public readonly DISPLAY_LINES = MessageLog.DISPLAY_LINES;/**
+   /*
    * Adds a new message to the log history.
    */
   addMessage(text: string, color: string = 'white'): void {
