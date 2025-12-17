@@ -60,6 +60,7 @@ export class Game {
       inventory,
       log,
       projectiles: [],
+      ui: { kind: "NONE" },
     };
 
     this.saveCurrentLevelSnapshot();
@@ -188,25 +189,10 @@ export class Game {
   }
 
   private tryEquip(): boolean {
-    const s = this.state;
-
-    const candidates = s.inventory.items.filter(i =>
-      i.slot === "weapon" || i.slot === "chest" || i.slot === "legs" ||
-      i.slot === "feet" || i.slot === "head" || i.slot === "offhand"
-    );
-
-    if (candidates.length === 0) {
-      s.log.addMessage("Nothing to equip.", "gray");
-      return false;
-    }
-
-    const index = s.inventory.items.findIndex(i => i === candidates[0]);
-    s.inventory.equipItem(index, s.player);
-
-    s.player.damage = s.player.damageBase + s.inventory.getAttackBonus();
-    s.player.defense = s.player.defenseBase + s.inventory.getDefenseBonus();
-
-    return true;
+    // Opening a menu should NOT take a turn
+    const opened = this.openEquipMenu();
+    if (opened) this.render();
+    return false;
   }
 
   private tryUseConsumable(): boolean {
@@ -253,8 +239,6 @@ export class Game {
     );
     return false;
   }
-
-
 
   private goDownStairs(): void {
     const s = this.state;
@@ -512,6 +496,94 @@ export class Game {
     s.log.addMessage(`The ${monster.name} drops its corpse.`, "gray");
   }
 
+  public handleUiKey(event: KeyboardEvent): boolean {
+    const s = this.state;
+    if (s.ui.kind !== "PICKLIST") return false;
+
+    const entries = s.ui.entries;
+    if (entries.length === 0) {
+      s.ui = { kind: "NONE" };
+      return true;
+    }
+
+    const key = event.key;
+
+    // Cancel
+    if (key === "Escape") {
+      s.ui = { kind: "NONE" };
+      this.render();
+      return true;
+    }
+
+    // Up/Down
+    if (key === "ArrowUp") {
+      s.ui = { ...s.ui, selected: (s.ui.selected - 1 + entries.length) % entries.length };
+      this.render();
+      return true;
+    }
+    if (key === "ArrowDown") {
+      s.ui = { ...s.ui, selected: (s.ui.selected + 1) % entries.length };
+      this.render();
+      return true;
+    }
+
+    // Letter select a-z
+    const lower = key.toLowerCase();
+    if (lower.length === 1 && lower >= "a" && lower <= "z") {
+      const idx = lower.charCodeAt(0) - "a".charCodeAt(0);
+      if (idx >= 0 && idx < entries.length) {
+        s.ui = { ...s.ui, selected: idx };
+        this.render();
+      }
+      return true;
+    }
+
+    // Confirm
+    if (key === "Enter") {
+      const chosen = entries[s.ui.selected];
+      s.inventory.equipItem(chosen.inventoryIndex, s.player);
+
+      // Recompute derived stats
+      s.player.damage = s.player.damageBase + s.inventory.getAttackBonus();
+      s.player.defense = s.player.defenseBase + s.inventory.getDefenseBonus();
+
+      s.ui = { kind: "NONE" };
+      this.render();
+      return true;
+    }
+
+    return true; // consume other keys while menu is open
+  }
+
+  private openEquipMenu(): boolean {
+    const s = this.state;
+
+    // Show only equippable items for equip menu
+    const equippable = s.inventory.items
+      .map((it, idx) => ({ it, idx }))
+      .filter(({ it }) => it.slot !== "consumable" && it.slot !== "none");
+
+    if (equippable.length === 0) {
+      s.log.addMessage("Nothing to equip.", "gray");
+      return false;
+    }
+
+    const letters = "abcdefghijklmnopqrstuvwxyz";
+    const entries = equippable.slice(0, 26).map(({ it, idx }, i) => {
+      const label = letters[i];
+      const text = `${label}) ${it.name}  (${it.slot})`;
+      return { label, text, inventoryIndex: idx };
+    });
+
+    s.ui = {
+      kind: "PICKLIST",
+      title: "Equip which item?",
+      selected: 0,
+      entries,
+    };
+
+    return true;
+  }
 
 }
 

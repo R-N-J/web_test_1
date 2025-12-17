@@ -137,4 +137,30 @@ export class AsciiRenderer {
     this.ctx.textAlign = "center";
   }
 
+  public drawString(x: number, y: number, text: string, fg: string, bg: string | null = "#000"): void {
+    for (let i = 0; i < text.length; i++) {
+      this.draw(x + i, y, text[i], fg, bg);
+    }
+  }
+
+  public drawBox(x: number, y: number, w: number, h: number, fg: string, bg: string = "#000"): void {
+    if (w < 2 || h < 2) return;
+
+    // Fill background
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        this.draw(x + xx, y + yy, " ", fg, bg);
+      }
+    }
+
+    // Border (ASCII box)
+    const top = "+" + "-".repeat(w - 2) + "+";
+    const mid = "|" + " ".repeat(w - 2) + "|";
+    const bot = "+" + "-".repeat(w - 2) + "+";
+
+    this.drawString(x, y, top, fg, bg);
+    for (let i = 1; i < h - 1; i++) this.drawString(x, y + i, mid, fg, bg);
+    this.drawString(x, y + h - 1, bot, fg, bg);
+  }
+
 }

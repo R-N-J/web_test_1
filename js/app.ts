@@ -22,9 +22,15 @@ game.startNewGame();
 new InputHandler((event) => {
   if (event.repeat) return;
 
+  // If a modal UI is open, it consumes the key.
+  if (game.handleUiKey(event)) {
+    event.preventDefault();
+    return;
+  }
+
   const action = keyEventToAction(event);
   if (!action) return;
 
   event.preventDefault();
-  void game.handleAction(action); // don't block handler; run async
+  void game.handleAction(action);
 });

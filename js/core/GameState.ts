@@ -11,6 +11,15 @@ export interface Projectile {
   color: string;
 }
 
+export type UiMode =
+  | { kind: "NONE" }
+  | {
+  kind: "PICKLIST";
+  title: string;
+  selected: number;
+  entries: Array<{ label: string; text: string; inventoryIndex: number }>;
+};
+
 export interface GameState {
   width: number;
   height: number;     // screen height (chars)
@@ -26,5 +35,6 @@ export interface GameState {
   inventory: Inventory;
   log: MessageLog;
   projectiles: Projectile[]; // transient render-layer
+  ui: UiMode;
 
 }
