@@ -1,6 +1,7 @@
 import { DungeonMap, generateRandomWalk, findStartingFloorTile } from "../map/DungeonMap";
 import type { Entity } from "../entities/Entity";
 import type { Item, Inventory } from "../items/Item";
+import { createId } from "../utils/id";
 
 
 export function createFreshLevel(params: {
@@ -23,6 +24,7 @@ export function createFreshLevel(params: {
   const start = findStartingFloorTile(map);
 
   const player: Entity = {
+    id: createId("player"),
     x: start.x,
     y: start.y,
     symbol: "@",
@@ -125,6 +127,7 @@ function spawnMonsters(map: DungeonMap, count: number): Entity[] {
   for (let i = 0; i < count && floorTiles.length > 0; i++) {
     const { x, y } = floorTiles.splice(Math.floor(Math.random() * floorTiles.length), 1)[0];
     monsters.push({
+      id: createId("monster"),
       x,
       y,
       symbol: "o",
@@ -152,7 +155,8 @@ function spawnItems(map: DungeonMap, count: number): Item[] {
     }
   }
 
-  const itemsToSpawn: Array<Omit<Item, "x" | "y">> = [
+  // Items to spawn on the floor template (without x, y, or id)
+  const itemsToSpawn: Array<Omit<Item, "x" | "y" | "id">> = [
     {
       symbol: "!",
       color: "#00f",
@@ -185,7 +189,7 @@ function spawnItems(map: DungeonMap, count: number): Item[] {
   for (let i = 0; i < count && floorTiles.length > 0; i++) {
     const { x, y } = floorTiles.splice(Math.floor(Math.random() * floorTiles.length), 1)[0];
     const base = itemsToSpawn[Math.floor(Math.random() * itemsToSpawn.length)];
-    itemsOnMap.push({ ...base, x, y });
+    itemsOnMap.push({ ...base, id: createId("item"), x, y });
   }
 
   return itemsOnMap;

@@ -16,10 +16,13 @@ import {
   loadFromLocalStorage,
   saveToLocalStorage
 } from "../systems/save";
+import {createId} from "../utils/id";
 
 export class Game {
   public state!: GameState;
   private isAnimating = false;
+  private lastSaveTime = 0;
+  private readonly SAVE_DEBOUNCE_MS = 1000; // 1 second debounce
 
   private levels: Record<string, { mapData: GameState["map"]["mapData"]; monsters: GameState["monsters"]; itemsOnMap: GameState["itemsOnMap"] }> = {};
 
@@ -144,7 +147,7 @@ export class Game {
       s.log.addMessage(`Hero attacks ${monster.name} for ${s.player.damage} damage!`, "yellow");
       if (monster.hp <= 0) {
         s.log.addMessage(`${monster.name} is defeated!`, "red");
-        this.dropCorpse(monster, 1); // 1 = 100% chance; change to e.g. 0.5 for 50%
+        this.dropCorpse(monster);
       }
       return true;
     }
@@ -343,10 +346,16 @@ export class Game {
   }
 
   private saveGame(): void {
+    const now = Date.now();
+    if (now - this.lastSaveTime < this.SAVE_DEBOUNCE_MS) {
+      return; // Skip if we've saved recently
+    }
+    
     this.saveCurrentLevelSnapshot();
     const data = buildSaveData(this.state, this.levels);
     saveToLocalStorage(data);
     this.state.log.addMessage("Game saved.", "green");
+    this.lastSaveTime = now; // Update the last save time
   }
 
   private loadGame(): void {
@@ -411,7 +420,6 @@ export class Game {
 
   private async animateArrowPath(
     path: Array<{ x: number; y: number }>,
-  //  target: { x: number; y: number; hp: number }
     target: Entity
   ): Promise<void> {
     const s = this.state;
@@ -440,7 +448,7 @@ export class Game {
           s.log.addMessage("The arrow hits!", "yellow");
           if (target.hp <= 0) {
             s.log.addMessage("Target is slain!", "red");
-            this.dropCorpse(target, 1); // 100% chance
+            this.dropCorpse(target);
           }
           break;
         }
@@ -452,12 +460,16 @@ export class Game {
     }
   }
 
-  private dropCorpse(monster: Entity, chance: number = 1): void {
+  private dropCorpse(monster: Entity): void {
+    // If not set, default to "no corpse" (useful so the player doesn't drop one)
+    const chance = monster.corpseDropChance ?? 0;
+    if (chance <= 0) return;
     if (Math.random() > chance) return;
 
     const s = this.state;
 
     const corpse: Item = {
+      id: createId('corpse'),
       x: monster.x,
       y: monster.y,
       symbol: "%",

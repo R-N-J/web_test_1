@@ -1,11 +1,33 @@
 export type Direction = { x: number; y: number };
 
 export class InputHandler {
+  private readonly down = new Set<string>();
   constructor(onKeyDown: (event: KeyboardEvent) => void) {
     window.addEventListener("keydown", (event) => {
+      // One action per press:
+      // - ignore OS key-repeat
+      if (event.repeat) return;
+
+      // - ignore if we already consider this key held
+      //   (covers edge cases + prevents duplicates if logic changes later)
+      const keyId = event.code || event.key;
+      if (this.down.has(keyId)) return;
+      this.down.add(keyId);
+
       onKeyDown(event);
     });
+
+    window.addEventListener("keyup", (event) => {
+      const keyId = event.code || event.key;
+      this.down.delete(keyId);
+    });
+
+    // Optional safety: if the tab loses focus while holding a key, clear state
+    window.addEventListener("blur", () => {
+      this.down.clear();
+    });
   }
+
 
   public static getMovementDelta(event: KeyboardEvent): Direction | null {
     switch (event.key) {

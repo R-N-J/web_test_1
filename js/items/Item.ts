@@ -14,6 +14,7 @@ export type EquipmentSlot =
 
 
 export interface Item {
+  id: string;
   x: number;
   y: number;
   symbol: string;
@@ -58,11 +59,23 @@ export class Inventory {
       return parts.length > 0 ? parts.join(', ') : 'no stat changes';
     }
 
-    addItem(item: Item): void {
-      const { x, y, ...inventoryItem } = item;
-      this.items.push(inventoryItem);
-      this.log(`Picked up ${item.name}!`, item.color);
+  addItem(item: Item): void {
+    // Defensive: never allow map-decoration items into inventory.
+    if (item.slot === "none") {
+      this.log(`You can't pick up ${item.name}.`, "gray");
+      return;
     }
+
+    // Defensive: IDs are unique, so don't allow duplicates.
+    if (this.items.some(i => i.id === item.id)) {
+      this.log(`You already have ${item.name}.`, "gray");
+      return;
+    }
+
+    const { x: _x, y: _y, ...inventoryItem } = item; // Remove x and y from the item
+    this.items.push(inventoryItem);
+    this.log(`Picked up ${item.name}!`, item.color);
+  }
 
     hasItems(): boolean {
       return this.items.length > 0;

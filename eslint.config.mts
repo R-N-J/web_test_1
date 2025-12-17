@@ -23,7 +23,15 @@ export default defineConfig([
     files: ["webpack*.js"],
     rules: {
       "@typescript-eslint/no-var-requires": "off",
-      "@typescript-eslint/no-require-imports": "off"
+      "@typescript-eslint/no-require-imports": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_",
+          "caughtErrorsIgnorePattern": "^_"
+        }
+      ]
     }
   }
 ]);

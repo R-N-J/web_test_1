@@ -21,6 +21,7 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
     case "f":
       return { type: "FIRE_ARROW" };
     case "p":
+      event.preventDefault(); // Prevent default to avoid key repeat
       return { type: "SAVE_GAME" };
     case "r":
       return { type: "LOAD_GAME" };
