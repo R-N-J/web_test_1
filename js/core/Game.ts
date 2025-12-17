@@ -350,7 +350,7 @@ export class Game {
     if (now - this.lastSaveTime < this.SAVE_DEBOUNCE_MS) {
       return; // Skip if we've saved recently
     }
-    
+
     this.saveCurrentLevelSnapshot();
     const data = buildSaveData(this.state, this.levels);
     saveToLocalStorage(data);
@@ -425,13 +425,39 @@ export class Game {
     const s = this.state;
     this.isAnimating = true;
 
+    const arrowCharForDelta = (dx: number, dy: number): string => {
+      // Normalize to -1/0/1 (path steps should already be like this, but be safe)
+      const ndx = Math.sign(dx);
+      const ndy = Math.sign(dy);
+
+      if (ndx === 1 && ndy === 0) return "→";
+      if (ndx === -1 && ndy === 0) return "←";
+      if (ndx === 0 && ndy === 1) return "↓";
+      if (ndx === 0 && ndy === -1) return "↑";
+
+      if (ndx === 1 && ndy === 1) return "↘";
+      if (ndx === 1 && ndy === -1) return "↗";
+      if (ndx === -1 && ndy === 1) return "↙";
+      if (ndx === -1 && ndy === -1) return "↖";
+
+      return "•"; // fallback (shouldn't happen)
+    };
+
+
     try {
+      // Start from the player tile, since `path` begins after the player tile
+      let prev = { x: s.player.x, y: s.player.y };
+
       for (const step of path) {
         const tile = s.map.get(step.x, step.y);
         if (!tile) break;
 
+        const dx = step.x - prev.x;
+        const dy = step.y - prev.y;
+        const arrowChar = arrowCharForDelta(dx, dy);
+
         // Arrow stops at blocking tiles (still “hits” that tile visually for one frame)
-        s.projectiles = [{ x: step.x, y: step.y, char: "→", color: "white" }];
+        s.projectiles = [{ x: step.x, y: step.y, char: arrowChar, color: "white" }];
         this.render();
 
         // small delay per tile
@@ -452,6 +478,7 @@ export class Game {
           }
           break;
         }
+        prev = step;
       }
     } finally {
       s.projectiles = [];

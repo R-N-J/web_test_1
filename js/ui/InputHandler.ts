@@ -28,7 +28,6 @@ export class InputHandler {
     });
   }
 
-
   public static getMovementDelta(event: KeyboardEvent): Direction | null {
     switch (event.key) {
       case "ArrowUp":
