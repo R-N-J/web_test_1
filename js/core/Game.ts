@@ -506,13 +506,10 @@ export class Game {
 
   private openEquipMenu(): boolean {
     const s = this.state;
-
     const letters = "abcdefghijklmnopqrstuvwxyz";
 
-    // keep inventoryIndex so we can call inventory.equipItem(index, player)
     const candidates = s.inventory.items
-      .map((it, inventoryIndex) => ({ it, inventoryIndex }))
-      .filter(({ it }) => it.slot !== "consumable" && it.slot !== "none")
+      .filter((it) => it.slot !== "consumable" && it.slot !== "none")
       .slice(0, 26);
 
     if (candidates.length === 0) {
@@ -520,21 +517,21 @@ export class Game {
       return false;
     }
 
-    const entries = candidates.map(({ it, inventoryIndex }, i) => {
+    const entries = candidates.map((it, i) => {
       const label = letters[i];
       return {
         label,
         text: `${label}) ${it.name} (${it.slot})`,
-        value: inventoryIndex,
+        value: it.id, // Store ID as the payload
       };
     });
 
     this.pushUi(
-      new PickListOverlay<number>(
+      new PickListOverlay<string>( // Use string ID
         "Equip which item?",
         entries,
-        (state, inventoryIndex) => {
-          state.inventory.equipItem(inventoryIndex, state.player);
+        (state, itemId) => {
+          state.inventory.equipItem(itemId, state.player);
           state.player.damage = state.player.damageBase + state.inventory.getAttackBonus();
           state.player.defense = state.player.defenseBase + state.inventory.getDefenseBonus();
           this.popUi();
@@ -548,12 +545,10 @@ export class Game {
 
   private openUseConsumableMenu(): boolean {
     const s = this.state;
-
     const letters = "abcdefghijklmnopqrstuvwxyz";
 
     const candidates = s.inventory.items
-      .map((it, inventoryIndex) => ({ it, inventoryIndex }))
-      .filter(({ it }) => it.slot === "consumable")
+      .filter((it) => it.slot === "consumable")
       .slice(0, 26);
 
     if (candidates.length === 0) {
@@ -561,22 +556,22 @@ export class Game {
       return false;
     }
 
-    const entries = candidates.map(({ it, inventoryIndex }, i) => {
+    const entries = candidates.map((it, i) => {
       const label = letters[i];
       const details = it.healAmount > 0 ? ` (heal ${it.healAmount})` : "";
       return {
         label,
         text: `${label}) ${it.name}${details}`,
-        value: inventoryIndex,
+        value: it.id, // Store ID as the payload
       };
     });
 
     this.pushUi(
-      new PickListOverlay<number>(
+      new PickListOverlay<string>( // Use string ID
         "Use which item?",
         entries,
-        (state, inventoryIndex) => {
-          state.inventory.useConsumable(inventoryIndex, state.player);
+        (state, itemId) => {
+          state.inventory.useConsumable(itemId, state.player);
           this.popUi();
         },
         () => this.popUi()
@@ -585,7 +580,6 @@ export class Game {
 
     return true;
   }
-
 
   private pushUi(overlay: import("./GameState").UiOverlay): void {
     this.state.uiStack.push(overlay);

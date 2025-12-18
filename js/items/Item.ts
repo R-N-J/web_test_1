@@ -81,30 +81,31 @@ export class Inventory {
       return this.items.length > 0;
     }
 
-    equipItem(itemIndex: number, player: Entity): void {
-        const itemToEquip = this.items[itemIndex];
-        if (!itemToEquip || itemToEquip.slot === 'consumable' || itemToEquip.slot === 'none') {
-            return; // cannot equip consumables/none
-        }
+  equipItem(itemId: string, player: Entity): void {
+    const itemIndex = this.items.findIndex(i => i.id === itemId);
+    const itemToEquip = this.items[itemIndex];
 
-        const slot: EquippableSlot = itemToEquip.slot;
-
-        if (this.equipment[slot]) {
-            this.unequipItem(slot, player);
-        }
-
-        this.equipment[slot] = itemToEquip;
-
-
-        // Remove item from the main inventory list
-        this.items.splice(itemIndex, 1);
-
-        this.log(
-            `Equipped ${itemToEquip.name} (${slot}). ${this.formatBonuses(itemToEquip)}. ` +
-            `Now: ATK=${player.damageBase}, DEF=${player.defenseBase}`,
-            itemToEquip.color
-        );
+    if (!itemToEquip || itemToEquip.slot === 'consumable' || itemToEquip.slot === 'none') {
+      return;
     }
+
+    const slot: EquippableSlot = itemToEquip.slot;
+
+    if (this.equipment[slot]) {
+      this.unequipItem(slot, player);
+    }
+
+    this.equipment[slot] = itemToEquip;
+
+    // Remove item from the main inventory list using the index we found
+    this.items.splice(itemIndex, 1);
+
+    this.log(
+      `Equipped ${itemToEquip.name} (${slot}). ${this.formatBonuses(itemToEquip)}. ` +
+      `Now: ATK=${player.damage}, DEF=${player.defense}`,
+      itemToEquip.color
+    );
+  }
 
     unequipItem(slot: Exclude<EquipmentSlot, 'consumable' | 'none'>, player: Entity): void {
         const item = this.equipment[slot];
@@ -120,16 +121,18 @@ export class Inventory {
         );
     }
 
-    useConsumable(itemIndex: number, player: Entity): void {
-        const item = this.items[itemIndex];
-        if (!item || item.slot !== 'consumable') return;
+    useConsumable(itemId: string, player: Entity): void {
+      const itemIndex = this.items.findIndex(i => i.id === itemId);
+      const item = this.items[itemIndex];
 
-        if (item.healAmount > 0) {
-            player.hp = Math.min(player.maxHp, player.hp + item.healAmount);
-            this.log(`Used ${item.name}. HP restored to ${player.hp}.`, item.color);
-        }
+      if (!item || item.slot !== 'consumable') return;
 
-        this.items.splice(itemIndex, 1);
+      if (item.healAmount > 0) {
+        player.hp = Math.min(player.maxHp, player.hp + item.healAmount);
+        this.log(`Used ${item.name}. HP restored to ${player.hp}.`, item.color);
+      }
+
+      this.items.splice(itemIndex, 1);
     }
 
     getAttackBonus(): number {
