@@ -118,13 +118,27 @@ export class AsciiRenderer {
    */
   public clear() {
     const { width, height, tileSize } = this.options;
+    // Reset transform before clearing
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    const dpr = window.devicePixelRatio || 1;
+    this.ctx.scale(dpr, dpr);
+
     this.ctx.clearRect(0, 0, width * tileSize, height * tileSize);
+
 
     // Optional: Fill with default background color immediately
     this.ctx.fillStyle = "#000";
     this.ctx.fillRect(0, 0, width * tileSize, height * tileSize);
   }
 
+  /**
+   * Applies a global pixel offset for effects like screen shake.
+   */
+  public setOffset(x: number, y: number): void {
+    const dpr = window.devicePixelRatio || 1;
+    this.ctx.setTransform(dpr, 0, 0, dpr, x * dpr, y * dpr);
+  }
 
   /**
    * Draws a full string starting at grid coordinates (x, y), clearing the rest of the line.

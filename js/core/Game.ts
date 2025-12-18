@@ -20,12 +20,13 @@ import {
 import {createId} from "../utils/id";
 import { PickListOverlay } from "../ui/overlays/PickListOverlay";
 import { MessageLogOverlay } from "../ui/overlays/MessageLogOverlay";
+import { GameOverOverlay } from "../ui/overlays/GameOverOverlay";
 
 export class Game {
   public state!: GameState;
   private isAnimating = false;
   private lastSaveTime = 0;
-  private readonly SAVE_DEBOUNCE_MS = 1000; // 1 second debounce
+  private readonly SAVE_DEBOUNCE_MS = 1000; // 1 second debounce. prevent the player from spamming the save function
 
   private levels: Record<string, { mapData: GameState["map"]["mapData"]; monsters: GameState["monsters"]; itemsOnMap: GameState["itemsOnMap"] }> = {};
 
@@ -64,6 +65,7 @@ export class Game {
       log,
       projectiles: [],
       uiStack: [],
+      screenShake: { x: 0, y: 0 },
     };
 
     this.saveCurrentLevelSnapshot();
@@ -73,6 +75,7 @@ export class Game {
   public async handleAction(action: Action): Promise<void> {
     if (!this.state) return;
     if (this.isAnimating) return; // NEW: lock input while animating
+    if (this.state.player.hp <= 0) return; // Don't allow actions if dead
 
     const takesTurn = await this.playerTurn(action);
 
@@ -80,7 +83,18 @@ export class Game {
       runMonsterTurn(this.state);
     }
 
+    this.checkGameOver();
     this.render();
+  }
+
+  private checkGameOver(): void {
+    if (this.state.player.hp <= 0) {
+      // Prevent multiple overlays if we are already dead
+      if (!this.state.uiStack.some(o => o.kind === "GAME_OVER")) {
+        this.state.log.addMessage("You have died!", "red");
+        this.pushUi(new GameOverOverlay());
+      }
+    }
   }
 
   public render(): void {
@@ -345,17 +359,18 @@ export class Game {
   }
 
   private loadGame(): void {
-    const loaded = loadFromLocalStorage();
-    if (!loaded) {
+      const loaded = loadFromLocalStorage();
+      if (!loaded) {
       this.state.log.addMessage("No save found.", "gray");
       return;
     }
 
     const log = this.state.log; // keep current log instance
+    log.setHistory(loaded.log || []); // Restore history from save
+
     const inventory = hydrateInventory(log, loaded.inventory);
 
     this.levels = loaded.levels;
-
     const current = this.levels[String(loaded.currentLevel)];
     if (!current) {
       this.state.log.addMessage("Save is missing current level data.", "red");

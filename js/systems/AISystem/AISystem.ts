@@ -14,7 +14,18 @@ export function runMonsterTurn(state: GameState): void {
     if (distSq <= 2) {
       const damageTaken = Math.max(0, monster.damage - state.player.defense);
       state.player.hp = Math.max(0, state.player.hp - damageTaken);
+
+      // Trigger screen shake on any hit
+      state.screenShake = {
+        x: (Math.random() - 0.5) * 40,
+        y: (Math.random() - 0.5) * 40
+      };
+
       state.log.addMessage(`${monster.name} attacks for ${damageTaken} damage!`, "red");
+
+      if (state.player.hp <= 0) {
+        state.log.addMessage("Everything fades to black...", "red");
+      }
       continue;
     }
 

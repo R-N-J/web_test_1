@@ -39,4 +39,19 @@ export class MessageLog {
     return this.history.slice();
   }
 
+  /**
+   * Restores history from a saved state.
+   */
+  setHistory(history: Message[]): void {
+    this.history = history.slice(-this.MAX_HISTORY);
+  }
+
+  /**
+   * Returns history filtered by search text (case-insensitive).
+   */
+  getFilteredHistory(query: string): Message[] {
+    if (!query) return this.getHistory();
+    const lower = query.toLowerCase();
+    return this.history.filter(m => m.text.toLowerCase().includes(lower));
+  }
 }

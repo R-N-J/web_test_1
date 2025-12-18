@@ -40,5 +40,5 @@ export interface GameState {
   log: MessageLog;
   projectiles: Projectile[]; // transient render-layer
   uiStack: UiOverlay[];
-
+  screenShake: { x: number, y: number }; // Pixel offset for juice effects
 }

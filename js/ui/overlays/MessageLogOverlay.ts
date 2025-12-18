@@ -12,6 +12,9 @@ export class MessageLogOverlay implements UiOverlay {
   // updated during render; used for PageUp/PageDown
   private lastPageSize = 10;
 
+  private searchQuery = "";
+  private isSearching = false;
+
   constructor(private readonly title: string = "Message Log") {}
 
   public render(state: GameState, display: AsciiRenderer): void {
@@ -28,9 +31,15 @@ export class MessageLogOverlay implements UiOverlay {
     // 3. Draw the smooth Title
     display.drawSmoothString(x0 + 1, y0, ` ${this.title} `, "#ddd", "#000");
 
+    if (this.isSearching) {
+      const searchLabel = ` Search: ${this.searchQuery}_ `;
+      display.drawSmoothString(x0 + 1, y0 + 1, searchLabel, "yellow", "#222");
+    }
+
+
     // 4. Wrapping and Scroll Logic
     const contentWidth = w - 2;
-    const pageSize = Math.max(1, h - 2);
+    const pageSize = this.isSearching ? Math.max(1, h - 3) : Math.max(1, h - 2);
     this.lastPageSize = pageSize;
 
     const lines = this.buildWrappedLines(state, contentWidth);
@@ -42,9 +51,10 @@ export class MessageLogOverlay implements UiOverlay {
     const end = Math.min(lines.length, start + pageSize);
 
     // 5. Draw the wrapped rendered lines using smooth text
+    const contentOffsetY = this.isSearching ? 2 : 1;
     for (let row = 0; row < pageSize; row++) {
       const idx = start + row;
-      const rowY = y0 + 1 + row;
+      const rowY = y0 + contentOffsetY + row;
 
       if (idx >= lines.length) break;
 
@@ -54,7 +64,9 @@ export class MessageLogOverlay implements UiOverlay {
     }
 
     // 6. Footer hint and position indicator
-    const hint = " Esc=close  ↑↓=scroll  PgUp/PgDn ";
+    const hint = this.isSearching
+      ? " Esc=Exit Search  Backspace=Delete "
+      : " Esc=Close  /=Search  ↑↓=Scroll ";
     display.drawSmoothString(x0 + 1, y0 + h - 1, hint, "#888", "#000");
 
     if (lines.length > pageSize) {
@@ -65,15 +77,45 @@ export class MessageLogOverlay implements UiOverlay {
   }
 
   public onKeyDown(state: GameState, event: KeyboardEvent): boolean {
-    const historyLen = state.log.getHistory().length;
+    const linesCount = this.buildWrappedLines(state, 10).length; // Rough estimate for paging
 
     // Compute “page size” similarly to render (best-effort; render will clamp precisely)
     const approxH = Math.min(state.mapHeight - 2, Math.max(6, state.mapHeight - 4));
-    const pageSize = Math.max(1, approxH - 2);
+    const pageSize = this.isSearching ? Math.max(1, approxH - 3) : Math.max(1, approxH - 2);
 
-    const maxTop = Math.max(0, historyLen - pageSize);
+    const maxTop = Math.max(0, linesCount - pageSize);
+
+    if (this.isSearching) {
+      if (event.key === "Escape") {
+        this.isSearching = false;
+        this.searchQuery = "";
+        this.top = 0;
+        return true;
+      }
+      if (event.key === "Backspace") {
+        this.searchQuery = this.searchQuery.slice(0, -1);
+        this.top = 0;
+        return true;
+      }
+      if (event.key === "Enter") {
+        this.isSearching = false;
+        return true;
+      }
+      if (event.key.length === 1) {
+        this.searchQuery += event.key;
+        this.top = 0;
+        return true;
+      }
+      return true; // Consume other keys in search mode
+    }
 
     switch (event.key) {
+      case "/":
+        this.isSearching = true;
+        this.searchQuery = "";
+        this.top = 0;
+        return true;
+
       case "Escape":
         state.uiStack.pop();
         return true;
@@ -145,7 +187,7 @@ export class MessageLogOverlay implements UiOverlay {
   }
 
   private buildWrappedLines(state: GameState, contentWidth: number): RenderLine[] {
-    const history = state.log.getHistory(); // oldest -> newest
+    const history = state.log.getFilteredHistory(this.searchQuery); // oldest -> newest
     const out: RenderLine[] = [];
 
     for (const msg of history) {

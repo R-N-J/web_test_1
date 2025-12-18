@@ -7,6 +7,9 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
 
   display.clear();
 
+  // Apply screen shake
+  display.setOffset(state.screenShake.x, state.screenShake.y);
+
   // 1. Map Tiles (Floor & Walls)
   for (let y = 0; y < state.map.height; y++) {
     for (let x = 0; x < state.map.width; x++) {
@@ -81,5 +84,15 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
   for (const overlay of state.uiStack) {
     overlay.render(state, display);
   }
-}
 
+  // Decay screen shake for next frame
+  if (state.screenShake.x !== 0 || state.screenShake.y !== 0) {
+    state.screenShake.x = -state.screenShake.x * 0.7; // Flip and shrink
+    state.screenShake.y = -state.screenShake.y * 0.7;
+
+    if (Math.abs(state.screenShake.x) < 0.5) state.screenShake.x = 0;
+    if (Math.abs(state.screenShake.y) < 0.5) state.screenShake.y = 0;
+
+    requestAnimationFrame(() => renderGame(state, display));
+  }
+}

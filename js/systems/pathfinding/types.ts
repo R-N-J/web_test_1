@@ -1,6 +1,7 @@
 import type { DungeonMap } from "../../map/DungeonMap";
+import type { Point } from "../../core/Types";
 
-export type Point = { x: number; y: number };
+export type { Point };
 export type Path = Point[];
 
 export interface PathfindingOptions {

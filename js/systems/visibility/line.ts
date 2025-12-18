@@ -1,4 +1,4 @@
-import type { Point } from "./types";
+import type { Point } from "../../core/Types";
 
 /**
  * Bresenham line from (x1,y1) to (x2,y2), inclusive of both endpoints.

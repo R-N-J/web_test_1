@@ -3,6 +3,7 @@ import { DungeonMap } from "../../map/DungeonMap";
 import { Inventory } from "../../items/Item";
 import { MessageLog } from "../../core/MessageLog";
 
+
 type LevelSnapshot = {
   mapData: GameState["map"]["mapData"];
   monsters: GameState["monsters"];
@@ -10,13 +11,14 @@ type LevelSnapshot = {
 };
 
 export type SaveData = {
-  version: 1;
+  version: 2;
   currentLevel: number;
   player: GameState["player"];
   inventory: {
     items: GameState["inventory"]["items"];
     equipment: GameState["inventory"]["equipment"];
   };
+  log: Array<{ text: string, color: string }>; // Added log history
   levels: Record<string, LevelSnapshot>; // key = level number as string
 };
 
@@ -24,13 +26,14 @@ const STORAGE_KEY = "rogue1.save";
 
 export function buildSaveData(state: GameState, levels: Record<string, LevelSnapshot>): SaveData {
   return {
-    version: 1,
+    version: 2,
     currentLevel: state.currentLevel,
     player: state.player,
     inventory: {
       items: state.inventory.items,
       equipment: state.inventory.equipment,
     },
+    log: state.log.getHistory(), // Capture current history
     levels,
   };
 }
@@ -44,7 +47,7 @@ export function loadFromLocalStorage(): SaveData | null {
   if (!raw) return null;
 
   const parsed = JSON.parse(raw) as SaveData;
-  if (parsed.version !== 1) return null;
+  if (parsed.version !== 2) return null;
 
   return parsed;
 }
