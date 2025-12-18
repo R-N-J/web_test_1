@@ -13,6 +13,7 @@ const display = new AsciiRenderer({
   height: CONFIG.HEIGHT,
   tileSize: CONFIG.TILE_SIZE,
   font: CONFIG.FONT,
+  smoothMap: CONFIG.SMOOTH_MAP,
 });
 
 const game = new Game(display, CONFIG);

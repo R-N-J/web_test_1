@@ -4,6 +4,7 @@ export interface RendererOptions {
   tileSize: number;   // Size of one tile in PIXELS (e.g., 20)
   parent?: HTMLElement; // Where to attach the canvas
   font?: string;      // Font family (must be monospace)
+  smoothMap?: boolean; // New setting
 }
 
 export class AsciiRenderer {
@@ -73,12 +74,19 @@ export class AsciiRenderer {
 
     // 2. Ensure consistent text state for every glyph
     this.ctx.font = `${ts}px ${this.options.font}`;
-    this.ctx.textAlign = "center";
     this.ctx.textBaseline = "middle";
+    this.ctx.fillStyle = fg;
 
     // 3. Draw Character
-    this.ctx.fillStyle = fg;
-    this.ctx.fillText(char, px + (ts / 2), py + (ts / 2));
+    if (this.options.smoothMap) {
+      // SMOOTH MODE: Normal kerning, left-aligned in the tile
+      this.ctx.textAlign = "left";
+      this.ctx.fillText(char, px, py + (ts / 2));
+    } else {
+      // CLASSIC MODE: Force center alignment (fixed-grid look)
+      this.ctx.textAlign = "center";
+      this.ctx.fillText(char, px + (ts / 2), py + (ts / 2));
+    }
   }
 
   /**
