@@ -71,8 +71,12 @@ export class AsciiRenderer {
       this.ctx.fillRect(px, py, ts, ts);
     }
 
-    // 2. Draw Character
-    // Note: We offset by ts/2 because textAlign is "center" and baseline is "middle"
+    // 2. Ensure consistent text state for every glyph
+    this.ctx.font = `${ts}px ${this.options.font}`;
+    this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+
+    // 3. Draw Character
     this.ctx.fillStyle = fg;
     this.ctx.fillText(char, px + (ts / 2), py + (ts / 2));
   }
@@ -124,17 +128,18 @@ export class AsciiRenderer {
     this.ctx.fillStyle = bg;
     this.ctx.fillRect(x * ts, y * ts, this.options.width * ts, ts);
 
-    // 2. Draw the text (using the standard drawChar logic, but simpler)
+    // 2. Draw the text
     this.ctx.font = `${ts}px ${this.options.font}`;
-    this.ctx.textAlign = "left"; // Align log text to the left
+    this.ctx.textAlign = "left";
     this.ctx.textBaseline = "middle";
     this.ctx.fillStyle = fg;
 
-    // We add a slight offset (ts / 2) to center the text vertically within the tile height
     this.ctx.fillText(text, x * ts, y * ts + (ts / 2));
 
-    // Reset textAlign for single char drawing if needed later (usually not necessary)
+    // 3. Restore to the standard glyph state (so future calls look identical)
     this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+    this.ctx.font = `${ts}px ${this.options.font}`;
   }
 
   public drawString(x: number, y: number, text: string, fg: string, bg: string | null = "#000"): void {
@@ -163,4 +168,47 @@ export class AsciiRenderer {
     this.drawString(x, y + h - 1, bot, fg, bg);
   }
 
+
+  /**
+   * Draws a smooth string (proportional spacing) with a background rectangle.
+   * x, y are still grid coordinates for placement, but text renders normally.
+   */
+  public drawSmoothString(x: number, y: number, text: string, fg: string, bg: string | null = "#000"): void {
+    const ts = this.options.tileSize;
+    const px = x * ts;
+    const py = y * ts;
+
+    this.ctx.font = `${ts}px ${this.options.font}`;
+    this.ctx.textBaseline = "middle";
+    this.ctx.textAlign = "left";
+
+    if (bg !== null) {
+      const metrics = this.ctx.measureText(text);
+      this.ctx.fillStyle = bg;
+      // Draw background slightly wider than text for safety
+      this.ctx.fillRect(px, py, metrics.width + 2, ts);
+    }
+
+    this.ctx.fillStyle = fg;
+    this.ctx.fillText(text, px, py + (ts / 2));
+  }
+
+  /**
+   * Draws a box using actual lines/rectangles instead of ASCII characters
+   * for a smoother "window" look.
+   */
+  public drawSmoothBox(x: number, y: number, w: number, h: number, fg: string, bg: string = "#000"): void {
+    const ts = this.options.tileSize;
+    const px = x * ts;
+    const py = y * ts;
+    const pw = w * ts;
+    const ph = h * ts;
+
+    this.ctx.fillStyle = bg;
+    this.ctx.fillRect(px, py, pw, ph);
+
+    this.ctx.strokeStyle = fg;
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+  }
 }

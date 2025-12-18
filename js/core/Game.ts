@@ -17,6 +17,8 @@ import {
   saveToLocalStorage
 } from "../systems/save";
 import {createId} from "../utils/id";
+import { PickListOverlay } from "../ui/overlays/PickListOverlay";
+import { MessageLogOverlay } from "../ui/overlays/MessageLogOverlay";
 
 export class Game {
   public state!: GameState;
@@ -60,7 +62,7 @@ export class Game {
       inventory,
       log,
       projectiles: [],
-      ui: { kind: "NONE" },
+      uiStack: [],
     };
 
     this.saveCurrentLevelSnapshot();
@@ -84,6 +86,7 @@ export class Game {
     renderGame(this.state, this.display);
   }
 
+
   private async playerTurn(action: Action): Promise<boolean> {
     switch (action.type) {
       case "MOVE":
@@ -106,6 +109,9 @@ export class Game {
         return false;
       case "LOAD_GAME":
         this.loadGame();
+        return false;
+      case "VIEW_LOG":
+        this.pushUi(new MessageLogOverlay());
         return false;
       default:
         return false;
@@ -196,18 +202,13 @@ export class Game {
   }
 
   private tryUseConsumable(): boolean {
-    const s = this.state;
-    const candidates = s.inventory.items.filter(i => i.slot === "consumable");
-
-    if (candidates.length === 0) {
-      s.log.addMessage("Nothing to use.", "gray");
-      return false;
-    }
-
-    const index = s.inventory.items.findIndex(i => i === candidates[0]);
-    s.inventory.useConsumable(index, s.player);
-    return true;
+    // Opening a menu should NOT take a turn
+    const opened = this.openUseConsumableMenu();
+    if (opened) this.render();
+    return false;
   }
+
+
 
   private tryToggleDoor(mode: "OPEN" | "CLOSE"): boolean {
     const s = this.state;
@@ -498,92 +499,102 @@ export class Game {
 
   public handleUiKey(event: KeyboardEvent): boolean {
     const s = this.state;
-    if (s.ui.kind !== "PICKLIST") return false;
-
-    const entries = s.ui.entries;
-    if (entries.length === 0) {
-      s.ui = { kind: "NONE" };
-      return true;
-    }
-
-    const key = event.key;
-
-    // Cancel
-    if (key === "Escape") {
-      s.ui = { kind: "NONE" };
-      this.render();
-      return true;
-    }
-
-    // Up/Down
-    if (key === "ArrowUp") {
-      s.ui = { ...s.ui, selected: (s.ui.selected - 1 + entries.length) % entries.length };
-      this.render();
-      return true;
-    }
-    if (key === "ArrowDown") {
-      s.ui = { ...s.ui, selected: (s.ui.selected + 1) % entries.length };
-      this.render();
-      return true;
-    }
-
-    // Letter select a-z
-    const lower = key.toLowerCase();
-    if (lower.length === 1 && lower >= "a" && lower <= "z") {
-      const idx = lower.charCodeAt(0) - "a".charCodeAt(0);
-      if (idx >= 0 && idx < entries.length) {
-        s.ui = { ...s.ui, selected: idx };
-        this.render();
-      }
-      return true;
-    }
-
-    // Confirm
-    if (key === "Enter") {
-      const chosen = entries[s.ui.selected];
-      s.inventory.equipItem(chosen.inventoryIndex, s.player);
-
-      // Recompute derived stats
-      s.player.damage = s.player.damageBase + s.inventory.getAttackBonus();
-      s.player.defense = s.player.defenseBase + s.inventory.getDefenseBonus();
-
-      s.ui = { kind: "NONE" };
-      this.render();
-      return true;
-    }
-
-    return true; // consume other keys while menu is open
+    const top = s.uiStack[s.uiStack.length - 1];
+    if (!top) return false;
+    return top.onKeyDown(s, event);
   }
 
   private openEquipMenu(): boolean {
     const s = this.state;
 
-    // Show only equippable items for equip menu
-    const equippable = s.inventory.items
-      .map((it, idx) => ({ it, idx }))
-      .filter(({ it }) => it.slot !== "consumable" && it.slot !== "none");
+    const letters = "abcdefghijklmnopqrstuvwxyz";
 
-    if (equippable.length === 0) {
+    // keep inventoryIndex so we can call inventory.equipItem(index, player)
+    const candidates = s.inventory.items
+      .map((it, inventoryIndex) => ({ it, inventoryIndex }))
+      .filter(({ it }) => it.slot !== "consumable" && it.slot !== "none")
+      .slice(0, 26);
+
+    if (candidates.length === 0) {
       s.log.addMessage("Nothing to equip.", "gray");
       return false;
     }
 
-    const letters = "abcdefghijklmnopqrstuvwxyz";
-    const entries = equippable.slice(0, 26).map(({ it, idx }, i) => {
+    const entries = candidates.map(({ it, inventoryIndex }, i) => {
       const label = letters[i];
-      const text = `${label}) ${it.name}  (${it.slot})`;
-      return { label, text, inventoryIndex: idx };
+      return {
+        label,
+        text: `${label}) ${it.name} (${it.slot})`,
+        value: inventoryIndex,
+      };
     });
 
-    s.ui = {
-      kind: "PICKLIST",
-      title: "Equip which item?",
-      selected: 0,
-      entries,
-    };
+    this.pushUi(
+      new PickListOverlay<number>(
+        "Equip which item?",
+        entries,
+        (state, inventoryIndex) => {
+          state.inventory.equipItem(inventoryIndex, state.player);
+          state.player.damage = state.player.damageBase + state.inventory.getAttackBonus();
+          state.player.defense = state.player.defenseBase + state.inventory.getDefenseBonus();
+          this.popUi();
+        },
+        () => this.popUi()
+      )
+    );
 
     return true;
   }
+
+  private openUseConsumableMenu(): boolean {
+    const s = this.state;
+
+    const letters = "abcdefghijklmnopqrstuvwxyz";
+
+    const candidates = s.inventory.items
+      .map((it, inventoryIndex) => ({ it, inventoryIndex }))
+      .filter(({ it }) => it.slot === "consumable")
+      .slice(0, 26);
+
+    if (candidates.length === 0) {
+      s.log.addMessage("Nothing to use.", "gray");
+      return false;
+    }
+
+    const entries = candidates.map(({ it, inventoryIndex }, i) => {
+      const label = letters[i];
+      const details = it.healAmount > 0 ? ` (heal ${it.healAmount})` : "";
+      return {
+        label,
+        text: `${label}) ${it.name}${details}`,
+        value: inventoryIndex,
+      };
+    });
+
+    this.pushUi(
+      new PickListOverlay<number>(
+        "Use which item?",
+        entries,
+        (state, inventoryIndex) => {
+          state.inventory.useConsumable(inventoryIndex, state.player);
+          this.popUi();
+        },
+        () => this.popUi()
+      )
+    );
+
+    return true;
+  }
+
+
+  private pushUi(overlay: import("./GameState").UiOverlay): void {
+    this.state.uiStack.push(overlay);
+  }
+
+  private popUi(): void {
+    this.state.uiStack.pop();
+  }
+
 
 }
 

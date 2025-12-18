@@ -31,4 +31,12 @@ export class MessageLog {
     const start = Math.max(0, this.history.length - this.DISPLAY_LINES);
     return this.history.slice(start);
   }
+
+  /**
+   * Full log history (oldest -> newest). Returns a copy to keep encapsulation.
+   */
+  getHistory(): Message[] {
+    return this.history.slice();
+  }
+
 }

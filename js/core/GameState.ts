@@ -2,7 +2,7 @@ import type { DungeonMap } from "../map/DungeonMap";
 import type { Entity } from "../entities/Entity";
 import type { Item, Inventory } from "../items/Item";
 import type { MessageLog } from "./MessageLog";
-
+import type { AsciiRenderer } from "../ui/AsciiRenderer";
 
 export interface Projectile {
   x: number;
@@ -11,14 +11,18 @@ export interface Projectile {
   color: string;
 }
 
-export type UiMode =
-  | { kind: "NONE" }
-  | {
-  kind: "PICKLIST";
-  title: string;
-  selected: number;
-  entries: Array<{ label: string; text: string; inventoryIndex: number }>;
-};
+
+export interface UiOverlay {
+  readonly kind: string;
+
+  render(state: GameState, display: AsciiRenderer): void;
+
+  /**
+   * Return true to consume the key (so the game doesn't handle it).
+   * The overlay is allowed to mutate state (e.g., close itself).
+   */
+  onKeyDown(state: GameState, event: KeyboardEvent): boolean;
+}
 
 export interface GameState {
   width: number;
@@ -35,6 +39,6 @@ export interface GameState {
   inventory: Inventory;
   log: MessageLog;
   projectiles: Projectile[]; // transient render-layer
-  ui: UiMode;
+  uiStack: UiOverlay[];
 
 }

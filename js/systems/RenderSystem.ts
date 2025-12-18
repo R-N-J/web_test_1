@@ -74,49 +74,9 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
     "black"
   );
 
-  // ---- Modal UI overlay ----
-  if (state.ui.kind === "PICKLIST") {
-    const title = state.ui.title;
-
-    const padding = 1;
-    const lines = state.ui.entries.length;
-    const contentW = Math.max(
-      title.length,
-      ...state.ui.entries.map(e => e.text.length)
-    );
-
-    const w = Math.min(state.width - 2, contentW + padding * 2 + 2); // +2 for borders
-    const h = Math.min(state.mapHeight - 2, lines + 3); // title row + border rows
-
-    const x0 = Math.floor((state.width - w) / 2);
-    const y0 = Math.floor((state.mapHeight - h) / 2);
-
-    const frameFg = "#ddd";
-    const frameBg = "#000";
-    const normalFg = "#fff";
-    const normalBg = "#000";
-    const hiliteFg = "#000"; // reverse video
-    const hiliteBg = "#fff";
-
-    display.drawBox(x0, y0, w, h, frameFg, frameBg);
-
-    // Title
-    const titleText = ` ${title} `;
-    display.drawString(x0 + 2, y0, titleText.slice(0, Math.max(0, w - 4)), frameFg, frameBg);
-
-    // Entries
-    const maxRows = h - 2; // inside border
-    for (let i = 0; i < Math.min(lines, maxRows); i++) {
-      const entry = state.ui.entries[i];
-      const rowY = y0 + 1 + i;
-
-      const isSelected = i === state.ui.selected;
-      const fg = isSelected ? hiliteFg : normalFg;
-      const bg = isSelected ? hiliteBg : normalBg;
-
-      const line = entry.text.padEnd(w - 2, " ").slice(0, w - 2);
-      display.drawString(x0 + 1, rowY, line, fg, bg);
-    }
+  // ---- Modal UI overlays (stack) ----
+  for (const overlay of state.uiStack) {
+    overlay.render(state, display);
   }
 
 }

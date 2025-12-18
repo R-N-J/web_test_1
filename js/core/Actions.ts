@@ -9,4 +9,5 @@ export type Action =
   | { type: 'CLOSE_DOOR' }
   | { type: "FIRE_ARROW" }
   | { type: "SAVE_GAME" }
-  | { type: "LOAD_GAME" };
+  | { type: "LOAD_GAME" }
+  | { type: "VIEW_LOG" };

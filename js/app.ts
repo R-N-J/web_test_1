@@ -22,9 +22,9 @@ game.startNewGame();
 new InputHandler((event) => {
   if (event.repeat) return;
 
-  // If a modal UI is open, it consumes the key.
   if (game.handleUiKey(event)) {
     event.preventDefault();
+    game.render(); // ensure selection highlight updates immediately
     return;
   }
 

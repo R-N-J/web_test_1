@@ -1,0 +1,169 @@
+import type { GameState, UiOverlay } from "../../core/GameState";
+import type { AsciiRenderer } from "../AsciiRenderer";
+
+export type PickListEntry<T> = {
+  label: string; // "a".."z"
+  text: string;  // what gets displayed in the list
+  value: T;      // payload (e.g. inventory index)
+};
+
+export class PickListOverlay<T> implements UiOverlay {
+  public readonly kind = "PICKLIST";
+
+  private selected = 0;
+
+  // Scroll state
+  private scrollOffset = 0;
+  private lastPageSize = 10; // updated during render (how many rows are visible)
+
+  constructor(
+    private readonly title: string,
+    private readonly entries: Array<PickListEntry<T>>,
+    private readonly onConfirm: (state: GameState, value: T) => void,
+    private readonly onCancel: (state: GameState) => void
+  ) {}
+
+  private clampSelected(): void {
+    if (this.entries.length === 0) {
+      this.selected = 0;
+      this.scrollOffset = 0;
+      return;
+    }
+    this.selected = Math.max(0, Math.min(this.selected, this.entries.length - 1));
+  }
+
+  private ensureSelectedVisible(pageSize: number): void {
+    const maxOffset = Math.max(0, this.entries.length - pageSize);
+    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxOffset));
+
+    if (this.selected < this.scrollOffset) {
+      this.scrollOffset = this.selected;
+    } else if (this.selected >= this.scrollOffset + pageSize) {
+      this.scrollOffset = this.selected - pageSize + 1;
+    }
+
+    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxOffset));
+  }
+
+  public render(state: GameState, display: AsciiRenderer): void {
+    const padding = 1;
+    const lines = this.entries.length;
+
+    // Calculate width based on content, but keep it within grid units for positioning
+    const contentW = Math.max(
+      this.title.length,
+      ...this.entries.map(e => e.text.length),
+      10
+    );
+
+    const w = Math.min(state.width - 2, contentW + padding * 2 + 2);
+    const desiredH = Math.min(state.mapHeight - 2, lines + 3);
+    const h = Math.max(4, desiredH);
+
+    const x0 = Math.floor((state.width - w) / 2);
+    const y0 = Math.floor((state.mapHeight - h) / 2);
+
+    // 1. Draw the smooth window frame and background
+    display.drawSmoothBox(x0, y0, w, h, "#ddd", "#000");
+
+    // 2. Draw the Smooth Title (centered in the top border or left-aligned)
+    display.drawSmoothString(x0 + 1, y0, ` ${this.title} `, "#ddd", "#000");
+
+    // 3. Scroll Logic
+    const pageSize = Math.max(1, h - 2);
+    this.lastPageSize = pageSize;
+
+    this.clampSelected();
+    this.ensureSelectedVisible(pageSize);
+
+    const start = this.scrollOffset;
+    const end = Math.min(this.entries.length, start + pageSize);
+
+    // 4. Draw Entries using smooth text
+    for (let row = 0; row < pageSize; row++) {
+      const idx = start + row;
+      const rowY = y0 + 1 + row;
+
+      if (idx >= end) break;
+
+      const entry = this.entries[idx];
+      const isSelected = idx === this.selected;
+
+      // Reverse video for selection
+      const fg = isSelected ? "#000" : "#fff";
+      const bg = isSelected ? "#fff" : "#000";
+
+      // We use a full-width background for the selection bar
+      const text = entry.text.padEnd(w - 2, " ");
+      display.drawSmoothString(x0 + 1, rowY, text, fg, bg);
+    }
+
+    // 5. Footer/Scroll indicator
+    if (this.entries.length > pageSize) {
+      const hint = `${start + 1}-${end}/${this.entries.length}`;
+      display.drawSmoothString(x0 + w - 1 - (hint.length * 0.6), y0 + h - 1, hint, "#888", "#000");
+    }
+  }
+
+  public onKeyDown(state: GameState, event: KeyboardEvent): boolean {
+    if (this.entries.length === 0) {
+      this.onCancel(state);
+      return true;
+    }
+
+    const key = event.key;
+
+    if (key === "Escape") {
+      this.onCancel(state);
+      return true;
+    }
+
+    if (key === "ArrowUp") {
+      this.selected = (this.selected - 1 + this.entries.length) % this.entries.length;
+      return true;
+    }
+
+    if (key === "ArrowDown") {
+      this.selected = (this.selected + 1) % this.entries.length;
+      return true;
+    }
+
+    // Home/End
+    if (key === "Home") {
+      this.selected = 0;
+      return true;
+    }
+    if (key === "End") {
+      this.selected = this.entries.length - 1;
+      return true;
+    }
+
+    // PageUp/PageDown (move by visible page size)
+    if (key === "PageUp") {
+      this.selected = Math.max(0, this.selected - Math.max(1, this.lastPageSize));
+      return true;
+    }
+    if (key === "PageDown") {
+      this.selected = Math.min(this.entries.length - 1, this.selected + Math.max(1, this.lastPageSize));
+      return true;
+    }
+
+    if (key === "Enter") {
+      const chosen = this.entries[this.selected];
+      this.onConfirm(state, chosen.value);
+      return true;
+    }
+
+    // letter select a-z
+    const lower = key.toLowerCase();
+    if (lower.length === 1 && lower >= "a" && lower <= "z") {
+      const idx = lower.charCodeAt(0) - "a".charCodeAt(0);
+      if (idx >= 0 && idx < this.entries.length) {
+        this.selected = idx;
+      }
+      return true;
+    }
+
+    return true; // modal: consume everything while open
+  }
+}

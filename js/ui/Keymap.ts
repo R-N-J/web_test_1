@@ -25,6 +25,8 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
       return { type: "SAVE_GAME" };
     case "r":
       return { type: "LOAD_GAME" };
+    case "m":
+      return { type: "VIEW_LOG" };
     default:
       return null;
   }
