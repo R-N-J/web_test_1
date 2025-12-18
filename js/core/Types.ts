@@ -2,8 +2,8 @@
  * Represents a point or a displacement in 2D space.
  */
 export interface Point {
-  x: number;
-  y: number;
+  x: number; // Horizontal (Column)
+  y: number; // Vertical (Row)
 }
 
 export type Direction = Point;

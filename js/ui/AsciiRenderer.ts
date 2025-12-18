@@ -1,12 +1,30 @@
+/**
+ * Options for configuring the AsciiRenderer.
+ */
 export interface RendererOptions {
-  width: number;      // Width of grid in CHARACTERS (e.g., 80)
-  height: number;     // Height of grid in CHARACTERS (e.g., 40)
-  tileSize: number;   // Size of one tile in PIXELS (e.g., 20)
-  parent?: HTMLElement; // Where to attach the canvas
-  font?: string;      // Font family (must be monospace)
-  smoothMap?: boolean; // New setting
+  /** Width of the rendering grid in character cells. */
+  width: number;
+  /** Height of the rendering grid in character cells. */
+  height: number;
+  /** Size of a single square tile in logical pixels. */
+  tileSize: number;
+  /** The DOM element where the canvas will be appended. Defaults to document.body. */
+  parent?: HTMLElement;
+  /** The font stack used for rendering. Must be a monospace font for standard grid alignment. */
+  font?: string;
+  /**
+   * If true, text is rendered with proportional spacing (normal kerning) within its cell.
+   * If false, text is strictly centered, creating a chunky fixed-grid aesthetic.
+   */
+  smoothMap?: boolean;
 }
 
+/**
+ * A hardware-accelerated 2D grid renderer using HTML5 Canvas.
+ *
+ * This class handles the conversion from a logical grid (cells) to physical pixels,
+ * accounting for High-DPI (Retina) displays to ensure text remains crisp.
+ */
 export class AsciiRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -30,7 +48,8 @@ export class AsciiRenderer {
   }
 
   /**
-   * Handles High-DPI scaling for crisp text on Retina screens
+   * Internal method to synchronize canvas dimensions with the browser's Device Pixel Ratio (DPR).
+   * Prevents blurriness on high-resolution screens by scaling the internal drawing buffer.
    */
   private resize() {
     const { width, height, tileSize } = this.options;
@@ -54,8 +73,13 @@ export class AsciiRenderer {
   }
 
   /**
-   * Draws a single character at grid coordinates
-   * If bg is null, background is not painted (allows overlay)
+   * Draws a single character at the specified grid coordinates.
+   *
+   * @param x - Grid X-coordinate (column).
+   * @param y - Grid Y-coordinate (row).
+   * @param char - The character glyph to render.
+   * @param fg - Foreground color (CSS color string).
+   * @param bg - Background color. Pass `null` to leave the background transparent (layering).
    */
   //public draw(x: number, y: number, char: string, fg: string, bg: string = "#000") {
   public draw(x: number, y: number, char: string, fg: string, bg: string | null = "#000") {
@@ -78,6 +102,7 @@ export class AsciiRenderer {
     this.ctx.fillStyle = fg;
 
     // 3. Draw Character
+    // x is pixels from left, y is pixels from top.
     if (this.options.smoothMap) {
       // SMOOTH MODE: Normal kerning, left-aligned in the tile
       this.ctx.textAlign = "left";
@@ -114,7 +139,8 @@ export class AsciiRenderer {
 
 
   /**
-   * Clears the entire screen
+   * Clears the entire canvas and resets the coordinate transform.
+   * Resets the viewport to (0,0) before clearing to ensure total coverage.
    */
   public clear() {
     const { width, height, tileSize } = this.options;
@@ -133,7 +159,11 @@ export class AsciiRenderer {
   }
 
   /**
-   * Applies a global pixel offset for effects like screen shake.
+   * Shifts the entire rendering context by a specific pixel amount.
+   * Useful for global juice effects like screen shake.
+   *
+   * @param x - Horizontal offset in pixels.
+   * @param y - Vertical offset in pixels.
    */
   public setOffset(x: number, y: number): void {
     const dpr = window.devicePixelRatio || 1;
@@ -191,9 +221,10 @@ export class AsciiRenderer {
   }
 
 
+
   /**
-   * Draws a smooth string (proportional spacing) with a background rectangle.
-   * x, y are still grid coordinates for placement, but text renders normally.
+   * Draws a string using proportional font spacing regardless of the `smoothMap` setting.
+   * Best used for UI elements, labels, and modal windows.
    */
   public drawSmoothString(x: number, y: number, text: string, fg: string, bg: string | null = "#000"): void {
     const ts = this.options.tileSize;
@@ -216,8 +247,8 @@ export class AsciiRenderer {
   }
 
   /**
-   * Draws a box using actual lines/rectangles instead of ASCII characters
-   * for a smoother "window" look.
+   * Draws an outlined box using geometric primitives instead of ASCII characters.
+   * Provides a "modern" UI look compared to standard ASCII border characters.
    */
   public drawSmoothBox(x: number, y: number, w: number, h: number, fg: string, bg: string = "#000"): void {
     const ts = this.options.tileSize;
