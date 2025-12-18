@@ -139,6 +139,7 @@ function spawnMonsters(map: DungeonMap, count: number): Entity[] {
       damage: 3,
       defenseBase: 0,
       defense: 0,
+      corpseDropChance: 1.0,
     });
   }
 

@@ -7,7 +7,7 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
 
   display.clear();
 
-  // Draw map (only within map height; UI lives below)
+  // 1. Map Tiles (Floor & Walls)
   for (let y = 0; y < state.map.height; y++) {
     for (let x = 0; x < state.map.width; x++) {
       const tile = state.map.get(x, y);
@@ -17,8 +17,11 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
       let fg = "#333";
       let bg = "#111";
 
+      // Draw standard tiles
       if (tile.type === "WALL") char = "#";
       if (tile.type === "FLOOR") char = ".";
+
+      // Feature tiles (Stairs/Doors) - we draw them here so items can overlap them
       if (tile.type === "STAIRS_DOWN") char = ">";
       if (tile.type === "STAIRS_UP") char = "<";
       if (tile.type === "DOOR_CLOSED") char = "+";
@@ -35,29 +38,29 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
     }
   }
 
-  // Items
+  // 2. Items & Corpses (Static objects on floor)
   for (const item of state.itemsOnMap) {
     if (state.map.get(item.x, item.y)?.isVisible) {
       display.draw(item.x, item.y, item.symbol, item.color);
     }
   }
 
-  // Monsters
+  // 3. Monsters (Active entities)
   for (const m of state.monsters) {
     if (m.hp > 0 && state.map.get(m.x, m.y)?.isVisible) {
       display.draw(m.x, m.y, m.symbol, m.color);
     }
   }
 
-  // Projectiles (overlay, no background)
+  // 4. Projectiles (Visual effects)
   for (const p of state.projectiles) {
     display.draw(p.x, p.y, p.char, p.color, null);
   }
 
-  // Player
+  // 5. Player (Top of the world)
   display.draw(state.player.x, state.player.y, state.player.symbol, state.player.color);
 
-  // UI (log + status)
+  // 6. UI Bars (Screen Space)
   const statusRow = state.height - 1;
   const logStartRow = statusRow - state.log.DISPLAY_LINES;
 
@@ -74,9 +77,9 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
     "black"
   );
 
-  // ---- Modal UI overlays (stack) ----
+  // 7. Overlays (Modal menus)
   for (const overlay of state.uiStack) {
     overlay.render(state, display);
   }
-
 }
+
