@@ -1,4 +1,4 @@
-export type Direction = { x: number; y: number };
+import type { Direction } from "./Types";
 
 export type Action =
   | { type: 'MOVE'; delta: Direction }

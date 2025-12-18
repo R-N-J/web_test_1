@@ -28,7 +28,8 @@ export function runMonsterTurn(state: GameState): void {
 
       if (path && path.length > 0) {
         const nextStep = path[0];
-        tryMoveEntity(monster, state.map, nextStep.x - monster.x, nextStep.y - monster.y);
+        // Pass the whole state as the context
+        tryMoveEntity(monster, state, nextStep.x - monster.x, nextStep.y - monster.y);
       } else {
         state.log.addMessage(`${monster.name} seems confused.`, "gray");
       }
@@ -42,7 +43,8 @@ export function runMonsterTurn(state: GameState): void {
       { x: 0, y: 1 }, { x: 0, y: -1 },
     ];
     const d = dirs[Math.floor(Math.random() * dirs.length)];
-    tryMoveEntity(monster, state.map, d.x, d.y);
+    // Pass the whole state as the context
+    tryMoveEntity(monster, state, d.x, d.y);
   }
 
   state.monsters = state.monsters.filter(m => m.hp > 0);

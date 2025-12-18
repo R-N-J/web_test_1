@@ -1,4 +1,5 @@
-import type { Action, Direction } from "./Actions";
+import type { Action } from "./Actions";
+import type { Direction } from "./Types";
 import type { GameState } from "./GameState";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
 import type { CONFIG } from "./Config";

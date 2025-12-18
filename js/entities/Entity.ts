@@ -28,16 +28,44 @@ interface GameMap {
   get(x: number, y: number): TileState | undefined;
 }
 
-export function tryMoveEntity(entity: Entity, map: GameMap, dx: number, dy: number): boolean {
+// Define a minimal interface for what tryMove needs to know about the world
+interface MoveContext {
+  map: { get(x: number, y: number): TileState | undefined };
+  monsters: Entity[];
+  player: Entity;
+}
+
+export function tryMoveEntity(entity: Entity, context: MoveContext, dx: number, dy: number): boolean {
   const newX = entity.x + dx;
   const newY = entity.y + dy;
 
-  // Check bounds and if the tile is a floor
-  const tile = map.get(newX, newY);
-  if (tile && tile.type === 'FLOOR') {
-    entity.x = newX;
-    entity.y = newY;
-    return true;
+  // 1. Check map bounds and tile type
+  const tile = context.map.get(newX, newY);
+  if (!tile || tile.blocksMovement) {
+    return false;
   }
-  return false;
+
+  // 2. Check if the player is there (if this entity isn't the player)
+  if (entity.id !== context.player.id) {
+    if (newX === context.player.x && newY === context.player.y) {
+      return false; // Monsters can't walk into the player (they should attack instead)
+    }
+  }
+
+  // 3. Check if any OTHER living monster is there
+  const isOccupied = context.monsters.some(m =>
+    m.hp > 0 &&
+    m.id !== entity.id &&
+    m.x === newX &&
+    m.y === newY
+  );
+
+  if (isOccupied) {
+    return false;
+  }
+
+  // Success!
+  entity.x = newX;
+  entity.y = newY;
+  return true;
 }

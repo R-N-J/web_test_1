@@ -1,4 +1,4 @@
-export type Direction = { x: number; y: number };
+import type { Direction } from "../core/Types";
 
 export class InputHandler {
   private readonly down = new Set<string>();

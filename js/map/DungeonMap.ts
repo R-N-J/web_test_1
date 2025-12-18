@@ -1,3 +1,5 @@
+import { CARDINAL_DIRECTIONS } from "../core/Types";
+
 // Define what a Tile is
 export type TileType =
   | 'WALL'
@@ -46,14 +48,6 @@ export class DungeonMap {
 }
 
 
-// Define the Directions a Walker can move
-const DIRECTIONS: { x: number; y: number }[] = [
-  { x: 0, y: -1 }, // North
-  { x: 0, y: 1 },  // South
-  { x: -1, y: 0 }, // West
-  { x: 1, y: 0 },  // East
-];
-
 export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.45): void {
   // RESET MAP FIRST (prevents floors accumulating across levels and freezing the while-loop)
   for (let y = 0; y < map.height; y++) {
@@ -82,7 +76,7 @@ export function generateRandomWalk(map: DungeonMap, floorPercentage: number = 0.
 
   while (carvedFloors < targetFloors) {
     // 1. Choose a random direction
-    const direction = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
+    const direction = CARDINAL_DIRECTIONS[Math.floor(Math.random() * CARDINAL_DIRECTIONS.length)];
 
     // 2. Calculate the potential new position
     const nextX = walkerX + direction.x;
