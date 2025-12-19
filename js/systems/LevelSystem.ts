@@ -2,7 +2,7 @@ import { DungeonMap, generateRandomWalk, findStartingFloorTile } from "../map/Du
 import type { Entity } from "../entities/Entity";
 import type { Item, Inventory } from "../items/Item";
 import { createId } from "../utils/id";
-
+import { getAdjacent4 } from "../utils/geometry";
 
 export function createFreshLevel(params: {
   width: number;
@@ -91,11 +91,8 @@ export function placeLevelFeatures(map: DungeonMap, level: number): void {
         const tile = map.get(x, y);
         if (tile?.type !== "WALL") continue;
 
-        const adjacentToFloor =
-          map.get(x + 1, y)?.type === "FLOOR" ||
-          map.get(x - 1, y)?.type === "FLOOR" ||
-          map.get(x, y + 1)?.type === "FLOOR" ||
-          map.get(x, y - 1)?.type === "FLOOR";
+        const neighbors = getAdjacent4(x, y);
+        const adjacentToFloor = neighbors.some(n => map.get(n.x, n.y)?.type === "FLOOR");
 
         if (adjacentToFloor) wallTiles.push({ x, y });
       }

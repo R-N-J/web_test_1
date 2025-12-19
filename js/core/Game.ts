@@ -1,5 +1,6 @@
 import type { Action } from "./Actions";
 import type { Direction } from "./Types";
+import { getAdjacent8 } from "../utils/geometry";
 import type { GameState } from "./GameState";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
 import type { CONFIG } from "./Config";
@@ -134,17 +135,21 @@ export class Game {
       case "OPEN_INVENTORY":
         return this.openInventoryMenu();
       case "TOGGLE_AUTO_PICKUP":
-        this.state.autoPickup = !this.state.autoPickup;
-        this.state.log.addMessage(
-          `Auto-pickup is now ${this.state.autoPickup ? "ON" : "OFF"}.`,
-          "orange"
-        );
-        return false; // Toggling settings shouldn't cost a turn
-
-      default:
+        return this.toggleAutoPickup();
+       default:
         return false;
     }
   }
+
+  private toggleAutoPickup(): boolean {
+    this.state.autoPickup = !this.state.autoPickup;
+    this.state.log.addMessage(
+      `Auto-pickup is now ${this.state.autoPickup ? "ON" : "OFF"}.`,
+      "orange"
+    );
+    return false; // Toggling settings does not cost a turn
+  }
+
 
   private saveCurrentLevelSnapshot(): void {
     const s = this.state;
@@ -157,12 +162,7 @@ export class Game {
 
   private adjacent8(): Array<{ x: number; y: number }> {
     const { x, y } = this.state.player;
-    return [
-      { x, y: y - 1 }, { x, y: y + 1 },
-      { x: x - 1, y }, { x: x + 1, y },
-      { x: x - 1, y: y - 1 }, { x: x + 1, y: y - 1 },
-      { x: x - 1, y: y + 1 }, { x: x + 1, y: y + 1 },
-    ];
+    return getAdjacent8(x, y);
   }
 
   //Return true if the player attacks a monster or moves to a valid tile
