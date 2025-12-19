@@ -1,8 +1,9 @@
-import type { DungeonMap } from "../map/DungeonMap";
+import type { DungeonMap, TileState } from "../map/DungeonMap";
 import type { Entity } from "../entities/Entity";
-import type { Item, Inventory } from "../items/Item";
+import type { Item, Inventory, InventoryItem, EquippableSlot } from "../items/Item";
 import type { MessageLog } from "./MessageLog";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
+
 
 export interface Projectile {
   x: number;
@@ -42,5 +43,28 @@ export interface GameState {
   uiStack: UiOverlay[];
   screenShake: { x: number, y: number }; // Pixel offset for juice effects
   autoPickup: boolean; // Toggle for automatic item collection
+}
 
+/**
+ * Represents a frozen state of a single dungeon level.
+ */
+export interface LevelSnapshot {
+  mapData: TileState[][];
+  monsters: Entity[];
+  itemsOnMap: Item[];
+}
+
+/**
+ * The root object for a complete game save file.
+ */
+export interface SaveData {
+  version: number;
+  currentLevel: number;
+  player: Entity;
+  inventory: {
+    items: InventoryItem[];
+    equipment: Partial<Record<EquippableSlot, InventoryItem>>;
+  };
+  log: Array<{ text: string, color: string }>;
+  levels: Record<string, LevelSnapshot>;
 }

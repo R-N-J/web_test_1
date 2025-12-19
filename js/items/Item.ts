@@ -161,4 +161,15 @@ export class Inventory {
             return total + (this.equipment[slot]?.defenseBonus ?? 0);
         }, 0);
     }
+
+  /**
+   * Reconstructs an inventory from saved data.
+   */
+  public static fromSnapshot(log: MessageLog, snapshot: { items: InventoryItem[], equipment: Partial<Record<EquippableSlot, InventoryItem>> }): Inventory {
+    const inventory = new Inventory(log);
+    inventory.items = snapshot.items;
+    inventory.equipment = snapshot.equipment;
+    return inventory;
+  }
+
 }

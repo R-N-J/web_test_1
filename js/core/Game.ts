@@ -1,6 +1,5 @@
 import type { Action } from "./Actions";
 import type { Direction } from "./Types";
-import { getAdjacent8 } from "../utils/geometry";
 import type { GameState } from "./GameState";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
 import type { CONFIG } from "./Config";
@@ -13,29 +12,33 @@ import { renderGame } from "../systems/RenderSystem";
 import { getLine } from "../systems/visibility";
 import {
   buildSaveData,
-  hydrateInventory,
-  hydrateLevel,
   loadFromLocalStorage,
   saveToLocalStorage
 } from "../systems/save";
+import { DungeonMap } from "../map/DungeonMap";
 import {createId} from "../utils/id";
 import { PickListOverlay } from "../ui/overlays/PickListOverlay";
 import { MessageLogOverlay } from "../ui/overlays/MessageLogOverlay";
 import { GameOverOverlay } from "../ui/overlays/GameOverOverlay";
+import { InventoryHandler } from "../ui/InventoryHandler";
 import { InventoryOverlay } from "../ui/overlays/InventoryOverlay";
+import { getAdjacent8, findNearestValidPlacement } from "../utils/geometry";
 
 export class Game {
   public state!: GameState;
   private isAnimating = false;
   private lastSaveTime = 0;
   private readonly SAVE_DEBOUNCE_MS = 1000; // 1 second debounce. prevent the player from spamming the save function
+  private inventoryHandler: InventoryHandler;
 
   private levels: Record<string, { mapData: GameState["map"]["mapData"]; monsters: GameState["monsters"]; itemsOnMap: GameState["itemsOnMap"] }> = {};
 
   constructor(
     private display: AsciiRenderer,
     private config: typeof CONFIG
-  ) {}
+  ) {
+    this.inventoryHandler = new InventoryHandler(this);
+  }
 
   public startNewGame(): void {
     const log = new MessageLog();
@@ -113,11 +116,19 @@ export class Game {
         this.state.log.addMessage("You wait.", "gray");
         return true;
       case "EQUIP":
-        return this.tryEquip();
+        return this.inventoryHandler.openMain(
+          it => it.slot !== "consumable" && it.slot !== "none",
+          "Equip Item"
+        );
       case "USE_CONSUMABLE":
-        //return this.tryUseConsumable();
-        return this.openInventoryMenu();
-      case "OPEN_DOOR":
+        return this.inventoryHandler.openMain(
+          it => it.slot === "consumable",
+          "Use Consumable"
+        );
+      case "OPEN_INVENTORY":
+        return this.inventoryHandler.openMain();
+        //    return this.openInventoryMenu();
+     case "OPEN_DOOR":
         return this.tryToggleDoor("OPEN");
       case "CLOSE_DOOR":
         return this.tryToggleDoor("CLOSE");
@@ -132,8 +143,6 @@ export class Game {
       case "VIEW_LOG":
         this.pushUi(new MessageLogOverlay());
         return false;
-      case "OPEN_INVENTORY":
-        return this.openInventoryMenu();
       case "TOGGLE_AUTO_PICKUP":
         return this.toggleAutoPickup();
        default:
@@ -288,10 +297,9 @@ export class Game {
 
     const cached = this.levels[String(nextLevel)];
     if (cached) {
-      const hydrated = hydrateLevel(this.config.WIDTH, this.config.MAP_HEIGHT, cached);
-      s.map = hydrated.map;
-      s.monsters = hydrated.monsters;
-      s.itemsOnMap = hydrated.itemsOnMap;
+      s.map = DungeonMap.fromSnapshot(this.config.WIDTH, this.config.MAP_HEIGHT, cached.mapData);
+      s.monsters = cached.monsters;
+      s.itemsOnMap = cached.itemsOnMap;
     } else {
       const fresh = createFreshLevel({
         width: this.config.WIDTH,
@@ -331,14 +339,15 @@ export class Game {
       return;
     }
 
-    const hydrated = hydrateLevel(this.config.WIDTH, this.config.MAP_HEIGHT, cached);
-    s.map = hydrated.map;
-    s.monsters = hydrated.monsters;
-    s.itemsOnMap = hydrated.itemsOnMap;
+    // Use the new class-based hydration
+    s.map = DungeonMap.fromSnapshot(this.config.WIDTH, this.config.MAP_HEIGHT, cached.mapData);
+    s.monsters = cached.monsters;
+    s.itemsOnMap = cached.itemsOnMap;
 
     // Place player at STAIRS_DOWN when returning upward.
     this.placePlayerOnTileOrFloor("STAIRS_DOWN");
   }
+// ... existing code ...
 
   private placePlayerOnTileOrFloor(type: "STAIRS_UP" | "STAIRS_DOWN"): void {
     const s = this.state;
@@ -379,16 +388,17 @@ export class Game {
   }
 
   private loadGame(): void {
-      const loaded = loadFromLocalStorage();
-      if (!loaded) {
+    const loaded = loadFromLocalStorage();
+    if (!loaded) {
       this.state.log.addMessage("No save found.", "gray");
       return;
     }
 
-    const log = this.state.log; // keep current log instance
-    log.setHistory(loaded.log || []); // Restore history from save
+    const log = this.state.log;
+    log.setHistory(loaded.log || []);
 
-    const inventory = hydrateInventory(log, loaded.inventory);
+    // Use the new class-based hydration
+    const inventory = Inventory.fromSnapshot(log, loaded.inventory);
 
     this.levels = loaded.levels;
     const current = this.levels[String(loaded.currentLevel)];
@@ -397,14 +407,13 @@ export class Game {
       return;
     }
 
-    const hydrated = hydrateLevel(this.config.WIDTH, this.config.MAP_HEIGHT, current);
-
+    // Hydrate level components
     this.state.currentLevel = loaded.currentLevel;
     this.state.player = loaded.player;
     this.state.inventory = inventory;
-    this.state.map = hydrated.map;
-    this.state.monsters = hydrated.monsters;
-    this.state.itemsOnMap = hydrated.itemsOnMap;
+    this.state.map = DungeonMap.fromSnapshot(this.config.WIDTH, this.config.MAP_HEIGHT, current.mapData);
+    this.state.monsters = current.monsters;
+    this.state.itemsOnMap = current.itemsOnMap;
 
     this.state.log.addMessage("Game loaded.", "green");
   }
@@ -516,10 +525,19 @@ export class Game {
 
     const s = this.state;
 
+    // Find a valid spot near the monster that isn't stairs or a wall
+    const placement = findNearestValidPlacement(monster.x, monster.y, (x, y) => {
+      const tile = s.map.get(x, y);
+      if (!tile || tile.type === "WALL") return false;
+      // Don't cover stairs
+      if (tile.type === "STAIRS_UP" || tile.type === "STAIRS_DOWN") return false;
+      return true;
+    });
+
     const corpse: Item = {
       id: createId('corpse'),
-      x: monster.x,
-      y: monster.y,
+      x: placement.x,
+      y: placement.y,
       symbol: "%",
       color: "#aa8866",
       name: `${monster.name} corpse`,
@@ -531,13 +549,6 @@ export class Game {
 
     s.itemsOnMap.push(corpse);
     s.log.addMessage(`The ${monster.name} drops its corpse.`, "gray");
-  }
-
-  public handleUiKey(event: KeyboardEvent): boolean {
-    const s = this.state;
-    const top = s.uiStack[s.uiStack.length - 1];
-    if (!top) return false;
-    return top.onKeyDown(s, event);
   }
 
   private openEquipMenu(): boolean {
@@ -617,11 +628,18 @@ export class Game {
     return true;
   }
 
-  private pushUi(overlay: import("./GameState").UiOverlay): void {
+  public handleUiKey(event: KeyboardEvent): boolean {
+    const s = this.state;
+    const top = s.uiStack[s.uiStack.length - 1];
+    if (!top) return false;
+    return top.onKeyDown(s, event);
+  }
+
+  public pushUi(overlay: import("./GameState").UiOverlay): void {
     this.state.uiStack.push(overlay);
   }
 
-  private popUi(): void {
+  public popUi(): void {
     this.state.uiStack.pop();
   }
 
@@ -639,10 +657,10 @@ export class Game {
         "Inventory",
         entries,
         (state, item) => {
-          this.popUi(); // Close list
-          this.openItemActionMenu(item); // Open actions for this item
+          this.popUi(); // Remove the item list
+          this.openItemActionMenu(item); // Open the actions for that item
         },
-        () => this.popUi()
+        () => this.popUi() // Just remove the list on cancel (Escape)
       )
     );
     return false;
@@ -662,8 +680,9 @@ export class Game {
         `${item.name}`,
         actions,
         (state, action) => {
-          this.popUi(); // Close action menu
+          this.popUi(); // Remove the action menu
           if (action === "USE") {
+
             state.inventory.useConsumable(item.id, state.player);
             // Taking an action ends the turn
             void this.handleAction({ type: "WAIT" });
@@ -683,7 +702,10 @@ export class Game {
           }
           this.render();
         },
-        () => this.openInventoryMenu() // Go back to list on cancel
+        () => {
+          this.popUi(); // Remove the action menu
+          this.openInventoryMenu(); // Return to the item list
+        }
       )
     );
   }

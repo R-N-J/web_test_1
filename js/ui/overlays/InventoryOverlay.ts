@@ -1,30 +1,19 @@
-import type { UiOverlay, GameState } from "../../core/GameState";
-import type { AsciiRenderer } from "../AsciiRenderer";
+import type { GameState } from "../../core/GameState";
 import type { InventoryItem } from "../../items/Item";
 
 /**
- * Utility class for inventory-related UI logic.
- * The actual rendering is handled by PickListOverlay, while this class
- * provides static helpers to format the inventory data.
+ * Utility for formatting inventory data for UI display.
  */
-export class InventoryOverlay implements UiOverlay {
-  public readonly kind = "INVENTORY";
-
-  public render(state: GameState, display: AsciiRenderer): void {
-    // Logic delegated to PickListOverlay in Game.ts
-  }
-
-  public onKeyDown(state: GameState, event: KeyboardEvent): boolean {
-    return false;
-  }
-
+export class InventoryOverlay {
   /**
-   * Helper to build the list of inventory items for PickListOverlay.
-   * Formats each item with its corresponding 'a-z' label and slot information.
+   * Builds an array of PickList entries from the current inventory state,
+   * optionally filtered by a predicate function.
    */
-  public static getEntryList(state: GameState) {
+  public static getEntryList(state: GameState, filter?: (item: InventoryItem) => boolean) {
     const letters = "abcdefghijklmnopqrstuvwxyz";
-    return state.inventory.items.map((it: InventoryItem, i: number) => ({
+    const items = filter ? state.inventory.items.filter(filter) : state.inventory.items;
+
+    return items.map((it: InventoryItem, i: number) => ({
       label: letters[i],
       text: `${letters[i]}) ${it.name} ${it.slot === 'consumable' ? '(use)' : '(' + it.slot + ')'}`,
       value: it

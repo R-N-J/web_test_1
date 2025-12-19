@@ -27,3 +27,25 @@ export function getAdjacent4(x: number, y: number): Array<{ x: number; y: number
     { x: x - 1, y }, { x: x + 1, y }  // W, E
   ];
 }
+
+/**
+ * Finds the nearest valid floor tile that isn't a restricted type (like stairs).
+ * Useful for dropping corpses or spawning items so they don't overlap important features.
+ */
+export function findNearestValidPlacement(
+  startX: number,
+  startY: number,
+  isTileValid: (x: number, y: number) => boolean
+): { x: number, y: number } {
+  // If the current tile is valid, stay here.
+  if (isTileValid(startX, startY)) return { x: startX, y: startY };
+
+  // Check 8-way neighbors
+  const neighbors = getAdjacent8(startX, startY);
+  for (const n of neighbors) {
+    if (isTileValid(n.x, n.y)) return n;
+  }
+
+  // Fallback to original position if no neighbor is found (unlikely in a dungeon)
+  return { x: startX, y: startY };
+}

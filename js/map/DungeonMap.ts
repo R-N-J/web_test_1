@@ -45,6 +45,15 @@ export class DungeonMap {
       this.mapData[y][x] = tile;
     }
   }
+
+  /**
+   * Creates a new DungeonMap instance from a saved data snapshot.
+   */
+  public static fromSnapshot(width: number, height: number, mapData: TileState[][]): DungeonMap {
+    const map = new DungeonMap(width, height);
+    map.mapData = mapData;
+    return map;
+  }
 }
 
 
