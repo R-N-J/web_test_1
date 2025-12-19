@@ -11,4 +11,5 @@ export type Action =
   | { type: "SAVE_GAME" }
   | { type: "LOAD_GAME" }
   | { type: "VIEW_LOG" }
-  | { type: "OPEN_INVENTORY" };
+  | { type: "OPEN_INVENTORY" }
+  | { type: "TOGGLE_AUTO_PICKUP" };

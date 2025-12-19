@@ -41,4 +41,6 @@ export interface GameState {
   projectiles: Projectile[]; // transient render-layer
   uiStack: UiOverlay[];
   screenShake: { x: number, y: number }; // Pixel offset for juice effects
+  autoPickup: boolean; // Toggle for automatic item collection
+
 }

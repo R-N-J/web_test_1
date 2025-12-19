@@ -29,6 +29,8 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
       return { type: "VIEW_LOG" };
     case "i":
       return { type: "OPEN_INVENTORY" };
+    case "@":
+      return { type: "TOGGLE_AUTO_PICKUP" };
     default:
       return null;
   }

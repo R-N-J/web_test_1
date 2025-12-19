@@ -67,6 +67,7 @@ export class Game {
       projectiles: [],
       uiStack: [],
       screenShake: { x: 0, y: 0 },
+      autoPickup: true, // Default to ON
     };
 
     this.saveCurrentLevelSnapshot();
@@ -132,6 +133,14 @@ export class Game {
         return false;
       case "OPEN_INVENTORY":
         return this.openInventoryMenu();
+      case "TOGGLE_AUTO_PICKUP":
+        this.state.autoPickup = !this.state.autoPickup;
+        this.state.log.addMessage(
+          `Auto-pickup is now ${this.state.autoPickup ? "ON" : "OFF"}.`,
+          "orange"
+        );
+        return false; // Toggling settings shouldn't cost a turn
+
       default:
         return false;
     }
@@ -182,18 +191,20 @@ export class Game {
       s.player.x = nx;
       s.player.y = ny;
 
-      const itemIndex = s.itemsOnMap.findIndex(it => it.x === nx && it.y === ny);
-      if (itemIndex >= 0) {
-        const item = s.itemsOnMap[itemIndex];
+      if (s.autoPickup) {
+        const itemIndex = s.itemsOnMap.findIndex(it => it.x === nx && it.y === ny);
+        if (itemIndex >= 0) {
+          const item = s.itemsOnMap[itemIndex];
 
-        // Don't auto-pickup corpses (or any "slot: none" map decoration items).
-        if (item.slot !== "none") {
-          // Check if pickup was successful before removing from map
-          const countBefore = s.inventory.items.length;
-          s.inventory.addItem(item);
+          // Don't auto-pickup corpses (or any "slot: none" map decoration items).
+          if (item.slot !== "none") {
+            // Check if pickup was successful before removing from map
+            const countBefore = s.inventory.items.length;
+            s.inventory.addItem(item);
 
-          if (s.inventory.items.length > countBefore) {
-            s.itemsOnMap.splice(itemIndex, 1);
+            if (s.inventory.items.length > countBefore) {
+              s.itemsOnMap.splice(itemIndex, 1);
+            }
           }
         }
       }
