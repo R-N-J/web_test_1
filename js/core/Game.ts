@@ -3,7 +3,7 @@ import type { Direction } from "./Types";
 import type { GameState } from "./GameState";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
 import type { CONFIG } from "./Config";
-import { Inventory,type Item } from "../items/Item";
+import { Inventory,type Item, type InventoryItem } from "../items/Item";
 import type { Entity } from "../entities/Entity";
 import { MessageLog } from "./MessageLog";
 import { createFreshLevel } from "../systems/LevelSystem";
@@ -21,6 +21,7 @@ import {createId} from "../utils/id";
 import { PickListOverlay } from "../ui/overlays/PickListOverlay";
 import { MessageLogOverlay } from "../ui/overlays/MessageLogOverlay";
 import { GameOverOverlay } from "../ui/overlays/GameOverOverlay";
+import { InventoryOverlay } from "../ui/overlays/InventoryOverlay";
 
 export class Game {
   public state!: GameState;
@@ -112,7 +113,8 @@ export class Game {
       case "EQUIP":
         return this.tryEquip();
       case "USE_CONSUMABLE":
-        return this.tryUseConsumable();
+        //return this.tryUseConsumable();
+        return this.openInventoryMenu();
       case "OPEN_DOOR":
         return this.tryToggleDoor("OPEN");
       case "CLOSE_DOOR":
@@ -128,6 +130,8 @@ export class Game {
       case "VIEW_LOG":
         this.pushUi(new MessageLogOverlay());
         return false;
+      case "OPEN_INVENTORY":
+        return this.openInventoryMenu();
       default:
         return false;
     }
@@ -184,8 +188,13 @@ export class Game {
 
         // Don't auto-pickup corpses (or any "slot: none" map decoration items).
         if (item.slot !== "none") {
+          // Check if pickup was successful before removing from map
+          const countBefore = s.inventory.items.length;
           s.inventory.addItem(item);
-          s.itemsOnMap.splice(itemIndex, 1);
+
+          if (s.inventory.items.length > countBefore) {
+            s.itemsOnMap.splice(itemIndex, 1);
+          }
         }
       }
       return true;
@@ -603,6 +612,69 @@ export class Game {
 
   private popUi(): void {
     this.state.uiStack.pop();
+  }
+
+  private openInventoryMenu(): boolean {
+    const s = this.state;
+    if (s.inventory.items.length === 0) {
+      s.log.addMessage("Your inventory is empty.", "gray");
+      return false;
+    }
+
+    const entries = InventoryOverlay.getEntryList(s);
+
+    this.pushUi(
+      new PickListOverlay<InventoryItem>(
+        "Inventory",
+        entries,
+        (state, item) => {
+          this.popUi(); // Close list
+          this.openItemActionMenu(item); // Open actions for this item
+        },
+        () => this.popUi()
+      )
+    );
+    return false;
+  }
+
+  private openItemActionMenu(item: InventoryItem): void {
+    const actions = [];
+    if (item.slot === "consumable") {
+      actions.push({ label: "u", text: "u) Use", value: "USE" });
+    } else {
+      actions.push({ label: "e", text: "e) Equip", value: "EQUIP" });
+    }
+    actions.push({ label: "d", text: "d) Drop", value: "DROP" });
+
+    this.pushUi(
+      new PickListOverlay<string>(
+        `${item.name}`,
+        actions,
+        (state, action) => {
+          this.popUi(); // Close action menu
+          if (action === "USE") {
+            state.inventory.useConsumable(item.id, state.player);
+            // Taking an action ends the turn
+            void this.handleAction({ type: "WAIT" });
+          } else if (action === "EQUIP") {
+            state.inventory.equipItem(item.id, state.player);
+            state.player.damage = state.player.damageBase + state.inventory.getAttackBonus();
+            state.player.defense = state.player.defenseBase + state.inventory.getDefenseBonus();
+          } else if (action === "DROP") {
+            const dropped = state.inventory.dropItem(item.id);
+            if (dropped) {
+              state.itemsOnMap.push({
+                ...dropped,
+                x: state.player.x,
+                y: state.player.y
+              });
+            }
+          }
+          this.render();
+        },
+        () => this.openInventoryMenu() // Go back to list on cancel
+      )
+    );
   }
 
 

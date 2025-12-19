@@ -10,4 +10,5 @@ export type Action =
   | { type: "FIRE_ARROW" }
   | { type: "SAVE_GAME" }
   | { type: "LOAD_GAME" }
-  | { type: "VIEW_LOG" };
+  | { type: "VIEW_LOG" }
+  | { type: "OPEN_INVENTORY" };

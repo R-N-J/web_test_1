@@ -2,21 +2,21 @@
  * Options for configuring the AsciiRenderer.
  */
 export interface RendererOptions {
-  /** Width of the rendering grid in character cells. */
-  width: number;
-  /** Height of the rendering grid in character cells. */
-  height: number;
-  /** Size of a single square tile in logical pixels. */
-  tileSize: number;
-  /** The DOM element where the canvas will be appended. Defaults to document.body. */
-  parent?: HTMLElement;
   /** The font stack used for rendering. Must be a monospace font for standard grid alignment. */
   font?: string;
+  /** Height of the rendering grid in character cells. */
+  height: number;
+  /** The DOM element where the canvas will be appended. Defaults to document.body. */
+  parent?: HTMLElement;
   /**
    * If true, text is rendered with proportional spacing (normal kerning) within its cell.
    * If false, text is strictly centered, creating a chunky fixed-grid aesthetic.
    */
   smoothMap?: boolean;
+  /** Size of a single square tile in logical pixels. */
+  tileSize: number;
+  /** Width of the rendering grid in character cells. */
+  width: number;
 }
 
 /**
@@ -26,9 +26,9 @@ export interface RendererOptions {
  * accounting for High-DPI (Retina) displays to ensure text remains crisp.
  */
 export class AsciiRenderer {
-  private canvas: HTMLCanvasElement;
+  private readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private options: RendererOptions;
+  private readonly options: RendererOptions;
 
   constructor(options: RendererOptions) {
     this.options = {

@@ -32,8 +32,9 @@ export type EquippableSlot = Exclude<EquipmentSlot, 'consumable' | 'none'>;
 
 export class Inventory {
     private readonly messageLog: MessageLog;
+    public static readonly CAPACITY = 26; // Limit to 'a'-'z' labels
 
-    private static readonly DEFENSE_SLOTS: Array<
+  private static readonly DEFENSE_SLOTS: Array<
       Extract<EquippableSlot, "head" | "chest" | "legs" | "feet">
     > = ["head", "chest", "legs", "feet"];
 
@@ -63,6 +64,12 @@ export class Inventory {
     // Defensive: never allow map-decoration items into inventory.
     if (item.slot === "none") {
       this.log(`You can't pick up ${item.name}.`, "gray");
+      return;
+    }
+
+    // Check capacity limit
+    if (this.items.length >= Inventory.CAPACITY) {
+      this.log(`Your inventory is full! (Max ${Inventory.CAPACITY} items)`, "orange");
       return;
     }
 
@@ -134,6 +141,16 @@ export class Inventory {
 
       this.items.splice(itemIndex, 1);
     }
+
+  dropItem(itemId: string): InventoryItem | null {
+    const index = this.items.findIndex(i => i.id === itemId);
+    if (index === -1) return null;
+
+    const item = this.items.splice(index, 1)[0];
+    this.log(`Dropped ${item.name}.`, "gray");
+    return item;
+  }
+
 
     getAttackBonus(): number {
         return this.equipment.weapon?.attackBonus ?? 0;

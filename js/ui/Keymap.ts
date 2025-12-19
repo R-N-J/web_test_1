@@ -27,6 +27,8 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
       return { type: "LOAD_GAME" };
     case "m":
       return { type: "VIEW_LOG" };
+    case "i":
+      return { type: "OPEN_INVENTORY" };
     default:
       return null;
   }
