@@ -14,7 +14,7 @@ export class GameOverOverlay implements UiOverlay {
     display.drawSmoothBox(x0, y0, w, h, COLOR.RED, COLOR.BLACK);
     display.drawSmoothString(x0 + 7, y0 + 2, " YOU HAVE DIED ", COLOR.RED, COLOR.BLACK);
     display.drawSmoothString(x0 + 4, y0 + 4, "The dungeon claims another soul.", COLOR.GRAY, COLOR.BLACK);
-    display.drawSmoothString(x0 + 5, y0 + 6, " Press Space to Restart ", COLOR.WHITE, COLOR.ONYX);
+    display.drawSmoothString(x0 + 5, y0 + 6, " Press Space to Restart ", COLOR.WHITE, COLOR.DEEP_GRAY);
   }
 
   public onKeyDown(state: GameState, event: KeyboardEvent): boolean {
