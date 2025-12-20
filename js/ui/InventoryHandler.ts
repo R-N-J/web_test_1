@@ -2,6 +2,7 @@ import { Game } from "../core/Game";
 import { PickListOverlay } from "./overlays/PickListOverlay";
 import { InventoryOverlay } from "./overlays/InventoryOverlay";
 import { InventoryItem } from "../items/Item";
+import { ActionType } from "../core/Actions";
 
 export class InventoryHandler {
   constructor(private game: Game) {}
@@ -67,15 +68,15 @@ export class InventoryHandler {
    */
   private processAction(item: InventoryItem, action: string) {
     const s = this.game.state;
-    if (action === "USE") {
+    if (action === ActionType.USE_CONSUMABLE) {
       s.inventory.useConsumable(item.id, s.player);
       // Passing time via a WAIT action
-      void this.game.handleAction({ type: "WAIT" });
-    } else if (action === "EQUIP") {
+      void this.game.handleAction({ type: ActionType.WAIT });
+    } else if (action === ActionType.EQUIP) {
       s.inventory.equipItem(item.id, s.player);
       s.player.damage = s.player.damageBase + s.inventory.getAttackBonus();
       s.player.defense = s.player.defenseBase + s.inventory.getDefenseBonus();
-    } else if (action === "DROP") {
+    } else if (action === ActionType.DROP) {
       const dropped = s.inventory.dropItem(item.id);
       if (dropped) {
         s.itemsOnMap.push({

@@ -1,9 +1,9 @@
-import type { Action } from "../core/Actions";
+import { Action, ActionType } from "../core/Actions";
 import { InputHandler } from "./InputHandler";
 
 export function keyEventToAction(event: KeyboardEvent): Action | null {
   const moveDelta = InputHandler.getMovementDelta(event);
-  if (moveDelta) return { type: "MOVE", delta: moveDelta };
+  if (moveDelta) return { type: ActionType.MOVE, delta: moveDelta };
 
   if (event.code === "Numpad5" || event.key === "5") {
     return { type: "WAIT" };
@@ -11,26 +11,25 @@ export function keyEventToAction(event: KeyboardEvent): Action | null {
 
   switch (event.key.toLowerCase()) {
     case "e":
-      return { type: "EQUIP" };
+      return { type: ActionType.EQUIP };
     case "u":
-      return { type: "USE_CONSUMABLE" };
+      return { type: ActionType.USE_CONSUMABLE };
     case "o":
-      return { type: "OPEN_DOOR" };
+      return { type: ActionType.OPEN_DOOR };
     case "c":
-      return { type: "CLOSE_DOOR" };
+      return { type: ActionType.CLOSE_DOOR };
     case "f":
-      return { type: "FIRE_ARROW" };
+      return { type: ActionType.FIRE_ARROW };
     case "p":
-      //event.preventDefault(); // Prevent default to avoid key repeat
-      return { type: "SAVE_GAME" };
+      return { type: ActionType.SAVE_GAME };
     case "r":
-      return { type: "LOAD_GAME" };
+      return { type: ActionType.LOAD_GAME };
     case "m":
-      return { type: "VIEW_LOG" };
+      return { type: ActionType.VIEW_LOG };
     case "i":
-      return { type: "OPEN_INVENTORY" };
+      return { type: ActionType.OPEN_INVENTORY };
     case "@":
-      return { type: "TOGGLE_AUTO_PICKUP" };
+      return { type: ActionType.TOGGLE_AUTO_PICKUP };
     default:
       return null;
   }
