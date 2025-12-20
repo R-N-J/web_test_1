@@ -1,5 +1,5 @@
 import type { Action } from "./Actions";
-import type { GameState } from "./GameState";
+import type { GameState, UiOverlay } from "./GameState";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
 import type { CONFIG } from "./Config";
 import { Inventory } from "../items/Item";
@@ -13,11 +13,12 @@ import { GameOverOverlay } from "../ui/overlays/GameOverOverlay";
 import { InventoryHandler } from "../ui/InventoryHandler";
 import { DungeonManager } from "./DungeonManager";
 import { PlayerSystem } from "../systems/PlayerSystem";
-
+import { EventBus } from "./EventBus";
 
 
 export class Game {
   public state!: GameState;
+  public readonly events: EventBus;
   private isAnimating = false;
   private lastSaveTime = 0;
   private readonly SAVE_DEBOUNCE_MS = 1000;
@@ -28,8 +29,25 @@ export class Game {
     private display: AsciiRenderer,
     private config: typeof CONFIG
   ) {
+    this.events = new EventBus();
     this.inventoryHandler = new InventoryHandler(this);
     this.dungeonManager = new DungeonManager(config);
+    this.setupEventSubscriptions();
+  }
+
+  private setupEventSubscriptions(): void {
+    this.events.subscribe('MESSAGE_LOGGED', (ev) => {
+      this.state?.log.addMessage(ev.text, ev.color);
+    });
+
+    this.events.subscribe('SCREEN_SHAKE', (ev) => {
+      if (this.state) {
+        this.state.screenShake = {
+          x: (Math.random() - 0.5) * ev.intensity,
+          y: (Math.random() - 0.5) * ev.intensity
+        };
+      }
+    });
   }
 
   public startNewGame(): void {
@@ -43,9 +61,11 @@ export class Game {
       inventory,
     });
 
-    log.addMessage("Welcome to the Dungeons!", "#0f0");
-    log.addMessage("Find the stairs (>) to descend deeper.", "white");
-    log.addMessage("Press 'p' to save, 'r' to load.", "gray");
+    inventory.setEventBus(this.events);
+
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Welcome to the Dungeons!", color: "#0f0" });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Find the stairs (>) to descend deeper.", color: "white" });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Press 'p' to save, 'r' to load.", color: "gray" });
 
     this.state = {
       width: this.config.WIDTH,
@@ -59,6 +79,7 @@ export class Game {
       itemsOnMap,
       inventory,
       log,
+      events: this.events,
       projectiles: [],
       uiStack: [],
       screenShake: { x: 0, y: 0 },
@@ -87,7 +108,7 @@ export class Game {
   private checkGameOver(): void {
     if (this.state.player.hp <= 0) {
       if (!this.state.uiStack.some(o => o.kind === "GAME_OVER")) {
-        this.state.log.addMessage("You have died!", "red");
+        this.events.publish({ type: 'MESSAGE_LOGGED', text: "You have died!", color: "red" });
         this.pushUi(new GameOverOverlay());
       }
     }
@@ -101,11 +122,11 @@ export class Game {
     switch (action.type) {
       case "MOVE":
         return PlayerSystem.tryMoveOrInteract(this.state, action.delta, {
-          onDescend: () => this.dungeonManager.descend(this.state, (m, c) => this.state.log.addMessage(m, c)),
-          onAscend: () => this.dungeonManager.ascend(this.state, (m, c) => this.state.log.addMessage(m, c)),
+          onDescend: () => this.dungeonManager.descend(this.state, (m, c) => this.events.publish({ type: 'MESSAGE_LOGGED', text: m, color: c ?? 'white' })),
+          onAscend: () => this.dungeonManager.ascend(this.state, (m, c) => this.events.publish({ type: 'MESSAGE_LOGGED', text: m, color: c ?? 'white' })),
         });
       case "WAIT":
-        this.state.log.addMessage("You wait.", "gray");
+        this.events.publish({ type: 'MESSAGE_LOGGED', text: "You wait.", color: "gray" });
         return true;
       case "EQUIP":
         return this.inventoryHandler.openMain(
@@ -147,10 +168,11 @@ export class Game {
 
   private toggleAutoPickup(): boolean {
     this.state.autoPickup = !this.state.autoPickup;
-    this.state.log.addMessage(
-      `Auto-pickup is now ${this.state.autoPickup ? "ON" : "OFF"}.`,
-      "orange"
-    );
+    this.events.publish({
+      type: 'MESSAGE_LOGGED',
+      text: `Auto-pickup is now ${this.state.autoPickup ? "ON" : "OFF"}.`,
+      color: "orange"
+    });
     return false;
   }
 
@@ -164,21 +186,25 @@ export class Game {
     this.dungeonManager.saveLevelSnapshot(this.state);
     SaveSystem.save(this.state, this.dungeonManager.levels);
 
-    this.state.log.addMessage("Game saved.", "green");
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Game saved.", color: "green" });
     this.lastSaveTime = now;
   }
 
   private loadGame(): void {
     const result = SaveSystem.load(this.config);
     if (!result) {
-      this.state.log.addMessage("No save found.", "gray");
+      this.events.publish({ type: 'MESSAGE_LOGGED', text: "No save found.", color: "gray" });
       return;
     }
 
     this.state = result.state;
     this.dungeonManager.levels = result.levels;
 
-    this.state.log.addMessage("Game loaded.", "green");
+    // Restore transient state
+    this.state.events = this.events;
+    this.state.inventory.setEventBus(this.events);
+
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Game loaded.", color: "green" });
     this.render();
   }
 
@@ -190,7 +216,7 @@ export class Game {
     return top.onKeyDown(s, event);
   }
 
-  public pushUi(overlay: import("./GameState").UiOverlay): void {
+  public pushUi(overlay: UiOverlay): void {
     this.state.uiStack.push(overlay);
   }
 

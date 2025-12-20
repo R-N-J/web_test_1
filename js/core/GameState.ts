@@ -1,8 +1,11 @@
-import type { DungeonMap, TileState } from "../map/DungeonMap";
-import type { Entity } from "../entities/Entity";
-import type { Item, Inventory, InventoryItem, EquippableSlot } from "../items/Item";
-import type { MessageLog } from "./MessageLog";
+import { DungeonMap } from "../map/DungeonMap";
+import type { TileState } from "../map/DungeonMap";
+import { Entity } from "../entities/Entity";
+import { Item, Inventory } from "../items/Item";
+import type { InventoryItem, EquippableSlot } from "../items/Item";
+import { MessageLog } from "./MessageLog";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
+import { EventBus } from "./EventBus";
 
 
 export interface Projectile {
@@ -39,6 +42,7 @@ export interface GameState {
   itemsOnMap: Item[];
   inventory: Inventory;
   log: MessageLog;
+  events: EventBus;
   projectiles: Projectile[]; // transient render-layer
   uiStack: UiOverlay[];
   screenShake: { x: number, y: number }; // Pixel offset for juice effects

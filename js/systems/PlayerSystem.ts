@@ -35,7 +35,7 @@ export class PlayerSystem {
     }
 
     if (tile?.type === "DOOR_CLOSED") {
-      state.log.addMessage("The door is closed. Press 'o' to open it.", "gray");
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: "The door is closed. Press 'o' to open it.", color: "gray" });
       return false;
     }
 
@@ -62,7 +62,7 @@ export class PlayerSystem {
 
       if (mode === "OPEN" && tile.type === "DOOR_CLOSED") {
         state.map.set(n.x, n.y, { ...tile, type: "DOOR_OPEN", blocksMovement: false, blocksSight: false });
-        state.log.addMessage("You open the door.", "orange");
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "You open the door.", color: "orange" });
         return true;
       }
 
@@ -72,15 +72,16 @@ export class PlayerSystem {
         if (occupiedByMonster || occupiedByPlayer) continue;
 
         state.map.set(n.x, n.y, { ...tile, type: "DOOR_CLOSED", blocksMovement: true, blocksSight: true });
-        state.log.addMessage("You close the door.", "orange");
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "You close the door.", color: "orange" });
         return true;
       }
     }
 
-    state.log.addMessage(
-      mode === "OPEN" ? "No closed door nearby to open." : "No open door nearby to close (or it's blocked).",
-      "gray"
-    );
+    state.events.publish({
+      type: 'MESSAGE_LOGGED',
+      text: mode === "OPEN" ? "No closed door nearby to open." : "No open door nearby to close (or it's blocked).",
+      color: "gray"
+    });
     return false;
   }
 
@@ -88,7 +89,7 @@ export class PlayerSystem {
     // Find the closest visible monster
     const visibleMonsters = state.monsters.filter(m => m.hp > 0 && state.map.get(m.x, m.y)?.isVisible);
     if (visibleMonsters.length === 0) {
-      state.log.addMessage("No visible target to shoot.", "gray");
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: "No visible target to shoot.", color: "gray" });
       return false;
     }
 
@@ -134,9 +135,9 @@ export class PlayerSystem {
 
       if (step.x === target.x && step.y === target.y) {
         target.hp -= 3;
-        state.log.addMessage("The arrow hits!", "yellow");
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "The arrow hits!", color: "yellow" });
         if (target.hp <= 0) {
-          state.log.addMessage("Target is slain!", "red");
+          state.events.publish({ type: 'MESSAGE_LOGGED', text: "Target is slain!", color: "red" });
           PlayerSystem.dropCorpse(state, target);
         }
         break;
@@ -151,9 +152,9 @@ export class PlayerSystem {
 
   private static attackMonster(state: GameState, monster: Entity) {
     monster.hp -= state.player.damage;
-    state.log.addMessage(`Hero attacks ${monster.name} for ${state.player.damage} damage!`, "yellow");
+    state.events.publish({ type: 'MESSAGE_LOGGED', text: `Hero attacks ${monster.name} for ${state.player.damage} damage!`, color: "yellow" });
     if (monster.hp <= 0) {
-      state.log.addMessage(`${monster.name} is defeated!`, "red");
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} is defeated!`, color: "red" });
       PlayerSystem.dropCorpse(state, monster);
     }
   }
@@ -183,7 +184,7 @@ export class PlayerSystem {
     };
 
     state.itemsOnMap.push(corpse);
-    state.log.addMessage(`The ${monster.name} drops its corpse.`, "gray");
+    state.events.publish({ type: 'MESSAGE_LOGGED', text: `The ${monster.name} drops its corpse.`, color: "gray" });
   }
 
   private static handleAutoPickup(state: GameState, x: number, y: number) {

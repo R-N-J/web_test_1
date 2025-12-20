@@ -16,15 +16,12 @@ export function runMonsterTurn(state: GameState): void {
       state.player.hp = Math.max(0, state.player.hp - damageTaken);
 
       // Trigger screen shake on any hit
-      state.screenShake = {
-        x: (Math.random() - 0.5) * 40,
-        y: (Math.random() - 0.5) * 40
-      };
+      state.events.publish({ type: 'SCREEN_SHAKE', intensity: 40 });
 
-      state.log.addMessage(`${monster.name} attacks for ${damageTaken} damage!`, "red");
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} attacks for ${damageTaken} damage!`, color: "red" });
 
       if (state.player.hp <= 0) {
-        state.log.addMessage("Everything fades to black...", "red");
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "Everything fades to black...", color: "red" });
       }
       continue;
     }
@@ -42,7 +39,7 @@ export function runMonsterTurn(state: GameState): void {
         // Pass the whole state as the context
         tryMoveEntity(monster, state, nextStep.x - monster.x, nextStep.y - monster.y);
       } else {
-        state.log.addMessage(`${monster.name} seems confused.`, "gray");
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} seems confused.`, color: "gray" });
       }
 
       continue;

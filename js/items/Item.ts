@@ -1,6 +1,7 @@
 // Item.ts
 import { Entity } from "../entities/Entity";
 import { MessageLog } from "../core/MessageLog";
+import { EventBus } from "../core/EventBus";
 
 export type EquipmentSlot =
   | "head"
@@ -32,6 +33,7 @@ export type EquippableSlot = Exclude<EquipmentSlot, 'consumable' | 'none'>;
 
 export class Inventory {
     private readonly messageLog: MessageLog;
+    private events?: EventBus;
     public static readonly CAPACITY = 26; // Limit to 'a'-'z' labels
 
   private static readonly DEFENSE_SLOTS: Array<
@@ -49,7 +51,15 @@ export class Inventory {
 
     private log(text: string, color: string = 'white'): void {
         console.log(text);
-        this.messageLog.addMessage(text, color);
+        if (this.events) {
+          this.events.publish({ type: 'MESSAGE_LOGGED', text, color });
+        } else {
+          this.messageLog.addMessage(text, color);
+        }
+    }
+
+    public setEventBus(events: EventBus): void {
+      this.events = events;
     }
 
 

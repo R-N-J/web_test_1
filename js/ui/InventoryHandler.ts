@@ -15,7 +15,7 @@ export class InventoryHandler {
 
     if (filteredItems.length === 0) {
       const msg = filter ? `You have no items for that action.` : "Your inventory is empty.";
-      s.log.addMessage(msg, "gray");
+      this.game.events.publish({ type: 'MESSAGE_LOGGED', text: msg, color: "gray" });
       return false;
     }
 

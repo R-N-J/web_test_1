@@ -1,3 +1,4 @@
+import { EventBus } from "../../core/EventBus";
 import { GameState, LevelSnapshot, SaveData } from "../../core/GameState";
 import { MessageLog } from "../../core/MessageLog";
 import { Inventory } from "../../items/Item";
@@ -64,6 +65,7 @@ export class SaveSystem {
       itemsOnMap: currentLevelSnapshot.itemsOnMap,
       inventory: inventory,
       log: log,
+      events: undefined as unknown as EventBus, // Injected by Game class during load
 
       // Initialize transient fields (stuff that isn't saved)
       projectiles: [],
