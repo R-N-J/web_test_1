@@ -1,3 +1,5 @@
+import { COLOR } from "../core/Colors";
+
 /**
  * Options for configuring the AsciiRenderer.
  */
@@ -81,8 +83,8 @@ export class AsciiRenderer {
    * @param fg - Foreground color (CSS color string).
    * @param bg - Background color. Pass `null` to leave the background transparent (layering).
    */
-  //public draw(x: number, y: number, char: string, fg: string, bg: string = "#000") {
-  public draw(x: number, y: number, char: string, fg: string, bg: string | null = "#000") {
+  //public draw(x: number, y: number, char: string, fg: string, bg: string = COLOR.BLACK) {
+  public draw(x: number, y: number, char: string, fg: string, bg: string | null = COLOR.BLACK) {
     // Bounds check (optional, but good for safety)
     if (x < 0 || x >= this.options.width || y < 0 || y >= this.options.height) return;
 
@@ -117,7 +119,7 @@ export class AsciiRenderer {
   /**
    * Draws a full-width status bar row (left-aligned text)
    */
-  public drawStatusBar(y: number, text: string, fg: string = "#fff", bg: string = "#000") {
+  public drawStatusBar(y: number, text: string, fg: string = COLOR.WHITE, bg: string = COLOR.BLACK) {
     if (y < 0 || y >= this.options.height) return;
 
     const ts = this.options.tileSize;
@@ -154,7 +156,7 @@ export class AsciiRenderer {
 
 
     // Optional: Fill with default background color immediately
-    this.ctx.fillStyle = "#000";
+    this.ctx.fillStyle = COLOR.BLACK;
     this.ctx.fillRect(0, 0, width * tileSize, height * tileSize);
   }
 
@@ -173,7 +175,7 @@ export class AsciiRenderer {
   /**
    * Draws a full string starting at grid coordinates (x, y), clearing the rest of the line.
    */
-  public drawTextLine(x: number, y: number, text: string, fg: string, bg: string = "#000") {
+  public drawTextLine(x: number, y: number, text: string, fg: string, bg: string = COLOR.BLACK) {
     const ts = this.options.tileSize;
 
     // 1. Clear the entire horizontal line for a clean background
@@ -194,13 +196,13 @@ export class AsciiRenderer {
     this.ctx.font = `${ts}px ${this.options.font}`;
   }
 
-  public drawString(x: number, y: number, text: string, fg: string, bg: string | null = "#000"): void {
+  public drawString(x: number, y: number, text: string, fg: string, bg: string | null = COLOR.BLACK): void {
     for (let i = 0; i < text.length; i++) {
       this.draw(x + i, y, text[i], fg, bg);
     }
   }
 
-  public drawBox(x: number, y: number, w: number, h: number, fg: string, bg: string = "#000"): void {
+  public drawBox(x: number, y: number, w: number, h: number, fg: string, bg: string = COLOR.BLACK): void {
     if (w < 2 || h < 2) return;
 
     // Fill background
@@ -226,7 +228,7 @@ export class AsciiRenderer {
    * Draws a string using proportional font spacing regardless of the `smoothMap` setting.
    * Best used for UI elements, labels, and modal windows.
    */
-  public drawSmoothString(x: number, y: number, text: string, fg: string, bg: string | null = "#000"): void {
+  public drawSmoothString(x: number, y: number, text: string, fg: string, bg: string | null = COLOR.BLACK): void {
     const ts = this.options.tileSize;
     const px = x * ts;
     const py = y * ts;
@@ -250,7 +252,7 @@ export class AsciiRenderer {
    * Draws an outlined box using geometric primitives instead of ASCII characters.
    * Provides a "modern" UI look compared to standard ASCII border characters.
    */
-  public drawSmoothBox(x: number, y: number, w: number, h: number, fg: string, bg: string = "#000"): void {
+  public drawSmoothBox(x: number, y: number, w: number, h: number, fg: string, bg: string = COLOR.BLACK): void {
     const ts = this.options.tileSize;
     const px = x * ts;
     const py = y * ts;

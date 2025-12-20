@@ -1,3 +1,4 @@
+import { COLOR } from "../../core/Colors";
 import type { UiOverlay, GameState } from "../../core/GameState";
 import type { AsciiRenderer } from "../AsciiRenderer";
 
@@ -26,14 +27,14 @@ export class MessageLogOverlay implements UiOverlay {
     const y0 = Math.floor((state.mapHeight - h) / 2);
 
     // 2. Draw the smooth vector frame and background
-    display.drawSmoothBox(x0, y0, w, h, "#ddd", "#000");
+    display.drawSmoothBox(x0, y0, w, h, COLOR.LIGHT_GRAY, COLOR.BLACK);
 
     // 3. Draw the smooth Title
-    display.drawSmoothString(x0 + 1, y0, ` ${this.title} `, "#ddd", "#000");
+    display.drawSmoothString(x0 + 1, y0, ` ${this.title} `, COLOR.LIGHT_GRAY, COLOR.BLACK);
 
     if (this.isSearching) {
       const searchLabel = ` Search: ${this.searchQuery}_ `;
-      display.drawSmoothString(x0 + 1, y0 + 1, searchLabel, "yellow", "#222");
+      display.drawSmoothString(x0 + 1, y0 + 1, searchLabel, COLOR.YELLOW, COLOR.DARK_GRAY);
     }
 
 
@@ -60,19 +61,19 @@ export class MessageLogOverlay implements UiOverlay {
 
       const line = lines[idx];
       // Draw the string normally (browser handles kerning/spacing)
-      display.drawSmoothString(x0 + 1, rowY, line.text, line.color ?? "#fff", "#000");
+      display.drawSmoothString(x0 + 1, rowY, line.text, line.color ?? COLOR.WHITE, COLOR.BLACK);
     }
 
     // 6. Footer hint and position indicator
     const hint = this.isSearching
       ? " Esc=Exit Search  Backspace=Delete "
       : " Esc=Close  /=Search  ↑↓=Scroll ";
-    display.drawSmoothString(x0 + 1, y0 + h - 1, hint, "#888", "#000");
+    display.drawSmoothString(x0 + 1, y0 + h - 1, hint, COLOR.GRAY, COLOR.BLACK);
 
     if (lines.length > pageSize) {
       const pos = `${start + 1}-${end}/${lines.length}`;
       // Right-aligned position indicator
-      display.drawSmoothString(x0 + w - 1 - (pos.length * 0.6), y0 + h - 1, pos, "#888", "#000");
+      display.drawSmoothString(x0 + w - 1 - (pos.length * 0.6), y0 + h - 1, pos, COLOR.GRAY, COLOR.BLACK);
     }
   }
 
@@ -191,7 +192,7 @@ export class MessageLogOverlay implements UiOverlay {
     const out: RenderLine[] = [];
 
     for (const msg of history) {
-      const color = msg.color ?? "#fff";
+      const color = msg.color ?? COLOR.WHITE;
       const wrapped = this.wrapTextPreserveNewlines(msg.text, contentWidth);
       for (const line of wrapped) out.push({ text: line, color });
     }

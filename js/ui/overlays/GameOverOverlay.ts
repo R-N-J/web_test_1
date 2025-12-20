@@ -1,5 +1,6 @@
 import type { UiOverlay, GameState } from "../../core/GameState";
 import type { AsciiRenderer } from "../AsciiRenderer";
+import { COLOR } from "../../core/Colors";
 
 export class GameOverOverlay implements UiOverlay {
   public readonly kind = "GAME_OVER";
@@ -10,10 +11,10 @@ export class GameOverOverlay implements UiOverlay {
     const x0 = Math.floor((state.width - w) / 2);
     const y0 = Math.floor((state.mapHeight - h) / 2);
 
-    display.drawSmoothBox(x0, y0, w, h, "red", "#000");
-    display.drawSmoothString(x0 + 7, y0 + 2, " YOU HAVE DIED ", "red", "#000");
-    display.drawSmoothString(x0 + 4, y0 + 4, "The dungeon claims another soul.", "#888", "#000");
-    display.drawSmoothString(x0 + 5, y0 + 6, " Press Space to Restart ", "#fff", "#222");
+    display.drawSmoothBox(x0, y0, w, h, COLOR.RED, COLOR.BLACK);
+    display.drawSmoothString(x0 + 7, y0 + 2, " YOU HAVE DIED ", COLOR.RED, COLOR.BLACK);
+    display.drawSmoothString(x0 + 4, y0 + 4, "The dungeon claims another soul.", COLOR.GRAY, COLOR.BLACK);
+    display.drawSmoothString(x0 + 5, y0 + 6, " Press Space to Restart ", COLOR.WHITE, COLOR.ONYX);
   }
 
   public onKeyDown(state: GameState, event: KeyboardEvent): boolean {

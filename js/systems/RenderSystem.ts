@@ -1,6 +1,8 @@
 import type { GameState } from "../core/GameState";
 import type { AsciiRenderer } from "../ui/AsciiRenderer";
+import { COLOR, UI_COLORS } from "../core/Colors";
 import { calculateFOV } from "./visibility";
+
 
 export function renderGame(state: GameState, display: AsciiRenderer): void {
   calculateFOV(state.map, state.player.x, state.player.y, state.fovRadius);
@@ -17,8 +19,8 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
       if (!tile || !tile.isExplored) continue;
 
       let char = " ";
-      let fg = "#333";
-      let bg = "#111";
+      let fg: string = COLOR.DARK_GRAY;
+      let bg: string = COLOR.VERY_DARK_GRAY;
 
       // Draw standard tiles
       if (tile.type === "WALL") char = "#";
@@ -31,10 +33,10 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
       if (tile.type === "DOOR_OPEN") char = "-";
 
       if (tile.isVisible) {
-        bg = "#000";
-        fg = tile.type === "WALL" ? "#ccc" : "#fff";
-        if (tile.type === "DOOR_CLOSED" || tile.type === "DOOR_OPEN") fg = "brown";
-        if (tile.type === "STAIRS_DOWN" || tile.type === "STAIRS_UP") fg = "yellow";
+        bg = COLOR.BLACK;
+        fg = tile.type === "WALL" ? COLOR.SILVER : COLOR.WHITE;
+        if (tile.type === "DOOR_CLOSED" || tile.type === "DOOR_OPEN") fg = COLOR.LEATHER;
+        if (tile.type === "STAIRS_DOWN" || tile.type === "STAIRS_UP") fg = COLOR.GOLD;
       }
 
       display.draw(x, y, char, fg, bg);
@@ -69,15 +71,15 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
 
   const messages = state.log.getDisplayMessages();
   messages.forEach((msg, i) => {
-    display.drawTextLine(0, logStartRow + i, msg.text, msg.color, "black");
+    display.drawTextLine(0, logStartRow + i, msg.text, msg.color, COLOR.BLACK);
   });
 
   display.drawTextLine(
     0,
     statusRow,
     `L${state.currentLevel} | HP: ${state.player.hp}/${state.player.maxHp} | ATK: ${state.player.damage} | DEF: ${state.player.defense} | INV: ${state.inventory.items.length}`,
-    "white",
-    "black"
+    UI_COLORS.DEFAULT_TEXT,
+    UI_COLORS.BACKGROUND
   );
 
   // 7. Overlays (Modal menus)

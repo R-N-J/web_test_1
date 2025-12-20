@@ -8,8 +8,10 @@ export const COLOR = {
   LIGHT_GRAY: "#dddddd",
   GRAY: "#888888",
   DARK_GRAY: "#333333",
+  ONYX: "#222222",
   VERY_DARK_GRAY: "#111111",
   BLACK: "#000000",
+
 
   // Basic Colors
   RED: "#ff0000",
@@ -93,7 +95,7 @@ export const UI_COLORS = {
  * as the player, enemies, and items in the game.
  */
 export const ENTITY_COLORS = {
-  PLAYER: COLOR.WHITE,
+  PLAYER: COLOR.GREEN,
   ENEMY: COLOR.RED,
   POTION: COLOR.MAGENTA,
   ITEM_COMMON: COLOR.WHITE,

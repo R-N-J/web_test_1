@@ -2,7 +2,7 @@ import { GameState, LevelSnapshot } from "./GameState";
 import { DungeonMap } from "../map/DungeonMap";
 import { createFreshLevel } from "../systems/LevelSystem";
 import { CONFIG } from "./Config";
-
+import { COLOR } from "./Colors";
 
 export class DungeonManager {
   // The cache of visited levels
@@ -24,7 +24,7 @@ export class DungeonManager {
     const nextLevel = state.currentLevel + 1;
     state.currentLevel = nextLevel;
 
-    logMessage(`You descend to Level ${state.currentLevel}!`, "yellow");
+    logMessage(`You descend to Level ${state.currentLevel}!`, COLOR.YELLOW);
 
     const cached = this.levels[String(nextLevel)];
     if (cached) {
@@ -49,7 +49,7 @@ export class DungeonManager {
 
   public ascend(state: GameState, logMessage: (msg: string, color?: string) => void): void {
     if (state.currentLevel <= 1) {
-      logMessage("You are already on Level 1.", "gray");
+      logMessage("You are already on Level 1.", COLOR.GRAY);
       return;
     }
 
@@ -58,11 +58,11 @@ export class DungeonManager {
     const prevLevel = state.currentLevel - 1;
     state.currentLevel = prevLevel;
 
-    logMessage(`You ascend to Level ${state.currentLevel}!`, "yellow");
+    logMessage(`You ascend to Level ${state.currentLevel}!`, COLOR.YELLOW);
 
     const cached = this.levels[String(prevLevel)];
     if (!cached) {
-      logMessage("No saved data for that level (unexpected).", "red");
+      logMessage("No saved data for that level (unexpected).", COLOR.RED);
       return;
     }
 
