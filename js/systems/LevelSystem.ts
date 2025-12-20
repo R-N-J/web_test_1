@@ -3,6 +3,7 @@ import type { Entity } from "../entities/Entity";
 import type { Item, Inventory } from "../items/Item";
 import { createId } from "../utils/id";
 import { getAdjacent4 } from "../utils/geometry";
+import { ENTITY_COLORS } from "../core/Colors";
 
 export function createFreshLevel(params: {
   width: number;
@@ -28,7 +29,7 @@ export function createFreshLevel(params: {
     x: start.x,
     y: start.y,
     symbol: "@",
-    color: "#0f0",
+    color: ENTITY_COLORS.PLAYER,
     name: "Player",
     hp: 30,
     maxHp: 30,
@@ -128,7 +129,7 @@ function spawnMonsters(map: DungeonMap, count: number): Entity[] {
       x,
       y,
       symbol: "o",
-      color: "#f00",
+      color: ENTITY_COLORS.ENEMY,
       name: "Orc",
       hp: 5,
       maxHp: 5,
@@ -157,7 +158,7 @@ function spawnItems(map: DungeonMap, count: number): Item[] {
   const itemsToSpawn: Array<Omit<Item, "x" | "y" | "id">> = [
     {
       symbol: "!",
-      color: "#00f",
+      color: ENTITY_COLORS.POTION,
       name: "Healing Potion",
       slot: "consumable",
       attackBonus: 0,
@@ -166,7 +167,7 @@ function spawnItems(map: DungeonMap, count: number): Item[] {
     },
     {
       symbol: "/",
-      color: "#999",
+      color: ENTITY_COLORS.ITEM_RARE,
       name: "Short Sword",
       slot: "weapon",
       attackBonus: 2,
@@ -175,7 +176,7 @@ function spawnItems(map: DungeonMap, count: number): Item[] {
     },
     {
       symbol: "[",
-      color: "#f90",
+      color: ENTITY_COLORS.ITEM_LEGENDARY,
       name: "Leather Vest",
       slot: "chest",
       attackBonus: 0,

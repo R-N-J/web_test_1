@@ -1,5 +1,7 @@
 // MessageLog.ts
 
+import { UI_COLORS } from "./Colors";
+
 export interface Message {
   text: string;
   color: string;
@@ -13,7 +15,7 @@ export class MessageLog {
    /*
    * Adds a new message to the log history.
    */
-  addMessage(text: string, color: string = 'white'): void {
+  addMessage(text: string, color: string = UI_COLORS.DEFAULT_TEXT): void {
     const message: Message = { text, color };
     this.history.push(message);
 

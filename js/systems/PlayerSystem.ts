@@ -5,6 +5,7 @@ import { createId } from "../utils/id";
 import { Entity } from "../entities/Entity";
 import { Item } from "../items/Item";
 import { getLine } from "./visibility";
+import { UI_COLORS, ENTITY_COLORS } from "../core/Colors";
 
 export class PlayerSystem {
 
@@ -35,7 +36,7 @@ export class PlayerSystem {
     }
 
     if (tile?.type === "DOOR_CLOSED") {
-      state.events.publish({ type: 'MESSAGE_LOGGED', text: "The door is closed. Press 'o' to open it.", color: "gray" });
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: "The door is closed. Press 'o' to open it.", color: UI_COLORS.MUTED_TEXT });
       return false;
     }
 
@@ -62,7 +63,7 @@ export class PlayerSystem {
 
       if (mode === "OPEN" && tile.type === "DOOR_CLOSED") {
         state.map.set(n.x, n.y, { ...tile, type: "DOOR_OPEN", blocksMovement: false, blocksSight: false });
-        state.events.publish({ type: 'MESSAGE_LOGGED', text: "You open the door.", color: "orange" });
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "You open the door.", color: UI_COLORS.WARNING });
         return true;
       }
 
@@ -72,7 +73,7 @@ export class PlayerSystem {
         if (occupiedByMonster || occupiedByPlayer) continue;
 
         state.map.set(n.x, n.y, { ...tile, type: "DOOR_CLOSED", blocksMovement: true, blocksSight: true });
-        state.events.publish({ type: 'MESSAGE_LOGGED', text: "You close the door.", color: "orange" });
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "You close the door.", color: UI_COLORS.WARNING });
         return true;
       }
     }
@@ -80,7 +81,7 @@ export class PlayerSystem {
     state.events.publish({
       type: 'MESSAGE_LOGGED',
       text: mode === "OPEN" ? "No closed door nearby to open." : "No open door nearby to close (or it's blocked).",
-      color: "gray"
+      color: UI_COLORS.MUTED_TEXT
     });
     return false;
   }
@@ -89,7 +90,7 @@ export class PlayerSystem {
     // Find the closest visible monster
     const visibleMonsters = state.monsters.filter(m => m.hp > 0 && state.map.get(m.x, m.y)?.isVisible);
     if (visibleMonsters.length === 0) {
-      state.events.publish({ type: 'MESSAGE_LOGGED', text: "No visible target to shoot.", color: "gray" });
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: "No visible target to shoot.", color: UI_COLORS.MUTED_TEXT });
       return false;
     }
 
@@ -126,7 +127,7 @@ export class PlayerSystem {
       const dx = step.x - prev.x;
       const dy = step.y - prev.y;
 
-      state.projectiles = [{ x: step.x, y: step.y, char: arrowCharForDelta(dx, dy), color: "white" }];
+      state.projectiles = [{ x: step.x, y: step.y, char: arrowCharForDelta(dx, dy), color: ENTITY_COLORS.ITEM_COMMON }];
       render(); // Force a frame
 
       await new Promise<void>(resolve => window.setTimeout(resolve, 60));
@@ -135,9 +136,9 @@ export class PlayerSystem {
 
       if (step.x === target.x && step.y === target.y) {
         target.hp -= 3;
-        state.events.publish({ type: 'MESSAGE_LOGGED', text: "The arrow hits!", color: "yellow" });
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "The arrow hits!", color: UI_COLORS.EXP });
         if (target.hp <= 0) {
-          state.events.publish({ type: 'MESSAGE_LOGGED', text: "Target is slain!", color: "red" });
+          state.events.publish({ type: 'MESSAGE_LOGGED', text: "Target is slain!", color: UI_COLORS.ERROR });
           PlayerSystem.dropCorpse(state, target);
         }
         break;
@@ -152,9 +153,9 @@ export class PlayerSystem {
 
   private static attackMonster(state: GameState, monster: Entity) {
     monster.hp -= state.player.damage;
-    state.events.publish({ type: 'MESSAGE_LOGGED', text: `Hero attacks ${monster.name} for ${state.player.damage} damage!`, color: "yellow" });
+    state.events.publish({ type: 'MESSAGE_LOGGED', text: `Hero attacks ${monster.name} for ${state.player.damage} damage!`, color: UI_COLORS.EXP });
     if (monster.hp <= 0) {
-      state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} is defeated!`, color: "red" });
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} is defeated!`, color: UI_COLORS.ERROR });
       PlayerSystem.dropCorpse(state, monster);
     }
   }
@@ -175,7 +176,7 @@ export class PlayerSystem {
       x: placement.x,
       y: placement.y,
       symbol: "%",
-      color: "#aa8866",
+      color: ENTITY_COLORS.CORPSE,
       name: `${monster.name} corpse`,
       slot: "none",
       attackBonus: 0,
@@ -184,7 +185,7 @@ export class PlayerSystem {
     };
 
     state.itemsOnMap.push(corpse);
-    state.events.publish({ type: 'MESSAGE_LOGGED', text: `The ${monster.name} drops its corpse.`, color: "gray" });
+    state.events.publish({ type: 'MESSAGE_LOGGED', text: `The ${monster.name} drops its corpse.`, color: UI_COLORS.MUTED_TEXT });
   }
 
   private static handleAutoPickup(state: GameState, x: number, y: number) {

@@ -14,6 +14,7 @@ import { InventoryHandler } from "../ui/InventoryHandler";
 import { DungeonManager } from "./DungeonManager";
 import { PlayerSystem } from "../systems/PlayerSystem";
 import { EventBus } from "./EventBus";
+import { UI_COLORS, ENTITY_COLORS } from "./Colors";
 
 
 export class Game {
@@ -63,9 +64,9 @@ export class Game {
 
     inventory.setEventBus(this.events);
 
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Welcome to the Dungeons!", color: "#0f0" });
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Find the stairs (>) to descend deeper.", color: "white" });
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Press 'p' to save, 'r' to load.", color: "gray" });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Welcome to the Dungeons!", color: ENTITY_COLORS.ITEM_UNCOMMON });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Find the stairs (>) to descend deeper.", color: UI_COLORS.DEFAULT_TEXT });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Press 'p' to save, 'r' to load.", color: UI_COLORS.MUTED_TEXT });
 
     this.state = {
       width: this.config.WIDTH,
@@ -108,7 +109,7 @@ export class Game {
   private checkGameOver(): void {
     if (this.state.player.hp <= 0) {
       if (!this.state.uiStack.some(o => o.kind === "GAME_OVER")) {
-        this.events.publish({ type: 'MESSAGE_LOGGED', text: "You have died!", color: "red" });
+        this.events.publish({ type: 'MESSAGE_LOGGED', text: "You have died!", color: UI_COLORS.ERROR });
         this.pushUi(new GameOverOverlay());
       }
     }
@@ -122,11 +123,11 @@ export class Game {
     switch (action.type) {
       case "MOVE":
         return PlayerSystem.tryMoveOrInteract(this.state, action.delta, {
-          onDescend: () => this.dungeonManager.descend(this.state, (m, c) => this.events.publish({ type: 'MESSAGE_LOGGED', text: m, color: c ?? 'white' })),
-          onAscend: () => this.dungeonManager.ascend(this.state, (m, c) => this.events.publish({ type: 'MESSAGE_LOGGED', text: m, color: c ?? 'white' })),
+          onDescend: () => this.dungeonManager.descend(this.state, (m, c) => this.events.publish({ type: 'MESSAGE_LOGGED', text: m, color: c ?? UI_COLORS.DEFAULT_TEXT })),
+          onAscend: () => this.dungeonManager.ascend(this.state, (m, c) => this.events.publish({ type: 'MESSAGE_LOGGED', text: m, color: c ?? UI_COLORS.DEFAULT_TEXT })),
         });
       case "WAIT":
-        this.events.publish({ type: 'MESSAGE_LOGGED', text: "You wait.", color: "gray" });
+        this.events.publish({ type: 'MESSAGE_LOGGED', text: "You wait.", color: UI_COLORS.MUTED_TEXT });
         return true;
       case "EQUIP":
         return this.inventoryHandler.openMain(
@@ -171,7 +172,7 @@ export class Game {
     this.events.publish({
       type: 'MESSAGE_LOGGED',
       text: `Auto-pickup is now ${this.state.autoPickup ? "ON" : "OFF"}.`,
-      color: "orange"
+      color: UI_COLORS.WARNING
     });
     return false;
   }
@@ -186,14 +187,14 @@ export class Game {
     this.dungeonManager.saveLevelSnapshot(this.state);
     SaveSystem.save(this.state, this.dungeonManager.levels);
 
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Game saved.", color: "green" });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Game saved.", color: ENTITY_COLORS.ITEM_UNCOMMON });
     this.lastSaveTime = now;
   }
 
   private loadGame(): void {
     const result = SaveSystem.load(this.config);
     if (!result) {
-      this.events.publish({ type: 'MESSAGE_LOGGED', text: "No save found.", color: "gray" });
+      this.events.publish({ type: 'MESSAGE_LOGGED', text: "No save found.", color: UI_COLORS.MUTED_TEXT });
       return;
     }
 
@@ -204,7 +205,7 @@ export class Game {
     this.state.events = this.events;
     this.state.inventory.setEventBus(this.events);
 
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Game loaded.", color: "green" });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Game loaded.", color: ENTITY_COLORS.ITEM_UNCOMMON });
     this.render();
   }
 

@@ -2,6 +2,7 @@
 import { Entity } from "../entities/Entity";
 import { MessageLog } from "../core/MessageLog";
 import { EventBus } from "../core/EventBus";
+import { UI_COLORS } from "../core/Colors";
 
 export type EquipmentSlot =
   | "head"
@@ -49,7 +50,7 @@ export class Inventory {
         this.messageLog = messageLog;
     }
 
-    private log(text: string, color: string = 'white'): void {
+    private log(text: string, color: string = UI_COLORS.DEFAULT_TEXT): void {
         console.log(text);
         if (this.events) {
           this.events.publish({ type: 'MESSAGE_LOGGED', text, color });
@@ -73,19 +74,19 @@ export class Inventory {
   addItem(item: Item): void {
     // Defensive: never allow map-decoration items into inventory.
     if (item.slot === "none") {
-      this.log(`You can't pick up ${item.name}.`, "gray");
+      this.log(`You can't pick up ${item.name}.`, UI_COLORS.MUTED_TEXT);
       return;
     }
 
     // Check capacity limit
     if (this.items.length >= Inventory.CAPACITY) {
-      this.log(`Your inventory is full! (Max ${Inventory.CAPACITY} items)`, "orange");
+      this.log(`Your inventory is full! (Max ${Inventory.CAPACITY} items)`, UI_COLORS.WARNING);
       return;
     }
 
     // Defensive: IDs are unique, so don't allow duplicates.
     if (this.items.some(i => i.id === item.id)) {
-      this.log(`You already have ${item.name}.`, "gray");
+      this.log(`You already have ${item.name}.`, UI_COLORS.MUTED_TEXT);
       return;
     }
 
@@ -157,7 +158,7 @@ export class Inventory {
     if (index === -1) return null;
 
     const item = this.items.splice(index, 1)[0];
-    this.log(`Dropped ${item.name}.`, "gray");
+    this.log(`Dropped ${item.name}.`, UI_COLORS.MUTED_TEXT);
     return item;
   }
 

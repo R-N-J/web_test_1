@@ -1,6 +1,7 @@
 import type { GameState } from "../../core/GameState";
 import { tryMoveEntity } from "../../entities/Entity";
 import { findPath } from "../pathfinding";
+import { UI_COLORS } from "../../core/Colors";
 
 export function runMonsterTurn(state: GameState): void {
   for (const monster of state.monsters) {
@@ -18,10 +19,10 @@ export function runMonsterTurn(state: GameState): void {
       // Trigger screen shake on any hit
       state.events.publish({ type: 'SCREEN_SHAKE', intensity: 40 });
 
-      state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} attacks for ${damageTaken} damage!`, color: "red" });
+      state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} attacks for ${damageTaken} damage!`, color: UI_COLORS.ERROR });
 
       if (state.player.hp <= 0) {
-        state.events.publish({ type: 'MESSAGE_LOGGED', text: "Everything fades to black...", color: "red" });
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: "Everything fades to black...", color: UI_COLORS.ERROR });
       }
       continue;
     }
@@ -39,7 +40,7 @@ export function runMonsterTurn(state: GameState): void {
         // Pass the whole state as the context
         tryMoveEntity(monster, state, nextStep.x - monster.x, nextStep.y - monster.y);
       } else {
-        state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} seems confused.`, color: "gray" });
+        state.events.publish({ type: 'MESSAGE_LOGGED', text: `${monster.name} seems confused.`, color: UI_COLORS.MUTED_TEXT });
       }
 
       continue;

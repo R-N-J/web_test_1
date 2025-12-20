@@ -1,5 +1,6 @@
 import type { GameState, UiOverlay } from "../../core/GameState";
 import type { AsciiRenderer } from "../AsciiRenderer";
+import { UI_COLORS } from "../../core/Colors";
 
 export type PickListEntry<T> = {
   label: string; // "a".."z"
@@ -64,10 +65,10 @@ export class PickListOverlay<T> implements UiOverlay {
     const y0 = Math.floor((state.mapHeight - h) / 2);
 
     // 1. Draw the smooth window frame and background
-    display.drawSmoothBox(x0, y0, w, h, "#ddd", "#000");
+    display.drawSmoothBox(x0, y0, w, h, UI_COLORS.WINDOW_BORDER, UI_COLORS.WINDOW_BG);
 
     // 2. Draw the Smooth Title (centered in the top border or left-aligned)
-    display.drawSmoothString(x0 + 1, y0, ` ${this.title} `, "#ddd", "#000");
+    display.drawSmoothString(x0 + 1, y0, ` ${this.title} `, UI_COLORS.WINDOW_BORDER, UI_COLORS.WINDOW_BG);
 
     // 3. Scroll Logic
     const pageSize = Math.max(1, h - 2);
@@ -90,8 +91,8 @@ export class PickListOverlay<T> implements UiOverlay {
       const isSelected = idx === this.selected;
 
       // Reverse video for selection
-      const fg = isSelected ? "#000" : "#fff";
-      const bg = isSelected ? "#fff" : "#000";
+      const fg = isSelected ? UI_COLORS.SELECTION_FG : UI_COLORS.DEFAULT_TEXT;
+      const bg = isSelected ? UI_COLORS.SELECTION_BG : UI_COLORS.WINDOW_BG;
 
       // We use a full-width background for the selection bar
       const text = entry.text.padEnd(w - 2, " ");
@@ -101,7 +102,7 @@ export class PickListOverlay<T> implements UiOverlay {
     // 5. Footer/Scroll indicator
     if (this.entries.length > pageSize) {
       const hint = `${start + 1}-${end}/${this.entries.length}`;
-      display.drawSmoothString(x0 + w - 1 - (hint.length * 0.6), y0 + h - 1, hint, "#888", "#000");
+      display.drawSmoothString(x0 + w - 1 - (hint.length * 0.6), y0 + h - 1, hint, UI_COLORS.MUTED_TEXT, UI_COLORS.WINDOW_BG);
     }
   }
 
@@ -112,43 +113,53 @@ export class PickListOverlay<T> implements UiOverlay {
     }
 
     const key = event.key;
+    const code = event.code;
 
     if (key === "Escape") {
       this.onCancel(state);
       return true;
     }
 
-    if (key === "ArrowUp") {
+    // Up / Numpad 8
+    if (key === "ArrowUp" || code === "Numpad8") {
       this.selected = (this.selected - 1 + this.entries.length) % this.entries.length;
       return true;
     }
 
-    if (key === "ArrowDown") {
+    // Down / Numpad 2
+    if (key === "ArrowDown" || code === "Numpad2") {
       this.selected = (this.selected + 1) % this.entries.length;
       return true;
     }
 
-    // Home/End
-    if (key === "Home") {
+    // Home / Numpad 7
+    if (key === "Home" || code === "Numpad7") {
       this.selected = 0;
       return true;
     }
-    if (key === "End") {
+
+
+    // End / Numpad 1
+    if (key === "End" || code === "Numpad1") {
       this.selected = this.entries.length - 1;
       return true;
     }
 
-    // PageUp/PageDown (move by visible page size)
-    if (key === "PageUp") {
+
+    // PageUp / Numpad 9 (move by visible page size)
+    if (key === "PageUp" || code === "Numpad9") {
       this.selected = Math.max(0, this.selected - Math.max(1, this.lastPageSize));
       return true;
     }
-    if (key === "PageDown") {
+
+    // PageDown / Numpad 3 (move by visible page size)
+    if (key === "PageDown" || code === "Numpad3") {
       this.selected = Math.min(this.entries.length - 1, this.selected + Math.max(1, this.lastPageSize));
       return true;
     }
 
-    if (key === "Enter") {
+    // Confirm: Enter or Numpad 5
+    if (key === "Enter" || code === "Numpad5" || code === "NumpadEnter") {
       const chosen = this.entries[this.selected];
       this.onConfirm(state, chosen.value);
       return true;

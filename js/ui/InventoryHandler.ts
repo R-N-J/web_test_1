@@ -3,6 +3,7 @@ import { PickListOverlay } from "./overlays/PickListOverlay";
 import { InventoryOverlay } from "./overlays/InventoryOverlay";
 import { InventoryItem } from "../items/Item";
 import { ActionType } from "../core/Actions";
+import { UI_COLORS } from "../core/Colors";
 
 export class InventoryHandler {
   constructor(private game: Game) {}
@@ -16,7 +17,7 @@ export class InventoryHandler {
 
     if (filteredItems.length === 0) {
       const msg = filter ? `You have no items for that action.` : "Your inventory is empty.";
-      this.game.events.publish({ type: 'MESSAGE_LOGGED', text: msg, color: "gray" });
+      this.game.events.publish({ type: 'MESSAGE_LOGGED', text: msg, color: UI_COLORS.MUTED_TEXT });
       return false;
     }
 
