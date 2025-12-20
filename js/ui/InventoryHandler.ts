@@ -42,11 +42,11 @@ export class InventoryHandler {
   private openActionMenu(item: InventoryItem, filter?: (item: InventoryItem) => boolean, title: string = "Inventory"): void {
     const actions = [];
     if (item.slot === "consumable") {
-      actions.push({ label: "u", text: "u) Use", value: "USE" });
+      actions.push({ label: "u", text: "u) Use", value: ActionType.USE_CONSUMABLE });
     } else {
-      actions.push({ label: "e", text: "e) Equip", value: "EQUIP" });
+      actions.push({ label: "e", text: "e) Equip", value: ActionType.EQUIP });
     }
-    actions.push({ label: "d", text: "d) Drop", value: "DROP" });
+    actions.push({ label: "d", text: "d) Drop", value: ActionType.DROP  });
 
     this.game.pushUi(
       new PickListOverlay<string>(
@@ -70,8 +70,8 @@ export class InventoryHandler {
     const s = this.game.state;
     if (action === ActionType.USE_CONSUMABLE) {
       s.inventory.useConsumable(item.id, s.player);
-      // Passing time via a WAIT action
-      void this.game.handleAction({ type: ActionType.WAIT });
+      // Passing time via a WAIT action if the item is used
+      // void this.game.handleAction({ type: ActionType.WAIT });
     } else if (action === ActionType.EQUIP) {
       s.inventory.equipItem(item.id, s.player);
       s.player.damage = s.player.damageBase + s.inventory.getAttackBonus();
