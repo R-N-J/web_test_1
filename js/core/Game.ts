@@ -7,17 +7,14 @@ import { MessageLog } from "./MessageLog";
 import { createFreshLevel } from "../systems/LevelSystem";
 import { runMonsterTurn } from "../systems/AISystem/AISystem";
 import { renderGame } from "../systems/RenderSystem";
-import {
-  buildSaveData,
-  loadFromLocalStorage,
-  saveToLocalStorage
-} from "../systems/save";
-import { DungeonMap } from "../map/DungeonMap";
+import { SaveSystem } from "../systems/save";
 import { MessageLogOverlay } from "../ui/overlays/MessageLogOverlay";
 import { GameOverOverlay } from "../ui/overlays/GameOverOverlay";
 import { InventoryHandler } from "../ui/InventoryHandler";
 import { DungeonManager } from "./DungeonManager";
 import { PlayerSystem } from "../systems/PlayerSystem";
+
+
 
 export class Game {
   public state!: GameState;
@@ -157,6 +154,7 @@ export class Game {
     return false;
   }
 
+
   private saveGame(): void {
     const now = Date.now();
     if (now - this.lastSaveTime < this.SAVE_DEBOUNCE_MS) {
@@ -164,42 +162,26 @@ export class Game {
     }
 
     this.dungeonManager.saveLevelSnapshot(this.state);
-    const data = buildSaveData(this.state, this.dungeonManager.levels);
-    saveToLocalStorage(data);
+    SaveSystem.save(this.state, this.dungeonManager.levels);
+
     this.state.log.addMessage("Game saved.", "green");
     this.lastSaveTime = now;
   }
 
   private loadGame(): void {
-    const loaded = loadFromLocalStorage();
-    if (!loaded) {
+    const result = SaveSystem.load(this.config);
+    if (!result) {
       this.state.log.addMessage("No save found.", "gray");
       return;
     }
 
-    const log = this.state.log;
-    log.setHistory(loaded.log || []);
-
-    const inventory = Inventory.fromSnapshot(log, loaded.inventory);
-
-    // Restore dungeon manager levels
-    this.dungeonManager.levels = loaded.levels;
-
-    const current = loaded.levels[String(loaded.currentLevel)];
-    if (!current) {
-      this.state.log.addMessage("Save is missing current level data.", "red");
-      return;
-    }
-
-    this.state.currentLevel = loaded.currentLevel;
-    this.state.player = loaded.player;
-    this.state.inventory = inventory;
-    this.state.map = DungeonMap.fromSnapshot(this.config.WIDTH, this.config.MAP_HEIGHT, current.mapData);
-    this.state.monsters = current.monsters;
-    this.state.itemsOnMap = current.itemsOnMap;
+    this.state = result.state;
+    this.dungeonManager.levels = result.levels;
 
     this.state.log.addMessage("Game loaded.", "green");
+    this.render();
   }
+
 
   public handleUiKey(event: KeyboardEvent): boolean {
     const s = this.state;

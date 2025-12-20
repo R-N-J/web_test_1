@@ -2,7 +2,7 @@ import { GameState, LevelSnapshot } from "./GameState";
 import { DungeonMap } from "../map/DungeonMap";
 import { createFreshLevel } from "../systems/LevelSystem";
 import { CONFIG } from "./Config";
-import { Inventory } from "../items/Item";
+
 
 export class DungeonManager {
   // The cache of visited levels
