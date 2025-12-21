@@ -26,3 +26,13 @@ export const ALL_DIRECTIONS: Direction[] = [
   { x: -1, y: -1 }, { x: 1, y: -1 },
   { x: -1, y: 1 },  { x: 1, y: 1 },
 ];
+
+declare global {
+
+  const __BUILD_NAME__: string;
+  const __BUILD_DATE__: string;
+  const __VERSION__: string;
+}
+
+export {}
+

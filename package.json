@@ -14,7 +14,8 @@
     "start": "webpack serve --open --config webpack.config.dev.js",
     "build": "webpack --config webpack.config.prod.js",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "docs": "typedoc --entryPointStrategy expand ./js --out .docs"
   },
   "devDependencies": {
     "@eslint/css": "^0.14.1",
@@ -26,7 +27,9 @@
     "globals": "^16.5.0",
     "html-webpack-plugin": "^5.6.0",
     "jiti": "^2.6.1",
+    "jsdoc": "^4.0.5",
     "ts-loader": "^9.5.4",
+    "typedoc": "^0.28.15",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.49.0",
     "webpack": "^5.91.0",

@@ -64,6 +64,8 @@ export class Game {
 
     inventory.setEventBus(this.events);
 
+    console.log(`${__BUILD_NAME__} Version: ${__VERSION__} (Built: ${__BUILD_DATE__})`);
+
     this.events.publish({ type: 'MESSAGE_LOGGED', text: "Welcome to the Dungeons!", color: ENTITY_COLORS.ITEM_UNCOMMON });
     this.events.publish({ type: 'MESSAGE_LOGGED', text: "Find the stairs (>) to descend deeper.", color: UI_COLORS.DEFAULT_TEXT });
     this.events.publish({ type: 'MESSAGE_LOGGED', text: "Press 'p' to save, 'r' to load.", color: UI_COLORS.MUTED_TEXT });

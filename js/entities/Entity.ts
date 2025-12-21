@@ -29,7 +29,7 @@ interface GameMap {
 }
 
 // Define a minimal interface for what tryMove needs to know about the world
-interface MoveContext {
+export interface MoveContext {
   map: { get(x: number, y: number): TileState | undefined };
   monsters: Entity[];
   player: Entity;

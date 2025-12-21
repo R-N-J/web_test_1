@@ -25,3 +25,5 @@ export const CONFIG = {
     return this.HEIGHT - this.UI_ROWS;
   },
 } as const;
+
+

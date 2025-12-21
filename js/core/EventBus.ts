@@ -4,7 +4,7 @@ export type GameEvent =
   | { type: 'MESSAGE_LOGGED'; text: string; color: string }
   | { type: 'SCREEN_SHAKE'; intensity: number };
 
-type Handler<T extends GameEvent['type']> = (data: Extract<GameEvent, { type: T }>) => void;
+export type Handler<T extends GameEvent['type']> = (data: Extract<GameEvent, { type: T }>) => void;
 
 export class EventBus {
   private handlers: { [K in GameEvent['type']]?: Handler<K>[] } = {};

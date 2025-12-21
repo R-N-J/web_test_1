@@ -141,7 +141,6 @@ export const GRAY = {
  * const chestColor = COLOR.WOOD;
  * ```
  *
- * @constant
  * @readonly
  */
 export const COLOR = {
