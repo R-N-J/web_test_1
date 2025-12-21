@@ -69,9 +69,14 @@ export function renderGame(state: GameState, display: AsciiRenderer): void {
   const statusRow = state.height - 1;
   const logStartRow = statusRow - state.log.DISPLAY_LINES;
 
+  // 6A. Message Log (Screen Space)
   const messages = state.log.getDisplayMessages();
   messages.forEach((msg, i) => {
-    display.drawTextLine(0, logStartRow + i, msg.text, msg.color, COLOR.BLACK);
+    display.drawTextLine(0, logStartRow + i, msg.text, msg.color, COLOR.BLACK, {
+      bold: msg.bold,
+      underline: msg.underline,
+      reverse: msg.reverse
+    });
   });
 
   display.drawTextLine(

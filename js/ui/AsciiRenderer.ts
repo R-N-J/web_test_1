@@ -175,22 +175,56 @@ export class AsciiRenderer {
   /**
    * Draws a full string starting at grid coordinates (x, y), clearing the rest of the line.
    */
-  public drawTextLine(x: number, y: number, text: string, fg: string, bg: string = COLOR.BLACK) {
+  public drawTextLine(
+    x: number,
+    y: number,
+    text: string,
+    fg: string,
+    bg: string = COLOR.BLACK,
+    effects?: { bold?: boolean, underline?: boolean, reverse?: boolean }
+  ) {
     const ts = this.options.tileSize;
+    const px = x * ts;
+    const py = y * ts;
 
-    // 1. Clear the entire horizontal line for a clean background
-    this.ctx.fillStyle = bg;
-    this.ctx.fillRect(x * ts, y * ts, this.options.width * ts, ts);
+    // 1. Always clear the full background with the BASE background color first
+    // This ensures the line is clean before we draw highlights
+    this.ctx.fillStyle = COLOR.BLACK;
+    this.ctx.fillRect(px, py, this.options.width * ts, ts);
 
-    // 2. Draw the text
-    this.ctx.font = `${ts}px ${this.options.font}`;
+    if (effects?.reverse) {
+      [fg, bg] = [bg, fg];
+    }
+
+    // 2. Setup Font for measuring
+    this.ctx.font = `${effects?.bold ? "bold " : ""}${ts}px ${this.options.font}`;
+    const metrics = this.ctx.measureText(text);
+
+    // 3. Draw the specific background (either the base bg or the reversed highlight)
+    if (bg !== COLOR.BLACK || effects?.reverse) {
+      this.ctx.fillStyle = bg;
+      // Only fill the area where the text actually is
+      this.ctx.fillRect(px, py, metrics.width + 4, ts);
+    }
+
+    // 4. Draw the text
     this.ctx.textAlign = "left";
     this.ctx.textBaseline = "middle";
     this.ctx.fillStyle = fg;
+    this.ctx.fillText(text, px + 2, py + (ts / 2));
 
-    this.ctx.fillText(text, x * ts, y * ts + (ts / 2));
+    // 5. Draw Underline
+    if (effects?.underline) {
+      const metrics = this.ctx.measureText(text);
+      this.ctx.beginPath();
+      this.ctx.strokeStyle = fg;
+      this.ctx.lineWidth = 1;
+      this.ctx.moveTo(px, py + ts - 2);
+      this.ctx.lineTo(px + metrics.width, py + ts - 2);
+      this.ctx.stroke();
+    }
 
-    // 3. Restore to the standard glyph state (so future calls look identical)
+    // 4. Restore to the standard glyph state
     this.ctx.textAlign = "center";
     this.ctx.textBaseline = "middle";
     this.ctx.font = `${ts}px ${this.options.font}`;
@@ -227,25 +261,46 @@ export class AsciiRenderer {
   /**
    * Draws a string using proportional font spacing regardless of the `smoothMap` setting.
    * Best used for UI elements, labels, and modal windows.
+   * Supports bold, underline, and reverse effects.
    */
-  public drawSmoothString(x: number, y: number, text: string, fg: string, bg: string | null = COLOR.BLACK): void {
+  public drawSmoothString(
+    x: number,
+    y: number,
+    text: string,
+    fg: string,
+    bg: string | null = COLOR.BLACK,
+    effects?: { bold?: boolean, underline?: boolean, reverse?: boolean }
+  ): void {
     const ts = this.options.tileSize;
     const px = x * ts;
     const py = y * ts;
 
-    this.ctx.font = `${ts}px ${this.options.font}`;
+    if (effects?.reverse) {
+      [fg, bg] = [bg ?? COLOR.BLACK, fg];
+    }
+
+    this.ctx.font = `${effects?.bold ? "bold " : ""}${ts}px ${this.options.font}`;
     this.ctx.textBaseline = "middle";
     this.ctx.textAlign = "left";
 
+    const metrics = this.ctx.measureText(text);
+
     if (bg !== null) {
-      const metrics = this.ctx.measureText(text);
       this.ctx.fillStyle = bg;
-      // Draw background slightly wider than text for safety
       this.ctx.fillRect(px, py, metrics.width + 2, ts);
     }
 
     this.ctx.fillStyle = fg;
     this.ctx.fillText(text, px, py + (ts / 2));
+
+    if (effects?.underline) {
+      this.ctx.beginPath();
+      this.ctx.strokeStyle = fg;
+      this.ctx.lineWidth = 1;
+      this.ctx.moveTo(px, py + ts - 2);
+      this.ctx.lineTo(px + metrics.width, py + ts - 2);
+      this.ctx.stroke();
+    }
   }
 
   /**

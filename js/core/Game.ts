@@ -38,7 +38,11 @@ export class Game {
 
   private setupEventSubscriptions(): void {
     this.events.subscribe('MESSAGE_LOGGED', (ev) => {
-      this.state?.log.addMessage(ev.text, ev.color);
+      this.state?.log.addMessage(ev.text, ev.color, {
+        bold: ev.bold,
+        underline: ev.underline,
+        reverse: ev.reverse
+      });
     });
 
     this.events.subscribe('SCREEN_SHAKE', (ev) => {
@@ -64,12 +68,6 @@ export class Game {
 
     inventory.setEventBus(this.events);
 
-    console.log(`${__BUILD_NAME__} Version: ${__VERSION__} (Built: ${__BUILD_DATE__})`);
-
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Welcome to the Dungeons!", color: ENTITY_COLORS.ITEM_UNCOMMON });
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Find the stairs (>) to descend deeper.", color: UI_COLORS.DEFAULT_TEXT });
-    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Press 'p' to save, 'r' to load.", color: UI_COLORS.MUTED_TEXT });
-
     this.state = {
       width: this.config.WIDTH,
       height: this.config.HEIGHT,
@@ -89,7 +87,13 @@ export class Game {
       autoPickup: true,
     };
 
-    this.dungeonManager.saveLevelSnapshot(this.state);
+    console.log(`${__BUILD_NAME__} Version: ${__VERSION__} (Built: ${__BUILD_DATE__})`);
+
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Welcome to the Dungeons!", color: ENTITY_COLORS.ITEM_UNCOMMON, bold: true, underline: false, reverse: true });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Find the stairs (>) to descend deeper.", color: UI_COLORS.DEFAULT_TEXT });
+    this.events.publish({ type: 'MESSAGE_LOGGED', text: "Press 'p' to save, 'r' to load.", color: UI_COLORS.MUTED_TEXT });
+
+     this.dungeonManager.saveLevelSnapshot(this.state);
     this.render();
   }
 

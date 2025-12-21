@@ -50,15 +50,23 @@ export class Inventory {
         this.messageLog = messageLog;
     }
 
-    private log(text: string, color: string = UI_COLORS.DEFAULT_TEXT): void {
+  private log(
+    text: string,
+    color: string = UI_COLORS.DEFAULT_TEXT,
+    options?: { bold?: boolean, underline?: boolean, reverse?: boolean }
+  ): void {
         console.log(text);
-        if (this.events) {
-          this.events.publish({ type: 'MESSAGE_LOGGED', text, color });
-        } else {
-          this.messageLog.addMessage(text, color);
-        }
+    if (this.events) {
+      this.events.publish({
+        type: 'MESSAGE_LOGGED',
+        text,
+        color,
+        ...options
+      });
+    } else {
+      this.messageLog.addMessage(text, color, options);
     }
-
+  }
     public setEventBus(events: EventBus): void {
       this.events = events;
     }

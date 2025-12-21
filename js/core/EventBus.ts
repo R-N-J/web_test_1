@@ -1,7 +1,7 @@
 // js/core/EventBus.ts
 
 export type GameEvent =
-  | { type: 'MESSAGE_LOGGED'; text: string; color: string }
+  | { type: 'MESSAGE_LOGGED'; text: string; color: string; bold?: boolean; underline?: boolean; reverse?: boolean }
   | { type: 'SCREEN_SHAKE'; intensity: number };
 
 export type Handler<T extends GameEvent['type']> = (data: Extract<GameEvent, { type: T }>) => void;

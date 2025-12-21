@@ -2,7 +2,13 @@ import { COLOR } from "../../core/Colors";
 import type { UiOverlay, GameState } from "../../core/GameState";
 import type { AsciiRenderer } from "../AsciiRenderer";
 
-type RenderLine = { text: string; color: string };
+export interface RenderLine {
+  text: string;
+  color: string;
+  bold?: boolean;
+  underline?: boolean;
+  reverse?: boolean;
+}
 
 export class MessageLogOverlay implements UiOverlay {
   public readonly kind = "MESSAGE_LOG";
@@ -60,9 +66,12 @@ export class MessageLogOverlay implements UiOverlay {
       if (idx >= lines.length) break;
 
       const line = lines[idx];
-      // Draw the string normally (browser handles kerning/spacing)
-      display.drawSmoothString(x0 + 1, rowY, line.text, line.color ?? COLOR.WHITE, COLOR.BLACK);
-    }
+      // Draw the string with potential effects (bold, underline, reverse)
+      display.drawSmoothString(x0 + 1, rowY, line.text, line.color ?? COLOR.WHITE, COLOR.BLACK, {
+        bold: line.bold,
+        underline: line.underline,
+        reverse: line.reverse
+      });    }
 
     // 6. Footer hint and position indicator
     const hint = this.isSearching
@@ -194,7 +203,15 @@ export class MessageLogOverlay implements UiOverlay {
     for (const msg of history) {
       const color = msg.color ?? COLOR.WHITE;
       const wrapped = this.wrapTextPreserveNewlines(msg.text, contentWidth);
-      for (const line of wrapped) out.push({ text: line, color });
+      for (const line of wrapped) {
+        out.push({
+          text: line,
+          color,
+          bold: msg.bold,
+          underline: msg.underline,
+          reverse: msg.reverse
+        });
+      }
     }
 
     return out;

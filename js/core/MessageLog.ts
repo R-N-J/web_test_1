@@ -5,18 +5,35 @@ import { UI_COLORS } from "./Colors";
 export interface Message {
   text: string;
   color: string;
+  bold?: boolean;
+  underline?: boolean;
+  reverse?: boolean;
 }
+
+export interface MessageLoggedEvent {
+  type: 'MESSAGE_LOGGED';
+  text: string;
+  color?: string;
+  bold?: boolean;
+  underline?: boolean;
+  reverse?: boolean;
+}
+
 
 export class MessageLog {
   private history: Message[] = [];
   private readonly MAX_HISTORY = 100; // Total messages kept in memory
   public static readonly DISPLAY_LINES = 3;  // How many messages to show on screen
   public readonly DISPLAY_LINES = MessageLog.DISPLAY_LINES;/**
-   /*
-   * Adds a new message to the log history.
+   /**
+   * Adds a new message to the log history with optional styling.
    */
-  addMessage(text: string, color: string = UI_COLORS.DEFAULT_TEXT): void {
-    const message: Message = { text, color };
+  addMessage(text: string, color: string = UI_COLORS.DEFAULT_TEXT, options?: { bold?: boolean, underline?: boolean, reverse?: boolean }): void {
+    const message: Message = {
+      text,
+      color,
+      ...options
+    };
     this.history.push(message);
 
     // Keep history from growing too large
