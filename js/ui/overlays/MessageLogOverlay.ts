@@ -95,23 +95,27 @@ export class MessageLogOverlay implements UiOverlay {
 
     const maxTop = Math.max(0, linesCount - pageSize);
 
+    // Check Numpad via code (physical location) and others via key (logical value)
+    const code = event.code;
+    const key = event.key;
+
     if (this.isSearching) {
-      if (event.key === "Escape") {
+      if (key === "Escape") {
         this.isSearching = false;
         this.searchQuery = "";
         this.top = 0;
         return true;
       }
-      if (event.key === "Backspace") {
+      if (key === "Backspace") {
         this.searchQuery = this.searchQuery.slice(0, -1);
         this.top = 0;
         return true;
       }
-      if (event.key === "Enter") {
+      if (key === "Enter") {
         this.isSearching = false;
         return true;
       }
-      if (event.key.length === 1) {
+      if (key.length === 1) {
         this.searchQuery += event.key;
         this.top = 0;
         return true;
@@ -119,44 +123,48 @@ export class MessageLogOverlay implements UiOverlay {
       return true; // Consume other keys in search mode
     }
 
-    switch (event.key) {
-      case "/":
+    if (key === "/") {
         this.isSearching = true;
         this.searchQuery = "";
         this.top = 0;
         return true;
-
-      case "Escape":
-        state.uiStack.pop();
-        return true;
-
-      case "ArrowUp":
-        this.top = Math.max(0, this.top - 1);
-        return true;
-
-      case "ArrowDown":
-        this.top = Math.min(maxTop, this.top + 1);
-        return true;
-
-      case "PageUp":
-        this.top = Math.max(0, this.top - pageSize);
-        return true;
-
-      case "PageDown":
-        this.top = Math.min(maxTop, this.top + pageSize);
-        return true;
-
-      case "Home":
-        this.top = 0;
-        return true;
-
-      case "End":
-        this.top = maxTop;
-        return true;
-
-      default:
-        return true; // modal: consume keys while open
     }
+
+    if (key === "Escape") {
+      state.uiStack.pop();
+      return true;
+    }
+
+    if (key === "ArrowUp" || code === "Numpad8") {
+      this.top = Math.max(0, this.top - 1);
+      return true;
+    }
+
+    if (key === "ArrowDown" || code === "Numpad2") {
+      this.top = Math.min(maxTop, this.top + 1);
+      return true;
+    }
+
+    if (key === "PageUp" || code === "Numpad9") {
+      this.top = Math.max(0, this.top - pageSize);
+      return true;
+    }
+
+    if (key === "PageDown" || code === "Numpad3") {
+      this.top = Math.min(maxTop, this.top + pageSize);
+      return true;
+    }
+
+    if (key === "Home" || code === "Numpad7") {
+      this.top = 0;
+      return true;
+    }
+
+    if (key === "End" || code === "Numpad1") {
+      this.top = maxTop;
+      return true;
+    }
+    return true; // modal: consume keys while open
   }
 
   private wrapTextPreserveNewlines(text: string, width: number): string[] {

@@ -5,6 +5,8 @@ import type { InventoryItem } from "../../items/Item";
  * Utility for formatting inventory data for UI display.
  */
 export class InventoryOverlay {
+  public readonly kind = "INVENTORY";
+
   /**
    * Builds an array of PickList entries from the current inventory state,
    * optionally filtered by a predicate function.
