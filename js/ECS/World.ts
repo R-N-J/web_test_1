@@ -6,6 +6,7 @@ import { EntityEditor } from "./EntityEditor";
 import { EntityManager } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
 import { ComponentManager, ComponentObserver } from "./ComponentManager";
+import { RelationshipManager } from "./RelationshipManager";
 
 export interface WorldSnapshot {
   nextEntityId: number;
@@ -23,6 +24,7 @@ export class World {
   private entities = new EntityManager();
   private queries = new QueryManager();
   private components = new ComponentManager(this.entities, this.queries);
+  public readonly relationships = new RelationshipManager(this.entities, this.components);
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
@@ -124,6 +126,9 @@ export class World {
    * Deletes an entity, cleans up its data, and recycles its ID.
    */
   public deleteEntity(entity: EntityId): void {
+    // 0. Clean up relationships pointing TO this entity
+    this.relationships.cleanup(entity);
+
     // 1. Clean up from Archetypes
     const loc = this.entities.getLocation(entity);
     if (loc) {
