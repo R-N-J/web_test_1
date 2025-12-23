@@ -7,6 +7,7 @@ import { EntityManager } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
 import { ComponentManager, ComponentObserver } from "./ComponentManager";
 import { RelationshipManager } from "./RelationshipManager";
+import { PrefabManager } from "./PrefabManager";
 
 export interface WorldSnapshot {
   nextEntityId: number;
@@ -25,6 +26,7 @@ export class World {
   private queries = new QueryManager();
   private components = new ComponentManager(this.entities, this.queries);
   public readonly relationships = new RelationshipManager(this.entities, this.components);
+  public readonly prefabs = new PrefabManager(this);
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
