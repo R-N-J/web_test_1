@@ -1,0 +1,48 @@
+import { EntityId } from "./Archetype";
+
+/**
+ * Manages unique string tags for entities (1-to-1 mapping).
+ */
+export class TagManager {
+  private tags = new Map<string, EntityId>();
+  private entities = new Map<EntityId, string>();
+
+  public register(tag: string, entity: EntityId): void {
+    if (this.tags.has(tag)) {
+      throw new Error(`Tag ${tag} is already assigned to entity ${this.tags.get(tag)}`);
+    }
+    this.tags.set(tag, entity);
+    this.entities.set(entity, tag);
+  }
+
+  public getEntity(tag: string): EntityId | undefined {
+    return this.tags.get(tag);
+  }
+
+  public unregister(entity: EntityId): void {
+    const tag = this.entities.get(entity);
+    if (tag) {
+      this.tags.delete(tag);
+      this.entities.delete(entity);
+    }
+  }
+
+  public save(): Record<string, EntityId> {
+    const data: Record<string, EntityId> = {};
+    for (const [tag, id] of this.tags) {
+      data[tag] = id;
+    }
+    return data;
+  }
+
+  public load(data: Record<string, EntityId>): void {
+    this.tags.clear();
+    this.entities.clear();
+    for (const [tag, id] of Object.entries(data)) {
+      this.register(tag, id);
+    }
+  }
+
+
+
+}
