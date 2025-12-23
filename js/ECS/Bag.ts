@@ -25,4 +25,33 @@ export class Bag<T> {
   public get(index: number): T {
     return this.data[index] as T;
   }
+
+  /**
+   * Clears the bag without reallocating the underlying array.
+   */
+  public clear(): void {
+    for (let i = 0; i < this.length; i++) {
+      this.data[i] = null;
+    }
+    this.length = 0;
+  }
+
+  /**
+   * Returns a clean array of all items.
+   * Useful for debugging or when order-independent iteration is needed.
+   */
+  public toArray(): T[] {
+    return this.data.slice(0, this.length) as T[];
+  }
+
+  /**
+   * Checks if an item exists in the bag.
+   */
+  public contains(item: T): boolean {
+    for (let i = 0; i < this.length; i++) {
+      if (this.data[i] === item) return true;
+    }
+    return false;
+  }
+
 }

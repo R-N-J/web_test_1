@@ -9,6 +9,36 @@ export class Aspect {
   ) {}
 
   /**
+   * Helper to build a mask from component IDs.
+   */
+  private static buildMask(ids: number[]): bigint {
+    let mask = 0n;
+    for (const id of ids) mask |= (1n << BigInt(id));
+    return mask;
+  }
+
+  /**
+   * Factory: Matches entities that have ALL of these components.
+   */
+  public static all(...ids: number[]): Aspect {
+    return new Aspect(this.buildMask(ids), 0n, 0n);
+  }
+
+  /**
+   * Factory: Matches entities that have AT LEAST ONE of these components.
+   */
+  public static one(...ids: number[]): Aspect {
+    return new Aspect(0n, this.buildMask(ids), 0n);
+  }
+
+  /**
+   * Factory: Matches entities that do NOT have any of these components.
+   */
+  public static exclude(...ids: number[]): Aspect {
+    return new Aspect(0n, 0n, this.buildMask(ids));
+  }
+
+  /**
    * Checks if an archetype's mask satisfies this aspect.
    */
   public matches(mask: bigint): boolean {

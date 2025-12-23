@@ -10,6 +10,13 @@ export abstract class BaseSystem {
   abstract update(dt: number): void;
 
   /**
+   * Toggles the system's processing state.
+   */
+  public toggle(state?: boolean): void {
+    this.enabled = state !== undefined ? state : !this.enabled;
+  }
+
+  /**
    * Called when the system is removed from the world.
    * Use this to unsubscribe from observers or clean up event listeners.
    */
@@ -29,6 +36,20 @@ export abstract class IteratingSystem extends BaseSystem {
     super();
     // If no aspect is passed to constructor, look for Decorator metadata
     this.aspect = aspect || getSystemAspect(this.constructor);
+  }
+
+  /**
+   * Shortcut to get component data from the world.
+   */
+  protected getComponent<T>(entity: number, id: number): T | undefined {
+    return this.world.getComponent<T>(entity, id);
+  }
+
+  /**
+   * Checks if an entity has a specific component.
+   */
+  protected hasComponent(entity: number, id: number): boolean {
+    return this.world.hasComponent(entity, id);
   }
 
   /**

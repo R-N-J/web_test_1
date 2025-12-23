@@ -1,4 +1,4 @@
-import { EntityId, Archetype } from "./Archetype";
+import { EntityId, ComponentId, Archetype } from "./Archetype";
 import { Bag } from "./Bag";
 
 // note: the only limit of this system is the memory available to store the versions array.
@@ -83,6 +83,34 @@ export class EntityManager {
     this.entityToLocation.delete(entity);
   }
 
+
+  /**
+   * Safely retrieves a component value for an entity.
+   * Leverages the Archetype.getValue helper for type safety.
+   */
+  public getComponentValue<T>(entity: EntityId, componentId: ComponentId): T | undefined {
+    const loc = this.entityToLocation.get(entity);
+    if (!loc || !loc.arch.hasComponent(componentId)) return undefined;
+    return loc.arch.getValue<T>(componentId, loc.row);
+  }
+
+  /**
+   * Checks if an entity possesses a specific component.
+   */
+  public hasComponent(entity: EntityId, componentId: ComponentId): boolean {
+    const loc = this.entityToLocation.get(entity);
+    return loc ? loc.arch.hasComponent(componentId) : false;
+  }
+
+  /**
+   * Returns the current component bitmask of an entity.
+   */
+  public getMask(entity: EntityId): bigint {
+    const loc = this.entityToLocation.get(entity);
+    return loc ? loc.arch.mask : 0n;
+  }
+
+
   public clear(): void {
     this.entityToLocation.clear();
     this.nextEntityId = 0;
@@ -98,6 +126,6 @@ export class EntityManager {
   }
 
   public getFreeEntities(): EntityId[] {
-    return (this.freeEntities as unknown as { data: (EntityId | null)[] }).data.filter(i => i !== null) as EntityId[];
+    return this.freeEntities.toArray();
   }
 }

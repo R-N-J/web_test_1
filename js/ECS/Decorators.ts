@@ -27,12 +27,21 @@ function getOrCreateAspectData(target: Constructor | Record<string, unknown>): A
 }
 
 /**
+ * Builds a mask from an array of IDs.
+ */
+function buildMask(ids: number[]): bigint {
+  let mask = 0n;
+  for (const id of ids) mask |= (1n << BigInt(id));
+  return mask;
+}
+
+/**
  * The entity must possess ALL of these components.
  */
 export function All(...componentIds: number[]) {
   return function(constructor: Constructor): void {
     const data = getOrCreateAspectData(constructor);
-    for (const id of componentIds) data.all |= (1n << BigInt(id));
+    data.all |= buildMask(componentIds);
   };
 }
 
@@ -42,7 +51,7 @@ export function All(...componentIds: number[]) {
 export function One(...componentIds: number[]) {
   return function(constructor: Constructor): void {
     const data = getOrCreateAspectData(constructor);
-    for (const id of componentIds) data.one |= (1n << BigInt(id));
+    data.one |= buildMask(componentIds);
   };
 }
 
@@ -52,7 +61,7 @@ export function One(...componentIds: number[]) {
 export function Exclude(...componentIds: number[]) {
   return function(constructor: Constructor): void {
     const data = getOrCreateAspectData(constructor);
-    for (const id of componentIds) data.exclude |= (1n << BigInt(id));
+    data.exclude |= buildMask(componentIds);
   };
 }
 

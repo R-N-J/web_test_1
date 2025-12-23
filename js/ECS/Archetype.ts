@@ -19,6 +19,23 @@ export class Archetype {
   }
 
   /**
+   * Returns true if this archetype contains the specified component.
+   */
+  public hasComponent(id: ComponentId): boolean {
+    return this.columns.has(id);
+  }
+
+  /**
+   * Safely retrieves a component value for a specific row.
+   */
+  public getValue<T>(id: ComponentId, row: number): T {
+    const col = this.columns.get(id);
+    if (!col) throw new Error(`Component ${id} not found in archetype ${this.mask}`);
+    return col[row] as T;
+  }
+
+
+  /**
    * Adds an entity to this archetype.
    * Values are passed as unknown to ensure type safety at the boundaries.
    */
@@ -44,5 +61,20 @@ export class Archetype {
       col.pop();
     }
     return movedEntity;
+  }
+
+  /**
+   * Creates a serializable snapshot of the archetype's data.
+   */
+  public save() {
+    const columnsData: Record<number, unknown[]> = {};
+    for (const [compId, column] of this.columns) {
+      columnsData[compId] = [...column]; // Shallow clone for immutability
+    }
+    return {
+      mask: this.mask.toString(),
+      entities: [...this.entities],
+      columns: columnsData
+    };
   }
 }

@@ -151,9 +151,6 @@ export class ComponentManager {
     this.entityManager.setLocation(entity, targetArch, newRow);
   }
 
-  public clear(): void {
-    this.archetypes.clear();
-  }
 
   public getArchetypes(): IterableIterator<Archetype> {
     return this.archetypes.values();
@@ -172,4 +169,35 @@ export class ComponentManager {
         this.registeredComponents.push(id);
     }
   }
+
+  /**
+   * Returns all component IDs currently known to the manager.
+   */
+  public getRegisteredComponents(): ComponentId[] {
+    return [...this.registeredComponents];
+  }
+
+  /**
+   * Total number of active archetypes.
+   */
+  public getArchetypeCount(): number {
+    return this.archetypes.size;
+  }
+
+  /**
+   * Wipes all observer subscriptions.
+   * Useful during a full world reset.
+   */
+  public clearObservers(): void {
+    this.onAddObservers.clear();
+    this.onRemoveObservers.clear();
+  }
+
+  public clear(): void {
+    this.archetypes.clear();
+    // Note: registeredComponents usually persists across clears
+    // unless you are doing a hard engine reset.
+  }
+
+
 }

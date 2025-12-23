@@ -27,7 +27,20 @@ export class EntityEditor {
    * Assigns a tag to this entity.
    */
   public tag(name: string): this {
+    // Safety: if the entity already has a different tag, unregister it first
+    const currentTag = this.world.tags.getTag(this.entity);
+    if (currentTag && currentTag !== name) {
+      this.world.tags.unregister(this.entity);
+    }
     this.world.tags.register(name, this.entity);
+    return this;
+  }
+
+  /**
+   * Removes any tag assigned to this entity.
+   */
+  public untag(): this {
+    this.world.tags.unregister(this.entity);
     return this;
   }
 
@@ -40,13 +53,18 @@ export class EntityEditor {
     return this;
   }
 
-
+  /**
+   * Removes this entity from a specific group.
+   */
+  public ungroup(name: string): this {
+    this.world.groups.removeFromGroup(name, this.entity);
+    return this;
+  }
 
   public add(id: ComponentId, value: unknown): this {
     this.newMask |= (1n << BigInt(id));
     this.additions.set(id, value);
     this.removals.delete(id);
-    this.additions.delete(id);
     return this;
   }
 

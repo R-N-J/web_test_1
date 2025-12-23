@@ -1,24 +1,55 @@
 import { World } from "./World";
 import { Scheduler } from "./Scheduler";
 
+// brain of the game loo, phases of a turn (Player -> NPCs -> World).
+
 export class TurnManager {
+  private turnCount = 0;
+  private _isPlayerTurn = true;
+
   constructor(private world: World, private scheduler: Scheduler) {}
 
-  /**
-   * Called when the player performs a move.
-   * It 'unlocks' the monster systems, runs them, then 'locks' them again.
-   */
-  public nextTurn(): void {
-    // 1. Process player consequences (Hunger, Poison)
-    // 2. Run Monster AI Systems
-    // 3. Tick the World
-    console.log("Turn processing...");
+  public get isPlayerTurn(): boolean {
+    return this._isPlayerTurn;
+  }
+
+  public get turnNumber(): number {
+    return this.turnCount;
   }
 
   /**
-   * In a turn-based game, dt is usually just '1' (one turn step).
+   * Called when the player performs a move.
+   */
+  public nextTurn(): void {
+    if (!this._isPlayerTurn) return; // Prevent double-turns
+
+    this._isPlayerTurn = false;
+    this.turnCount++;
+
+    // 1. Run NPC/Monster AI
+    // In a real game, you'd trigger specific systems here
+    this.tick();
+
+    // 2. Return control to player
+    this._isPlayerTurn = true;
+  }
+
+  /**
+   * Ticks the world systems.
+   * In a turn-based game, dt is usually '1'.
    */
   public tick(): void {
     this.scheduler.update(1.0);
+  }
+
+  /**
+   * Completely pauses the turn cycle (e.g. for a level-up screen).
+   */
+  public pause(): void {
+    this._isPlayerTurn = false;
+  }
+
+  public resume(): void {
+    this._isPlayerTurn = true;
   }
 }

@@ -80,21 +80,22 @@ export class RelationshipManager {
   }
 
   private removeComponent(subject: EntityId, relationId: ComponentId): void {
-    const loc = this.entities.getLocation(subject);
-    if (!loc) return;
-    const newMask = loc.arch.mask & ~(1n << BigInt(relationId));
-    this.components.transmute(subject, newMask);
-  }
+    const currentMask = this.entities.getMask(subject);
+    const bit = 1n << BigInt(relationId);
 
+    if ((currentMask & bit) !== 0n) {
+      const newMask = currentMask & ~bit;
+      this.components.transmute(subject, newMask);
+    }
+  }
   /**
    * Returns the target(s) of a relationship.
    * Returns a single EntityId for exclusive, or a Set<EntityId> for non-exclusive.
    */
   public getTargets(subject: EntityId, relationId: ComponentId): EntityId | Set<EntityId> | undefined {
-    const loc = this.entities.getLocation(subject);
-    if (!loc) return undefined;
-    return loc.arch.columns.get(relationId)?.[loc.row] as EntityId | Set<EntityId> | undefined;
-  }
+    return this.entities.getComponentValue<EntityId | Set<EntityId>>(subject, relationId);  }
+
+
 
   /**
    * Finds all entities that point to a specific target.
@@ -112,6 +113,32 @@ export class RelationshipManager {
         }
       }
     }
+  }
+
+  /**
+   * Returns the number of entities that point to a specific target via a relation.
+   */
+  public countRelated(relationId: ComponentId, target: EntityId): number {
+    let count = 0;
+    for (const arch of this.components.getArchetypes()) {
+      const column = arch.columns.get(relationId);
+      if (!column) continue;
+
+      for (let i = 0; i < arch.entities.length; i++) {
+        const val = column[i];
+        if (val === target || (val instanceof Set && val.has(target))) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Removes all targets for a specific relationship on a subject.
+   */
+  public clear(subject: EntityId, relationId: ComponentId): void {
+    this.removeComponent(subject, relationId);
   }
 
   public cleanup(deletedEntity: EntityId): void {

@@ -102,9 +102,25 @@ export class World {
     for (const e of entities) yield e;
   }
 
+  /**
+   * Returns the number of entities in a specific group.
+   * Much faster than getting all entities and checking the length.
+   */
+  public countGroup(group: string): number {
+    return this.groups.count(group);
+  }
+
   public *viewTag(tag: string): IterableIterator<EntityId> {
     const entity = this.tags.getEntity(tag);
     if (entity !== undefined) yield entity;
+  }
+
+  /**
+   * Returns the tag assigned to an entity, if any.
+   * Useful for identifying special entities in logs or UI.
+   */
+  public getEntityTag(entity: EntityId): string | undefined {
+    return this.tags.getTag(entity);
   }
 
   public query(aspect: bigint): EntityId[] {
@@ -116,6 +132,29 @@ export class World {
     }
     return results;
   }
+
+  /**
+   * Safely retrieves a component value for an entity.
+   */
+  public getComponent<T>(entity: EntityId, id: ComponentId): T | undefined {
+    return this.entities.getComponentValue<T>(entity, id);
+  }
+
+  /**
+   * Checks if an entity possesses a specific component.
+   */
+  public hasComponent(entity: EntityId, id: ComponentId): boolean {
+    return this.entities.hasComponent(entity, id);
+  }
+
+  /**
+   * Checks if an entity is still active and hasn't been recycled.
+   */
+  public isValid(entity: EntityId): boolean {
+    return this.entities.isValid(entity);
+  }
+
+
 
   /**
    * Generates a new unique Entity ID, recycling old IDs if available.
@@ -183,33 +222,27 @@ export class World {
    * Useful for loading games or switching levels.
    */
   public clear(): void {
+    // 1. Clear Entities and their recycling versions
     this.entities.clear();
+    // 2. Clear Archetype data and observers
     this.components.clear();
+    this.components.clearObservers(); // Ensure old callbacks don't fire on new entities
+    // 3. Clear the Query cache
     this.queries.clear();
-    this.tags.load({});
-    this.groups.load({});
+    // 4. Reset Tags and Groups
+    this.tags.load({}); // TagManager.load({}) effectively clears it
+    this.groups.load({}); // GroupManager.load({}) effectively clears it
+    // 5. Note: PrefabManager doesn't usually need clearing as
+    // blueprints persist across level changes.
   }
 
   /**
    * Creates a plain-object snapshot of the entire ECS state.
    */
   public saveSnapshot(): WorldSnapshot {
-    const archetypeSnapshots = [];
-
-    for (const [mask, arch] of this.components.getArchetypeMap()) {
-      const columnsData: Record<number, unknown[]> = {};
-
-      for (const [compId, column] of arch.columns) {
-        // We clone the column data to ensure the snapshot is immutable
-        columnsData[compId] = [...column];
-      }
-
-      archetypeSnapshots.push({
-        mask: mask.toString(), // BigInt must be stringified for JSON
-        entities: [...arch.entities],
-        columns: columnsData
-      });
-    }
+    const archetypeSnapshots = Array.from(this.components.getArchetypeMap().values())
+      .filter(arch => arch.entities.length > 0) // Only save archetypes that actually have entities
+      .map(arch => arch.save());
 
     return {
       nextEntityId: this.entities.getNextEntityId(),
@@ -224,7 +257,7 @@ export class World {
    * Restores the world state from a snapshot.
    */
   public loadSnapshot(snapshot: WorldSnapshot): void {
-    this.clear(); // Method to reset all maps and arrays
+    this.clear();
     this.entities.setNextEntityId(snapshot.nextEntityId);
 
     // 1. Rebuild Archetypes and Entity Locations
@@ -237,6 +270,7 @@ export class World {
 
       for (const compId of componentIds) {
         arch.columns.set(compId, archData.columns[compId]);
+        // CLEANER: ComponentManager handles its own registration logic
         this.components.addRegisteredComponent(compId);
       }
 
@@ -250,5 +284,6 @@ export class World {
     this.tags.load(snapshot.tags);
     this.groups.load(snapshot.groups);
   }
+
 }
 

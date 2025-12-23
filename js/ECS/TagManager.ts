@@ -19,6 +19,27 @@ export class TagManager {
     return this.tags.get(tag);
   }
 
+  /**
+   * Returns true if the specific tag is currently assigned.
+   */
+  public has(tag: string): boolean {
+    return this.tags.has(tag);
+  }
+
+  /**
+   * Returns the tag assigned to a specific entity, if any.
+   */
+  public getTag(entity: EntityId): string | undefined {
+    return this.entities.get(entity);
+  }
+
+  /**
+   * Returns all registered tags.
+   */
+  public getTags(): string[] {
+    return Array.from(this.tags.keys());
+  }
+
   public unregister(entity: EntityId): void {
     const tag = this.entities.get(entity);
     if (tag) {

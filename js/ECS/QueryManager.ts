@@ -35,6 +35,13 @@ export class QueryManager {
     }
   }
 
+  /**
+   * Returns the number of unique queries (Aspects) currently cached.
+   */
+  public getQueryCount(): number {
+    return this.queryCache.size;
+  }
+
   public clear(): void {
     this.queryCache.clear();
     this.activeAspects.clear();

@@ -15,6 +15,29 @@ export class GroupManager {
     this.entityToGroups.get(entity)!.add(group);
   }
 
+  /**
+   * Checks if a group contains a specific entity.
+   */
+  public has(group: string, entity: EntityId): boolean {
+    return this.groups.get(group)?.has(entity) ?? false;
+  }
+
+  /**
+   * Returns the number of entities in a group.
+   */
+  public count(group: string): number {
+    return this.groups.get(group)?.size ?? 0;
+  }
+
+  /**
+   * Removes an entity from one specific group.
+   */
+  public removeFromGroup(group: string, entity: EntityId): void {
+    this.groups.get(group)?.delete(entity);
+    this.entityToGroups.get(entity)?.delete(group);
+  }
+
+
   public getEntities(group: string): EntityId[] {
     const set = this.groups.get(group);
     return set ? Array.from(set) : [];

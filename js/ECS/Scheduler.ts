@@ -1,5 +1,7 @@
 import { BaseSystem } from "./System";
 
+type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): T };
+
 export class Scheduler {
   private systems: BaseSystem[] = [];
 
@@ -21,9 +23,11 @@ export class Scheduler {
   /**
    * Suspends a system by class type or instance.
    */
-  public setEnabled<T extends BaseSystem>(type: new (...args: ConstructorParameters<typeof BaseSystem>) => T, enabled: boolean): void {
+  public setEnabled<T extends BaseSystem>(type: SystemConstructor<T>, enabled: boolean): void {
     for (const s of this.systems) {
-      if (s instanceof type) s.enabled = enabled;
+      if (s.constructor === type) {
+        s.toggle(enabled);
+      }
     }
   }
 
