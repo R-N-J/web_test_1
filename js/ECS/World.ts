@@ -148,6 +148,68 @@ export class World {
   }
 
   /**
+   * Fast-path iterator that yields raw SoA columns for matching archetypes.
+   *
+   * Example usage:
+   * for (const { entities, columns: [pos, vel] } of world.viewColumns(aspect, POS, VEL)) { ... }
+   */
+  public *viewColumns(
+    aspect: Aspect,
+    ...componentIds: ComponentId[]
+  ): IterableIterator<{ arch: Archetype; entities: EntityId[]; columns: unknown[][] }> {
+    const archetypes = this.getArchetypes(aspect);
+
+    for (const arch of archetypes) {
+      const cols: unknown[][] = [];
+      let ok = true;
+
+      for (const id of componentIds) {
+        const col = arch.getColumn<unknown>(id);
+        if (!col) {
+          ok = false;
+          break;
+        }
+        cols.push(col);
+      }
+
+      if (!ok) continue;
+
+      yield { arch, entities: arch.entities, columns: cols };
+    }
+  }
+
+  /**
+   * Strict fast-path iterator: yields raw SoA columns for matching archetypes.
+   * Throws if any matching archetype is missing a requested column.
+   *
+   * Use this when your Aspect logically guarantees the columns exist (e.g. Aspect.all(...)).
+   * This helps catch registration/serialization mistakes early.
+   */
+  public *viewColumnsStrict(
+    aspect: Aspect,
+    ...componentIds: ComponentId[]
+  ): IterableIterator<{ arch: Archetype; entities: EntityId[]; columns: unknown[][] }> {
+    const archetypes = this.getArchetypes(aspect);
+
+    for (const arch of archetypes) {
+      const cols: unknown[][] = [];
+
+      for (const id of componentIds) {
+        const col = arch.getColumn<unknown>(id);
+        if (!col) {
+          throw new Error(
+            `viewColumnsStrict: archetype mask=${arch.mask.toString()} is missing column for componentId=${id}`
+          );
+        }
+        cols.push(col);
+      }
+
+      yield { arch, entities: arch.entities, columns: cols };
+    }
+  }
+
+
+  /**
    * Returns the tag assigned to an entity, if any.
    * Useful for identifying special entities in logs or UI.
    */

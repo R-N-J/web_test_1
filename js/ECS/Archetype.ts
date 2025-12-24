@@ -33,6 +33,17 @@ export class Archetype {
     return this.columns.get(id) as T[] | undefined;
   }
 
+
+  /**
+   * Fast-path access that asserts the column exists.
+   * Use when your system's Aspect guarantees this component is present.
+   */
+  public requireColumn<T>(id: ComponentId): T[] {
+    const col = this.getColumn<T>(id);
+    if (!col) throw new Error(`Component ${id} not found in archetype ${this.mask}`);
+    return col;
+  }
+
   /**
    * Safely retrieves a component value for a specific row.
    */
