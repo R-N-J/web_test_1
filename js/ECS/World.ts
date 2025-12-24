@@ -30,6 +30,8 @@ export interface WorldSnapshot {
 
 const ECS_SNAPSHOT_VERSION = 1;
 
+
+
 export class World {
   private entities = new EntityManager();
   private queries = new QueryManager();
@@ -39,6 +41,35 @@ export class World {
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
+
+  private singletonEntity: EntityId;
+
+  constructor() {
+    this.singletonEntity = this.createEntity();
+    this.tags.register("__world_singletons__", this.singletonEntity);
+  }
+
+  /**
+   * Sets or updates a global singleton component.
+   */
+  public setSingleton<T>(id: ComponentId, value: T): void {
+    this.addComponent(this.singletonEntity, id, value);
+  }
+
+  /**
+   * Retrieves a global singleton component.
+   */
+  public getSingleton<T>(id: ComponentId): T | undefined {
+    return this.getComponent<T>(this.singletonEntity, id);
+  }
+
+  /**
+   * Checks if a global singleton component exists.
+   */
+  public hasSingleton(id: ComponentId): boolean {
+    return this.hasComponent(this.singletonEntity, id);
+  }
+
 
   /**
    * Subscribe to structural changes (entity mask changes).

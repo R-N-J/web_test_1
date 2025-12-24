@@ -160,6 +160,20 @@ export abstract class IteratingSystem extends BaseSystem {
 
 
   /**
+   * Shortcut to get a global singleton component.
+   */
+  protected getSingleton<T>(id: number): T | undefined {
+    return this.world.getSingleton<T>(id);
+  }
+
+  /**
+   * Shortcut to check if a global singleton component exists.
+   */
+  protected hasSingleton(id: number): boolean {
+    return this.world.hasSingleton(id);
+  }
+
+  /**
    * The core loop. It avoids checking every entity by processing
    * pre-filtered chunks of memory (Archetypes).
    */
