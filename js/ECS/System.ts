@@ -53,6 +53,28 @@ export abstract class IteratingSystem extends BaseSystem {
   }
 
   /**
+   * Non-structural write (no archetype move).
+   */
+  protected setComponent<T>(entity: number, id: number, value: T): boolean {
+    return this.world.setComponent(entity, id, value);
+  }
+
+  /**
+   * Non-structural update (no archetype move).
+   */
+  protected updateComponent<T>(entity: number, id: number, updater: (current: T) => T): boolean {
+    return this.world.updateComponent(entity, id, updater);
+  }
+
+  /**
+   * Non-structural mutation (no archetype move).
+   */
+  protected mutateComponent<T>(entity: number, id: number, mutator: (value: T) => void): boolean {
+    return this.world.mutateComponent(entity, id, mutator);
+  }
+
+
+  /**
    * The core loop. It avoids checking every entity by processing
    * pre-filtered chunks of memory (Archetypes).
    */

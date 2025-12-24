@@ -15,6 +15,8 @@ export class EntityManager {
   private freeEntities = new Bag<EntityId>();
   private versions = new Uint32Array(1024); // Store versions for each index
 
+
+
   private ensureVersionCapacity(index: number): void {
     if (index >= this.versions.length) {
       const newCap = Math.max(index + 1, this.versions.length * 2);
@@ -95,6 +97,61 @@ export class EntityManager {
   }
 
   /**
+   * Non-structural write: sets the component value for an entity WITHOUT changing archetype.
+   * Returns false if entity/component doesn't exist.
+   */
+  public setComponentValue<T>(entity: EntityId, componentId: ComponentId, value: T): boolean {
+    const loc = this.entityToLocation.get(entity);
+    if (!loc) return false;
+
+    const col = loc.arch.columns.get(componentId);
+    if (!col) return false;
+
+    col[loc.row] = value as unknown;
+    return true;
+  }
+
+  /**
+   * Non-structural update: reads current value, computes next value, writes it back.
+   * Great for numbers/immutable updates (hp = hp - 1, etc).
+   */
+  public updateComponentValue<T>(
+    entity: EntityId,
+    componentId: ComponentId,
+    updater: (current: T) => T
+  ): boolean {
+    const loc = this.entityToLocation.get(entity);
+    if (!loc) return false;
+
+    const col = loc.arch.columns.get(componentId);
+    if (!col) return false;
+
+    const current = col[loc.row] as T;
+    col[loc.row] = updater(current) as unknown;
+    return true;
+  }
+
+  /**
+   * Non-structural mutate: gives you the live object reference and lets you mutate in place.
+   * Best for object components (Position, Stats objects, etc).
+   */
+  public mutateComponent<T>(
+    entity: EntityId,
+    componentId: ComponentId,
+    mutator: (value: T) => void
+  ): boolean {
+    const loc = this.entityToLocation.get(entity);
+    if (!loc) return false;
+
+    const col = loc.arch.columns.get(componentId);
+    if (!col) return false;
+
+    mutator(col[loc.row] as T);
+    return true;
+  }
+
+
+  /**
    * Checks if an entity possesses a specific component.
    */
   public hasComponent(entity: EntityId, componentId: ComponentId): boolean {
@@ -114,7 +171,24 @@ export class EntityManager {
   public clear(): void {
     this.entityToLocation.clear();
     this.nextEntityId = 0;
+    // Reuse Bag storage if you want; if not available, recreate it (your current approach).
     this.freeEntities = new Bag<EntityId>();
+
+    // Reset versions so any old EntityId becomes invalid after a clear.
+    // This keeps behavior predictable across world resets / snapshot loads.
+    this.versions.fill(0);
+  }
+
+
+  /**
+   * Hard reset: drops allocated buffers and returns to initial capacity.
+   * Optional, but handy for tests or extreme resets.
+   */
+  public hardReset(): void {
+    this.entityToLocation.clear();
+    this.nextEntityId = 0;
+    this.freeEntities = new Bag<EntityId>();
+    this.versions = new Uint32Array(1024);
   }
 
   public getNextEntityId(): number {
@@ -128,4 +202,39 @@ export class EntityManager {
   public getFreeEntities(): EntityId[] {
     return this.freeEntities.toArray();
   }
+
+  /**
+   * Restores the recycled-ID pool from a snapshot.
+   * This keeps entity ID reuse deterministic across save/load.
+   */
+  public loadFreeEntities(free: EntityId[]): void {
+    this.freeEntities = new Bag<EntityId>();
+    for (const id of free) {
+      this.freeEntities.add(id);
+    }
+  }
+
+  /**
+   * Returns a JSON-safe snapshot of entity versions for indices [0..nextEntityId).
+   */
+  public saveVersions(): number[] {
+    return Array.from(this.versions.subarray(0, this.nextEntityId));
+  }
+
+  /**
+   * Restores entity versions (generations). Expects versions for indices [0..nextEntityId).
+   */
+  public loadVersions(versions: number[]): void {
+    if (versions.length === 0) return;
+
+    // Ensure capacity for last index
+    this.ensureVersionCapacity(versions.length - 1);
+
+    // Reset existing values then restore
+    this.versions.fill(0);
+    for (let i = 0; i < versions.length; i++) {
+      this.versions[i] = versions[i] >>> 0;
+    }
+  }
+
 }

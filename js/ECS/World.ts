@@ -8,9 +8,16 @@ import { QueryManager } from "./QueryManager";
 import { ComponentManager, ComponentObserver } from "./ComponentManager";
 import { RelationshipManager } from "./RelationshipManager";
 import { PrefabManager } from "./PrefabManager";
+import type { ComponentSerializer } from "./ComponentManager";
 
 export interface WorldSnapshot {
+  version: number;
   nextEntityId: number;
+  /**
+   * Entity generation/version values for indices [0..nextEntityId).
+   * Used to keep EntityId validity deterministic across save/load.
+   */
+  entityVersions: number[];
   freeEntities: EntityId[];
   archetypes: {
     mask: string;
@@ -21,6 +28,8 @@ export interface WorldSnapshot {
   groups: Record<string, EntityId[]>;
 }
 
+const ECS_SNAPSHOT_VERSION = 1;
+
 export class World {
   private entities = new EntityManager();
   private queries = new QueryManager();
@@ -30,6 +39,23 @@ export class World {
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
+
+
+  /**
+   * Registers a component ID with the ECS. This should be done once at startup
+   * (or before loading a snapshot) to keep archetype construction deterministic.
+   */
+  public registerComponent(id: ComponentId): void {
+    this.components.addRegisteredComponent(id);
+  }
+
+  /**
+   * Registers a serializer for a specific component ID.
+   * This is used by snapshot save/load to handle non-JSON-native component values (Set, Map, custom classes, etc.).
+   */
+  public registerComponentSerializer(id: ComponentId, serializer: ComponentSerializer): void {
+    this.components.registerSerializer(id, serializer);
+  }
 
   /**
    * Subscribes a callback to be called when a component is added to an entity.
@@ -55,11 +81,17 @@ export class World {
 
   public addComponent(entity: EntityId, componentId: ComponentId, value: unknown): void {
     this.components.addRegisteredComponent(componentId);
+
+    // If the entity already has this component, treat this as "replace value" (non-structural).
+    if (this.entities.hasComponent(entity, componentId)) {
+      this.entities.setComponentValue(entity, componentId, value);
+      return;
+    }
+
+    // Otherwise, this is a structural change (add the component bit -> transmute).
     const loc = this.entities.getLocation(entity);
     const oldMask = loc?.arch.mask ?? 0n;
     const newMask = oldMask | (1n << BigInt(componentId));
-
-    if (oldMask === newMask) return; // Already has it
 
     this.components.transmute(entity, newMask, componentId, value);
   }
@@ -139,6 +171,29 @@ export class World {
   public getComponent<T>(entity: EntityId, id: ComponentId): T | undefined {
     return this.entities.getComponentValue<T>(entity, id);
   }
+
+  /**
+   * Non-structural write (no archetype move). Returns false if entity/component doesn't exist.
+   */
+  public setComponent<T>(entity: EntityId, id: ComponentId, value: T): boolean {
+    return this.entities.setComponentValue(entity, id, value);
+  }
+
+  /**
+   * Non-structural update (no archetype move). Returns false if entity/component doesn't exist.
+   */
+  public updateComponent<T>(entity: EntityId, id: ComponentId, updater: (current: T) => T): boolean {
+    return this.entities.updateComponentValue(entity, id, updater);
+  }
+
+  /**
+   * Non-structural mutation (no archetype move). Returns false if entity/component doesn't exist.
+   */
+  public mutateComponent<T>(entity: EntityId, id: ComponentId, mutator: (value: T) => void): boolean {
+    return this.entities.mutateComponent(entity, id, mutator);
+  }
+
+
 
   /**
    * Checks if an entity possesses a specific component.
@@ -240,12 +295,28 @@ export class World {
    * Creates a plain-object snapshot of the entire ECS state.
    */
   public saveSnapshot(): WorldSnapshot {
-    const archetypeSnapshots = Array.from(this.components.getArchetypeMap().values())
-      .filter(arch => arch.entities.length > 0) // Only save archetypes that actually have entities
-      .map(arch => arch.save());
+    const archetypeSnapshots = [];
+
+    for (const [mask, arch] of this.components.getArchetypeMap()) {
+      if (arch.entities.length === 0) continue;
+
+      const columnsData: Record<number, unknown[]> = {};
+      for (const [compId, column] of arch.columns) {
+        // Serialize + clone each value to keep snapshot immutable
+        columnsData[compId] = column.map(v => this.components.serializeValue(compId, v));
+      }
+
+      archetypeSnapshots.push({
+        mask: mask.toString(),
+        entities: [...arch.entities],
+        columns: columnsData
+      });
+    }
 
     return {
+      version: ECS_SNAPSHOT_VERSION,
       nextEntityId: this.entities.getNextEntityId(),
+      entityVersions: this.entities.saveVersions(),
       freeEntities: this.entities.getFreeEntities(),
       archetypes: archetypeSnapshots,
       tags: this.tags.save(),
@@ -254,13 +325,40 @@ export class World {
   }
 
   /**
+   * Prepares the World to load a snapshot.
+   *
+   * - Clears runtime state (entities, archetypes, queries, tags, groups)
+   * - Keeps component IDs + serializers intact (unless your code explicitly resets them)
+   * - Optionally runs a registrar callback to (re)register component IDs/serializers
+   */
+  public resetForLoad(registrar?: (world: World) => void): void {
+    this.clear();
+
+    // Ensure any caller can re-register component IDs and serializers at the right time.
+    // (Useful if you ever create a brand new World instance or you want explicit bootstrapping.)
+    registrar?.(this);
+  }
+
+
+  /**
    * Restores the world state from a snapshot.
    */
   public loadSnapshot(snapshot: WorldSnapshot): void {
-    this.clear();
-    this.entities.setNextEntityId(snapshot.nextEntityId);
+    if (snapshot.version !== ECS_SNAPSHOT_VERSION) {
+      throw new Error(
+        `Unsupported ECS snapshot version: ${snapshot.version}. Expected: ${ECS_SNAPSHOT_VERSION}`
+      );
+    }
+    //this.clear();
+    // If you want to enforce registration always happens before load,
+    // loadSnapshot can rely on resetForLoad() being called by the caller,
+    // OR you can call it here with no registrar.
+    this.resetForLoad();
 
-    // 1. Rebuild Archetypes and Entity Locations
+    this.entities.setNextEntityId(snapshot.nextEntityId);
+    this.entities.loadVersions(snapshot.entityVersions);
+    this.entities.loadFreeEntities(snapshot.freeEntities);
+
     for (const archData of snapshot.archetypes) {
       const mask = BigInt(archData.mask);
       const componentIds = Object.keys(archData.columns).map(Number);
@@ -269,18 +367,17 @@ export class World {
       arch.entities = archData.entities;
 
       for (const compId of componentIds) {
-        arch.columns.set(compId, archData.columns[compId]);
-        // CLEANER: ComponentManager handles its own registration logic
+        const rawColumn = archData.columns[compId];
+        const decoded = rawColumn.map(v => this.components.deserializeValue(compId, v));
+        arch.columns.set(compId, decoded);
         this.components.addRegisteredComponent(compId);
       }
 
-      // 2. Rebuild the entity-to-location index
       for (let row = 0; row < arch.entities.length; row++) {
         this.entities.setLocation(arch.entities[row], arch, row);
       }
     }
 
-    // 3. Rebuild Tags and Groups
     this.tags.load(snapshot.tags);
     this.groups.load(snapshot.groups);
   }

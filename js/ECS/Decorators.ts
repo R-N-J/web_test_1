@@ -16,7 +16,7 @@ interface AspectData {
   exclude: bigint;
 }
 
-type Constructor = { new (...args: unknown[]): unknown };
+export type Constructor = { new (...args: unknown[]): unknown };
 
 function getOrCreateAspectData(target: Constructor | Record<string, unknown>): AspectData {
   const t = target as unknown as Record<string, unknown>;

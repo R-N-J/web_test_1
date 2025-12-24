@@ -4,16 +4,71 @@ import { QueryManager } from "./QueryManager";
 
 export type ComponentObserver = (entity: EntityId, componentId: ComponentId) => void;
 
+/**
+ * Serializer for a single component type (by ComponentId).
+ * Use this for snapshot save/load of non-JSON-native values (Set, Map, classes, etc).
+ */
+export interface ComponentSerializer {
+  serialize(value: unknown): unknown;
+  deserialize(value: unknown): unknown;
+}
+
 export class ComponentManager {
   private archetypes = new Map<bigint, Archetype>();
   private onAddObservers = new Map<ComponentId, ComponentObserver[]>();
   private onRemoveObservers = new Map<ComponentId, ComponentObserver[]>();
   private registeredComponents: ComponentId[] = [];
 
+  private serializers = new Map<ComponentId, ComponentSerializer>();
+
   constructor(
     private entityManager: EntityManager,
     private queryManager: QueryManager
   ) {}
+
+
+
+  private static deepCloneSnapshotValue(value: unknown): unknown {
+    // Primitives and null are safe as-is
+    if (value === null || typeof value !== "object") return value;
+
+    const sc = (globalThis as unknown as { structuredClone?: (v: unknown) => unknown }).structuredClone;
+    if (typeof sc === "function") {
+      return sc(value);
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(value)) as unknown;
+    } catch (err) {
+      // Dev-mode warning. If this fires, register a serializer for this componentId.
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.warn(
+          "[ECS] Snapshot deep-clone failed. Value will be saved by reference. " +
+          "Register a ComponentSerializer for this ComponentId to fix it.",
+          { value, error: err }
+        );
+      }
+      return value;
+    }
+  }
+
+
+  public registerSerializer(id: ComponentId, serializer: ComponentSerializer): void {
+    this.serializers.set(id, serializer);
+  }
+
+  public serializeValue(id: ComponentId, value: unknown): unknown {
+    const s = this.serializers.get(id);
+    if (s) return s.serialize(value);
+
+    // Default policy: deep clone to prevent snapshot sharing references with live ECS data.
+    return ComponentManager.deepCloneSnapshotValue(value);
+  }
+
+  public deserializeValue(id: ComponentId, value: unknown): unknown {
+    const s = this.serializers.get(id);
+    return s ? s.deserialize(value) : value;
+  }
 
   public subscribeOnAdd(id: ComponentId, observer: ComponentObserver): void {
     if (!this.onAddObservers.has(id)) this.onAddObservers.set(id, []);
@@ -48,6 +103,8 @@ export class ComponentManager {
     }
     return arch;
   }
+
+
 
   public transmute(entity: EntityId, newMask: bigint, newComponentId?: ComponentId, newValue?: unknown): void {
     const oldLocation = this.entityManager.getLocation(entity);

@@ -1,6 +1,6 @@
 import { BaseSystem } from "./System";
 
-type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): T };
+export type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): T };
 
 export class Scheduler {
   private systems: BaseSystem[] = [];

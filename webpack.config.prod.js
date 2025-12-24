@@ -2,6 +2,7 @@ const { merge } = require('webpack-merge');
 const common = require('./webpack.common.js');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
+const webpack = require("webpack");
 
 module.exports = merge(common, {
   mode: 'production',
@@ -21,6 +22,9 @@ module.exports = merge(common, {
         { from: '404.html', to: '404.html' },
         { from: 'site.webmanifest', to: 'site.webmanifest' },
       ],
+    }),
+    new webpack.DefinePlugin({
+      __DEV__: JSON.stringify(false),
     }),
   ],
 });

@@ -17,25 +17,48 @@ export class RelationshipManager {
 
     this.components.addRegisteredComponent(relationId);
 
+    const hasRelation = this.entities.hasComponent(subject, relationId);
+
     if (exclusive) {
-      // Standard 1-to-1 or Many-to-1 logic
+      // If component already exists, just overwrite the stored target (non-structural).
+      if (hasRelation) {
+        this.entities.setComponentValue(subject, relationId, target);
+        return;
+      }
+
+      // Otherwise, structural add (needs the bit in the mask).
       const loc = this.entities.getLocation(subject);
       const oldMask = loc?.arch.mask ?? 0n;
       this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, target);
-    } else {
-      // One-to-Many logic using a Set
-      const existing = this.getTargets(subject, relationId);
-      if (existing instanceof Set) {
-        existing.add(target);
-      } else {
-        const newSet = new Set<EntityId>();
-        newSet.add(target);
-        const loc = this.entities.getLocation(subject);
-        const oldMask = loc?.arch.mask ?? 0n;
-        this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, newSet);
-      }
+      return;
     }
+
+    // One-to-Many logic using a Set
+    const existing = this.getTargets(subject, relationId);
+
+    if (existing instanceof Set) {
+      // Already a set: mutate in place (non-structural)
+      existing.add(target);
+      return;
+    }
+
+    // Upgrade "no relation" or "single relation value" to a Set
+    const newSet = new Set<EntityId>();
+    if (existing !== undefined) newSet.add(existing);
+    newSet.add(target);
+
+    if (hasRelation) {
+      // Component exists already, just replace stored value with the Set (non-structural)
+      this.entities.setComponentValue(subject, relationId, newSet);
+      return;
+    }
+
+    // Component not present: structural add required
+    const loc = this.entities.getLocation(subject);
+    const oldMask = loc?.arch.mask ?? 0n;
+    this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, newSet);
   }
+
 
   /**
    * Creates a two-way link between two entities.
