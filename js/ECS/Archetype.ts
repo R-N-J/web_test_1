@@ -26,6 +26,14 @@ export class Archetype {
   }
 
   /**
+   * Returns the raw column array for a component ID (fast-path access).
+   * Useful for high-performance systems that override `processArchetype`.
+   */
+  public getColumn<T>(id: ComponentId): T[] | undefined {
+    return this.columns.get(id) as T[] | undefined;
+  }
+
+  /**
    * Safely retrieves a component value for a specific row.
    */
   public getValue<T>(id: ComponentId, row: number): T {
