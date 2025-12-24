@@ -1,7 +1,7 @@
 import { World } from "./World";
 import { Aspect } from "./Aspect";
 import { Archetype, EntityId } from "./Archetype";
-import { getSystemAspect } from "./Decorators";
+import { getSystemAspect, getSystemInterval, getSystemGroup, getSystemTag } from "./Decorators";
 import type { MaskObserver } from "./ComponentManager";
 
 
@@ -32,6 +32,8 @@ export abstract class BaseSystem {
 
 export abstract class IteratingSystem extends BaseSystem {
   protected aspect: Aspect;
+  protected requiredGroup?: string;
+  protected requiredTag?: string;
 
   private membership = new Set<EntityId>();
   private readonly maskObserver: MaskObserver;
@@ -39,6 +41,8 @@ export abstract class IteratingSystem extends BaseSystem {
   constructor(protected world: World, aspect?: Aspect) {
     super();
     this.aspect = aspect || getSystemAspect(this.constructor);
+    this.requiredGroup = getSystemGroup(this.constructor);
+    this.requiredTag = getSystemTag(this.constructor);
 
     // Seed membership for already-existing entities (important when loading or building worlds).
     this.initializeMembership();
@@ -162,11 +166,25 @@ export abstract class IteratingSystem extends BaseSystem {
   update(dt: number): void {
     if (!this.enabled) return;
 
-    const matchingArchetypes = this.world.getArchetypes(this.aspect);
-    for (const arch of matchingArchetypes) {
-      this.processArchetype(arch, dt);
+    // Logic Improvement: If a group or tag is required, we use the specific
+    // view methods instead of scanning all archetypes.
+    if (this.requiredTag) {
+      for (const entity of this.world.viewTag(this.requiredTag)) {
+        if (this.world.matches(entity, this.aspect)) this.processEntity(entity, dt);
+      }
+    } else if (this.requiredGroup) {
+      for (const entity of this.world.viewGroup(this.requiredGroup)) {
+        if (this.world.matches(entity, this.aspect)) this.processEntity(entity, dt);
+      }
+    } else {
+      // Standard behavior: scan matching archetypes
+      const matchingArchetypes = this.world.getArchetypes(this.aspect);
+      for (const arch of matchingArchetypes) {
+        this.processArchetype(arch, dt);
+      }
     }
   }
+
 
   /**
    * Optimized: Processes an entire chunk of memory (Archetype) at once.
@@ -189,14 +207,17 @@ export abstract class IteratingSystem extends BaseSystem {
  */
 export abstract class IntervalSystem extends IteratingSystem {
   private accumulator = 0;
+  protected interval: number;
 
-  constructor(world: World, aspect: Aspect, protected interval: number) {
+  constructor(world: World, aspect?: Aspect, interval?: number) {
     super(world, aspect);
+    // Use 'interval' if provided, otherwise check decorator metadata
+    this.interval = interval ?? getSystemInterval(this.constructor) ?? 1;
   }
 
   update(dt: number): void {
     this.accumulator += dt;
-    if (this.accumulator >= this.interval) {
+    if (this.accumulator >= this.interval) {   // It has been 'interval' number of turns!
       super.update(this.accumulator);
       this.accumulator = 0;
     }

@@ -8,12 +8,26 @@ export class TagManager {
   private entities = new Map<EntityId, string>();
 
   public register(tag: string, entity: EntityId): void {
+    // If the entity already has a different tag, remove the old one first
+    const existingTag = this.entities.get(entity);
+    if (existingTag && existingTag !== tag) {
+      this.tags.delete(existingTag);
+    }
+
     if (this.tags.has(tag)) {
       throw new Error(`Tag ${tag} is already assigned to entity ${this.tags.get(tag)}`);
     }
     this.tags.set(tag, entity);
     this.entities.set(entity, tag);
   }
+
+  /**
+   * Checks if an entity is currently assigned any tag.
+   */
+  public isTagged(entity: EntityId): boolean {
+    return this.entities.has(entity);
+  }
+
 
   public getEntity(tag: string): EntityId | undefined {
     return this.tags.get(tag);

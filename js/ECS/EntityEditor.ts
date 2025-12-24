@@ -17,6 +17,16 @@ export class EntityEditor {
   }
 
   /**
+   * Retrieves a component value for the entity being edited.
+   * Checks pending additions first, then falls back to the world data.
+   */
+  public get<T>(id: ComponentId): T | undefined {
+    if (this.additions.has(id)) return this.additions.get(id) as T;
+    if (this.removals.has(id)) return undefined;
+    return this.world.getComponent<T>(this.entity, id);
+  }
+
+  /**
    * Checks if the entity will have this component after commit.
    */
   public has(id: ComponentId): boolean {
@@ -73,11 +83,18 @@ export class EntityEditor {
    * Removes all components from the entity.
    */
   public clear(): this {
-    this.newMask = 0n;
+    // 1. Clear pending additions
     this.additions.clear();
-    //TODO: implement
-    // We would need to identify all current components to add them to removals
-    // For now, this is a placeholder for the logic if needed
+
+    // 2. Identify all current components from the world mask and mark for removal
+    const currentMask = this.world.getMask(this.entity);
+    for (const compId of this.world.getRegisteredComponents()) {
+      if ((currentMask & (1n << BigInt(compId))) !== 0n) {
+        this.removals.add(compId);
+      }
+    }
+
+    this.newMask = 0n;
     return this;
   }
 

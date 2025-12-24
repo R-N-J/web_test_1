@@ -116,8 +116,20 @@ export class RelationshipManager {
    * Returns a single EntityId for exclusive, or a Set<EntityId> for non-exclusive.
    */
   public getTargets(subject: EntityId, relationId: ComponentId): EntityId | Set<EntityId> | undefined {
-    return this.entities.getComponentValue<EntityId | Set<EntityId>>(subject, relationId);  }
+    const val = this.entities.getComponentValue<EntityId | Set<EntityId>>(subject, relationId);
 
+    if (val === undefined) return undefined;
+
+    if (val instanceof Set) {
+      // Logic Improvement: filter out any recycled/deleted targets from the live Set
+      for (const id of val) {
+        if (!this.entities.isValid(id)) val.delete(id);
+      }
+      return val.size > 0 ? val : undefined;
+    }
+
+    return this.entities.isValid(val) ? val : undefined;
+  }
 
 
   /**
@@ -125,19 +137,24 @@ export class RelationshipManager {
    * Now handles both raw IDs and Sets.
    */
   public *getRelated(relationId: ComponentId, target: EntityId): IterableIterator<EntityId> {
+    if (!this.entities.isValid(target)) return;
+
     for (const arch of this.components.getArchetypes()) {
       const column = arch.columns.get(relationId);
       if (!column) continue;
 
       for (let i = 0; i < arch.entities.length; i++) {
         const val = column[i];
+        const subject = arch.entities[i];
+
+        if (!this.entities.isValid(subject)) continue;
+
         if (val === target || (val instanceof Set && val.has(target))) {
-          yield arch.entities[i];
+          yield subject;
         }
       }
     }
   }
-
   /**
    * Returns the number of entities that point to a specific target via a relation.
    */

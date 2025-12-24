@@ -1,6 +1,7 @@
 import { Archetype, EntityId, ComponentId } from "./Archetype";
 import { EntityManager } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
+import { Bag } from "./Bag";
 
 /**
  * Fired whenever an entity's structural mask changes.
@@ -23,7 +24,7 @@ export class ComponentManager {
   private archetypes = new Map<bigint, Archetype>();
   private onAddObservers = new Map<ComponentId, ComponentObserver[]>();
   private onRemoveObservers = new Map<ComponentId, ComponentObserver[]>();
-  private registeredComponents: ComponentId[] = [];
+  private registeredComponents = new Bag<ComponentId>();
 
   private serializers = new Map<ComponentId, ComponentSerializer>();
   private maskObservers = new Set<MaskObserver>();
@@ -157,7 +158,7 @@ export class ComponentManager {
 
     let targetArch = this.archetypes.get(newMask);
     if (!targetArch) {
-      const componentIds = this.registeredComponents.filter(id =>
+      const componentIds = this.registeredComponents.filter((id: ComponentId) =>
         (newMask & (1n << BigInt(id))) !== 0n
       );
       targetArch = new Archetype(newMask, componentIds);
@@ -174,6 +175,7 @@ export class ComponentManager {
   }
 
   public notifyObservers(entity: EntityId, added: bigint, removed: bigint): void {
+    // IMPROVEMENT: Use the new Bag iterator for a cleaner, faster loop
     for (const compId of this.registeredComponents) {
       const bit = 1n << BigInt(compId);
 
@@ -229,7 +231,7 @@ export class ComponentManager {
 
     const targetArch = this.getOrCreateArchetype(
       newMask,
-      this.registeredComponents.filter(id => (newMask & (1n << BigInt(id))) !== 0n)
+      this.registeredComponents.filter((id: ComponentId) => (newMask & (1n << BigInt(id))) !== 0n)
     );
     const newRow = targetArch.addEntity(entity, dataToMigrate);
     this.entityManager.setLocation(entity, targetArch, newRow);
@@ -251,8 +253,8 @@ export class ComponentManager {
   }
 
   public addRegisteredComponent(id: ComponentId): void {
-    if (!this.registeredComponents.includes(id)) {
-        this.registeredComponents.push(id);
+    if (!this.registeredComponents.contains(id)) { // CLEANER: uses Bag.contains
+      this.registeredComponents.add(id);
     }
   }
 
@@ -260,7 +262,7 @@ export class ComponentManager {
    * Returns all component IDs currently known to the manager.
    */
   public getRegisteredComponents(): ComponentId[] {
-    return [...this.registeredComponents];
+    return this.registeredComponents.toArray(); // CLEANER: uses Bag.toArray
   }
 
   /**
@@ -281,8 +283,8 @@ export class ComponentManager {
 
   public clear(): void {
     this.archetypes.clear();
-    // Note: registeredComponents usually persists across clears
-    // unless you are doing a hard engine reset.
+    this.clearObservers(); // IMPROVEMENT: Reset observers during a full clear
+    // Note: registeredComponents persists to keep ID mapping stable
   }
 
 

@@ -63,6 +63,9 @@ export class PrefabManager {
 
     // 1. Add components from the template
     for (const comp of template.components) {
+      // Logic Improvement: ensure all component IDs are registered with the engine
+      this.world.registerComponent(comp.id);
+
       // Use override value if provided, otherwise template value
       const val = overrides.has(comp.id) ? overrides.get(comp.id) : comp.value;
       editor.add(comp.id, val);
@@ -74,8 +77,9 @@ export class PrefabManager {
     // 2. Set up relationships (if any)
     if (template.relationships) {
       for (const rel of template.relationships) {
+        // Logic Improvement: verify the target exists before linking
         const target = this.world.tags.getEntity(rel.targetTag);
-        if (target !== undefined) {
+        if (target !== undefined && this.world.isValid(target)) {
           this.world.relationships.add(entity, rel.id, target);
         }
       }

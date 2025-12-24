@@ -53,4 +53,36 @@ export class Aspect {
 
     return true;
   }
+
+
+  /**
+   * Returns a new Aspect that includes all requirements of this and another aspect.
+   * Useful for composing complex queries.
+   */
+  public and(other: Aspect): Aspect {
+    return new Aspect(
+      this.all | other.all,
+      this.one | other.one,
+      this.exclude | other.exclude
+    );
+  }
+
+  /**
+   * Returns a new Aspect that adds additional exclusion requirements.
+   */
+  public butNot(...ids: number[]): Aspect {
+    let newExclude = this.exclude;
+    for (const id of ids) newExclude |= (1n << BigInt(id));
+    return new Aspect(this.all, this.one, newExclude);
+  }
+
+  /**
+   * Static getter for an aspect that matches absolutely everything.
+   */
+  public static get EMPTY(): Aspect {
+    return new Aspect();
+  }
+
+
+
 }

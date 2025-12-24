@@ -83,17 +83,12 @@ export class Archetype {
   }
 
   /**
-   * Creates a serializable snapshot of the archetype's data.
+   * Wipes all entities and component data from this archetype.
    */
-  public save() {
-    const columnsData: Record<number, unknown[]> = {};
-    for (const [compId, column] of this.columns) {
-      columnsData[compId] = [...column]; // Shallow clone for immutability
+  public clear(): void {
+    this.entities = [];
+    for (const col of this.columns.values()) {
+      col.length = 0;
     }
-    return {
-      mask: this.mask.toString(),
-      entities: [...this.entities],
-      columns: columnsData
-    };
   }
 }

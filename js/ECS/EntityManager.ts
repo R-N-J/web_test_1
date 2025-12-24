@@ -197,6 +197,8 @@ export class EntityManager {
 
   public setNextEntityId(id: number): void {
     this.nextEntityId = id;
+    // Safety: ensure we have version storage for the new ID range immediately
+    if (id > 0) this.ensureVersionCapacity(id - 1);
   }
 
   public getFreeEntities(): EntityId[] {
@@ -227,13 +229,18 @@ export class EntityManager {
   public loadVersions(versions: number[]): void {
     if (versions.length === 0) return;
 
-    // Ensure capacity for last index
+    // Ensure capacity for the incoming data
     this.ensureVersionCapacity(versions.length - 1);
 
-    // Reset existing values then restore
+    // Reset and restore
     this.versions.fill(0);
     for (let i = 0; i < versions.length; i++) {
       this.versions[i] = versions[i] >>> 0;
+    }
+
+    // Logic Improvement: sync nextEntityId if the versions array is larger than current
+    if (versions.length > this.nextEntityId) {
+      this.nextEntityId = versions.length;
     }
   }
 

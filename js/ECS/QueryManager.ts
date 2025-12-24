@@ -6,11 +6,19 @@ export class QueryManager {
   private queryCache = new Map<string, Archetype[]>();
   private activeAspects = new Map<string, Aspect>();
 
+
+  /**
+   * Generates a unique stable key for an Aspect.
+   */
+  private getAspectKey(aspect: Aspect): string {
+    return `${aspect.all}:${aspect.one}:${aspect.exclude}`;
+  }
+
   public getArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
-    const key = `${aspect.all}-${aspect.one}-${aspect.exclude}`;
+    const key = this.getAspectKey(aspect);
 
     // If we've seen this query before, return the cached list
-    if (this.queryCache.has(key)) {
+    if (this.hasQuery(aspect)) {
       return this.queryCache.get(key)!;
     }
 
@@ -25,6 +33,13 @@ export class QueryManager {
     this.activeAspects.set(key, aspect);
     this.queryCache.set(key, matches);
     return matches;
+  }
+
+  /**
+   * Checks if a specific Aspect is already being tracked/cached.
+   */
+  public hasQuery(aspect: Aspect): boolean {
+    return this.queryCache.has(this.getAspectKey(aspect));
   }
 
   public registerArchetype(arch: Archetype): void {

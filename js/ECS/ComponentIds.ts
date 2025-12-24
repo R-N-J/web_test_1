@@ -72,6 +72,34 @@ export function registerAllComponents(world: World): void {
   }
 }
 
+/**
+ * Metadata map for debugging and logging.
+ * Maps ComponentId -> Human Readable Name.
+ */
+const ComponentNames = new Map<ComponentId, string>(
+  Object.entries(Components).map(([name, id]) => [id, name])
+);
+
+/**
+ * Helper to get a readable name for a component ID.
+ */
+export function getComponentName(id: ComponentId): string {
+  return ComponentNames.get(id) ?? `Unknown(${id})`;
+}
+
+/**
+ * Helper to get a list of names for a bitmask.
+ * Useful for logging: "Entity 5 has [POSITION, HEALTH]"
+ */
+export function getNamesFromMask(mask: bigint): string[] {
+  const names: string[] = [];
+  for (const [id, name] of ComponentNames) {
+    if ((mask & (1n << BigInt(id))) !== 0n) {
+      names.push(name);
+    }
+  }
+  return names;
+}
 
 /**
  * ECS bootstrap: call this once for a new World, and also pass it into

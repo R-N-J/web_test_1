@@ -6,9 +6,37 @@ export class Bag<T> {
   private data: (T | null)[] = [];
   public length = 0;
 
+
+  /**
+   * Implements the Iterator protocol.
+   * Allows using the bag in for...of loops: for (const item of bag) { ... }
+   */
+  public *[Symbol.iterator](): IterableIterator<T> {
+    for (let i = 0; i < this.length; i++) {
+      yield this.data[i] as T;
+    }
+  }
+
+
+
   public add(item: T): void {
     this.data[this.length++] = item;
   }
+
+  /**
+   * Removes an item by value.
+   * Performs a linear scan to find the index, then a fast O(1) swap-remove.
+   */
+  public remove(item: T): boolean {
+    for (let i = 0; i < this.length; i++) {
+      if (this.data[i] === item) {
+        this.removeAt(i);
+        return true;
+      }
+    }
+    return false;
+  }
+
 
   public removeAt(index: number): T | undefined {
     if (index >= this.length) return undefined;
@@ -42,6 +70,18 @@ export class Bag<T> {
    */
   public toArray(): T[] {
     return this.data.slice(0, this.length) as T[];
+  }
+
+  /**
+   * Returns an array of items that match the predicate.
+   */
+  public filter(predicate: (item: T) => boolean): T[] {
+    const result: T[] = [];
+    for (let i = 0; i < this.length; i++) {
+      const item = this.data[i] as T;
+      if (predicate(item)) result.push(item);
+    }
+    return result;
   }
 
   /**

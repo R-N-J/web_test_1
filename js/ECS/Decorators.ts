@@ -6,6 +6,7 @@ import { Aspect } from "./Aspect";
 const ASPECT_METADATA_KEY = "__ecs_aspect__";
 const GROUP_METADATA_KEY = "__ecs_group__";
 const TAG_METADATA_KEY = "__ecs_tag__";
+const INTERVAL_METADATA_KEY = "__ecs_interval__";
 
 /**
  * Internal interface to satisfy the compiler while building the bitmasks
@@ -76,12 +77,25 @@ export function Group(name: string) {
 
 /**
  * Associates the system with a specific entity tag.
+ * Use this if a system should only ever process one specific entity.
  */
 export function Tag(name: string) {
   return function(constructor: Constructor): void {
     (constructor as unknown as Record<string, unknown>)[TAG_METADATA_KEY] = name;
   };
 }
+
+/**
+ * Defines the period (how often) an IntervalSystem runs.
+ * In your game, this represents the number of turns.
+ */
+export function Interval(period: number) {
+  return function(constructor: Constructor): void {
+    (constructor as unknown as Record<string, unknown>)[INTERVAL_METADATA_KEY] = period;
+  };
+}
+
+
 
 /**
  * Retrieves the Aspect defined by decorators for a given class.
@@ -104,3 +118,11 @@ export function getSystemGroup(constructor: object): string | undefined {
 export function getSystemTag(constructor: object): string | undefined {
   return (constructor as unknown as Record<string, unknown>)[TAG_METADATA_KEY] as string | undefined;
 }
+
+/**
+ * Retrieves the update interval defined by decorators for a given class.
+ */
+export function getSystemInterval(constructor: object): number | undefined {
+  return (constructor as unknown as Record<string, unknown>)[INTERVAL_METADATA_KEY] as number | undefined;
+}
+

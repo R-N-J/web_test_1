@@ -37,10 +37,16 @@ export class GroupManager {
     this.entityToGroups.get(entity)?.delete(group);
   }
 
-
-  public getEntities(group: string): EntityId[] {
+  /**
+   * Returns an array of all entities in a group.
+   * Filters out any entities that are no longer valid in the provided World context.
+   */
+  public getEntities(group: string, world?: { isValid(id: EntityId): boolean }): EntityId[] {
     const set = this.groups.get(group);
-    return set ? Array.from(set) : [];
+    if (!set) return [];
+
+    const results = Array.from(set);
+    return world ? results.filter(id => world.isValid(id)) : results;
   }
 
   public remove(entity: EntityId): void {

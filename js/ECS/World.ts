@@ -141,11 +141,9 @@ export class World {
   }
 
   public *viewGroup(group: string): IterableIterator<EntityId> {
-    const entities = this.groups.getEntities(group);
-    for (const e of entities) {
-      // Logic Improvement: verify the entity is still valid before yielding
-      if (this.entities.isValid(e)) yield e;
-    }
+    // Pass 'this' so the manager can filter out recycled IDs automatically
+    const entities = this.groups.getEntities(group, this);
+    for (const e of entities) yield e;
   }
 
   /**
@@ -306,7 +304,19 @@ export class World {
     return this.entities.isValid(entity);
   }
 
+  /**
+   * Returns the current component mask for an entity.
+   */
+  public getMask(entity: EntityId): bigint {
+    return this.entities.getMask(entity);
+  }
 
+  /**
+   * Returns all component IDs currently registered in the engine.
+   */
+  public getRegisteredComponents(): ComponentId[] {
+    return this.components.getRegisteredComponents();
+  }
 
 
   /**
