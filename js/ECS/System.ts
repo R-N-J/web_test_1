@@ -1,7 +1,8 @@
 import { World } from "./World";
 import { Aspect } from "./Aspect";
-import { Archetype } from "./Archetype";
+import { Archetype, EntityId } from "./Archetype";
 import { getSystemAspect } from "./Decorators";
+import type { MaskObserver } from "./ComponentManager";
 
 
 export abstract class BaseSystem {
@@ -32,10 +33,90 @@ export abstract class BaseSystem {
 export abstract class IteratingSystem extends BaseSystem {
   protected aspect: Aspect;
 
+  private membership = new Set<EntityId>();
+  private readonly maskObserver: MaskObserver;
+
   constructor(protected world: World, aspect?: Aspect) {
     super();
-    // If no aspect is passed to constructor, look for Decorator metadata
     this.aspect = aspect || getSystemAspect(this.constructor);
+
+    // Seed membership for already-existing entities (important when loading or building worlds).
+    this.initializeMembership();
+
+    // Subscribe to structural changes
+    this.maskObserver = (entity, oldMask, newMask) => {
+      const oldMatch = this.aspect.matches(oldMask);
+      const newMatch = this.aspect.matches(newMask);
+
+      if (oldMatch === newMatch) return;
+
+      if (newMatch) {
+        this.membership.add(entity);
+        this.onEntityAdded(entity);
+      } else {
+        this.membership.delete(entity);
+        this.onEntityRemoved(entity);
+      }
+    };
+
+    this.world.subscribeOnMaskChange(this.maskObserver);
+  }
+
+  /**
+   * Checks if a specific entity currently matches this system's Aspect.
+   * This is fast (O(1) Set lookup).
+   */
+  protected matches(entity: EntityId): boolean {
+    return this.membership.has(entity);
+  }
+
+  /**
+   * Returns the total number of entities currently matched by this system.
+   */
+  public getMatchedCount(): number {
+    return this.membership.size;
+  }
+
+  /**
+   * Executes a callback for every entity currently matched by this system.
+   */
+  protected forEach(callback: (entity: EntityId) => void): void {
+    for (const entity of this.membership) {
+      callback(entity);
+    }
+  }
+
+  /**
+   * Called exactly once when an entity begins matching this system's Aspect.
+   */
+  protected onEntityAdded(_entity: EntityId): void {}
+
+  /**
+   * Called exactly once when an entity stops matching this system's Aspect.
+   */
+  protected onEntityRemoved(_entity: EntityId): void {}
+
+  /**
+   * Iterates the world once to seed the membership set and fire onEntityAdded for existing matches.
+   */
+  private initializeMembership(): void {
+    const archetypes = this.world.getArchetypes(this.aspect);
+    for (const arch of archetypes) {
+      for (const e of arch.entities) {
+        if (!this.membership.has(e)) {
+          this.membership.add(e);
+          this.onEntityAdded(e);
+        }
+      }
+    }
+  }
+
+  /**
+   * Ensure we unsubscribe to avoid leaks when systems are removed from the Scheduler.
+   */
+  public override cleanup(): void {
+    this.world.unsubscribeOnMaskChange(this.maskObserver);
+    super.cleanup();
   }
 
   /**
@@ -82,7 +163,6 @@ export abstract class IteratingSystem extends BaseSystem {
     if (!this.enabled) return;
 
     const matchingArchetypes = this.world.getArchetypes(this.aspect);
-
     for (const arch of matchingArchetypes) {
       this.processArchetype(arch, dt);
     }

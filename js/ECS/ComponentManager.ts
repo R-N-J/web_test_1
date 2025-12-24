@@ -2,6 +2,12 @@ import { Archetype, EntityId, ComponentId } from "./Archetype";
 import { EntityManager } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
 
+/**
+ * Fired whenever an entity's structural mask changes.
+ */
+export type MaskObserver = (entity: EntityId, oldMask: bigint, newMask: bigint) => void;
+
+
 export type ComponentObserver = (entity: EntityId, componentId: ComponentId) => void;
 
 /**
@@ -20,13 +26,28 @@ export class ComponentManager {
   private registeredComponents: ComponentId[] = [];
 
   private serializers = new Map<ComponentId, ComponentSerializer>();
+  private maskObservers = new Set<MaskObserver>();
 
   constructor(
     private entityManager: EntityManager,
     private queryManager: QueryManager
   ) {}
 
+  public subscribeOnMaskChange(observer: MaskObserver): void {
+    this.maskObservers.add(observer);
+  }
 
+  public unsubscribeOnMaskChange(observer: MaskObserver): void {
+    this.maskObservers.delete(observer);
+  }
+
+  /**
+   * Used by World/ComponentManager internals to notify structural membership changes.
+   */
+  public emitMaskChange(entity: EntityId, oldMask: bigint, newMask: bigint): void {
+    if (oldMask === newMask) return;
+    for (const cb of this.maskObservers) cb(entity, oldMask, newMask);
+  }
 
   private static deepCloneSnapshotValue(value: unknown): unknown {
     // Primitives and null are safe as-is
@@ -148,6 +169,8 @@ export class ComponentManager {
     this.entityManager.setLocation(entity, targetArch, newRow);
 
     this.notifyObservers(entity, addedBits, removedBits);
+    // NEW: structural event
+    this.emitMaskChange(entity, oldMask, newMask);
   }
 
   public notifyObservers(entity: EntityId, added: bigint, removed: bigint): void {
@@ -171,6 +194,8 @@ export class ComponentManager {
     removals: Set<ComponentId>
   ): void {
     const oldLocation = this.entityManager.getLocation(entity);
+
+    // If same archetype, this is NON-structural (no mask change).
     if (oldLocation && oldLocation.arch.mask === newMask) {
       for (const [id, val] of additions) {
         const col = oldLocation.arch.columns.get(id);
@@ -179,6 +204,7 @@ export class ComponentManager {
       return;
     }
 
+    const oldMask = oldLocation?.arch.mask ?? 0n;
     const dataToMigrate = new Map<ComponentId, unknown>();
 
     if (oldLocation) {
@@ -192,7 +218,7 @@ export class ComponentManager {
       if (movedEntityId !== entity) {
         const movedLoc = this.entityManager.getLocation(movedEntityId);
         if (movedLoc) {
-            this.entityManager.setLocation(movedEntityId, movedLoc.arch, row);
+          this.entityManager.setLocation(movedEntityId, movedLoc.arch, row);
         }
       }
     }
@@ -201,13 +227,16 @@ export class ComponentManager {
       dataToMigrate.set(id, val);
     }
 
-    const targetArch = this.getOrCreateArchetype(newMask,
+    const targetArch = this.getOrCreateArchetype(
+      newMask,
       this.registeredComponents.filter(id => (newMask & (1n << BigInt(id))) !== 0n)
     );
     const newRow = targetArch.addEntity(entity, dataToMigrate);
     this.entityManager.setLocation(entity, targetArch, newRow);
-  }
 
+    // NEW: structural event
+    this.emitMaskChange(entity, oldMask, newMask);
+  }
 
   public getArchetypes(): IterableIterator<Archetype> {
     return this.archetypes.values();

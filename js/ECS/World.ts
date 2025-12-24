@@ -5,7 +5,7 @@ import { GroupManager } from "./GroupManager";
 import { EntityEditor } from "./EntityEditor";
 import { EntityManager } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
-import { ComponentManager, ComponentObserver } from "./ComponentManager";
+import { ComponentManager, ComponentObserver, MaskObserver } from "./ComponentManager";
 import { RelationshipManager } from "./RelationshipManager";
 import { PrefabManager } from "./PrefabManager";
 import type { ComponentSerializer } from "./ComponentManager";
@@ -39,6 +39,17 @@ export class World {
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
+
+  /**
+   * Subscribe to structural changes (entity mask changes).
+   */
+  public subscribeOnMaskChange(observer: MaskObserver): void {
+    this.components.subscribeOnMaskChange(observer);
+  }
+
+  public unsubscribeOnMaskChange(observer: MaskObserver): void {
+    this.components.unsubscribeOnMaskChange(observer);
+  }
 
 
   /**
@@ -131,7 +142,28 @@ export class World {
 
   public *viewGroup(group: string): IterableIterator<EntityId> {
     const entities = this.groups.getEntities(group);
-    for (const e of entities) yield e;
+    for (const e of entities) {
+      // Logic Improvement: verify the entity is still valid before yielding
+      if (this.entities.isValid(e)) yield e;
+    }
+  }
+
+  /**
+   * Returns the number of entities in a specific group.
+   // ... existing code ...
+   public *viewTag(tag: string): IterableIterator<EntityId> {
+   const entity = this.tags.getEntity(tag);
+   // Logic Improvement: verify the entity is still valid before yielding
+   if (entity !== undefined && this.entities.isValid(entity)) yield entity;
+   }
+
+   /**
+   * Checks if an entity matches a specific Aspect.
+   */
+  public matches(entity: EntityId, aspect: Aspect): boolean {
+    if (!this.isValid(entity)) return false;
+    const mask = this.entities.getMask(entity);
+    return aspect.matches(mask);
   }
 
   /**
@@ -144,7 +176,10 @@ export class World {
 
   public *viewTag(tag: string): IterableIterator<EntityId> {
     const entity = this.tags.getEntity(tag);
-    if (entity !== undefined) yield entity;
+    // Safety: only yield if the entity exists AND is still valid/active
+    if (entity !== undefined && this.entities.isValid(entity)) {
+      yield entity;
+    }
   }
 
   /**
@@ -273,6 +308,7 @@ export class World {
 
 
 
+
   /**
    * Generates a new unique Entity ID, recycling old IDs if available.
    */
@@ -284,23 +320,29 @@ export class World {
    * Deletes an entity, cleans up its data, and recycles its ID.
    */
   public deleteEntity(entity: EntityId): void {
-    // 0. Clean up relationships pointing TO this entity
-    this.relationships.cleanup(entity);
+      // 0. Clean up relationships pointing TO this entity
+      this.relationships.cleanup(entity);
 
-    // 1. Clean up from Archetypes
-    const loc = this.entities.getLocation(entity);
-    if (loc) {
-      const movedEntityId = loc.arch.removeEntity(loc.row);
+      // 1. Clean up from Archetypes
+      const loc = this.entities.getLocation(entity);
+      const oldMask = loc?.arch.mask ?? 0n;
 
-      // Update the row index of the entity that was swapped into this position
-      if (movedEntityId !== entity) {
-        const movedLoc = this.entities.getLocation(movedEntityId);
-        if (movedLoc) {
+      if (loc) {
+        const movedEntityId = loc.arch.removeEntity(loc.row);
+
+        if (movedEntityId !== entity) {
+          const movedLoc = this.entities.getLocation(movedEntityId);
+          if (movedLoc) {
             this.entities.setLocation(movedEntityId, movedLoc.arch, loc.row);
+          }
         }
+
+        this.entities.removeLocation(entity);
       }
 
-      this.entities.removeLocation(entity);
+      // NEW: structural exit event (entity is effectively removed from all aspects)
+      if (oldMask !== 0n) {
+      this.components.emitMaskChange(entity, oldMask, 0n);
     }
 
     // 2. Clean up Tags and Groups
