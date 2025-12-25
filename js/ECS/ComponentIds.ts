@@ -19,6 +19,10 @@ export const Components = {
   POSITION: 0,
   RENDER: 1,
   HEALTH: 2,
+  CLOCK: 3,
+
+  //TODO: Game Configuration or the Current Map  or `PLAYER_REFERENCE`
+
 
   // --- Relationships (examples) ---
   REL_MEMBER_OF: 100,
@@ -26,6 +30,13 @@ export const Components = {
 } as const satisfies Record<string, ComponentId>;
 
 export type ComponentName = keyof typeof Components;
+
+/**
+ * Data shape for the game clock.
+ */
+export interface Clock {
+  turn: number;
+}
 
 /**
  * Serializer for relationship values that can be:
@@ -113,3 +124,4 @@ export function bootstrapEcs(world: World): void {
   registerAllComponents(world);
   registerEcsSerializers(world);
 }
+

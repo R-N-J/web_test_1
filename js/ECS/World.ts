@@ -50,6 +50,14 @@ export class World {
   }
 
   /**
+   * Returns the internal entity ID used for global singletons.
+   * Useful for targeted updates via updateComponent or mutateComponent.
+   */
+  public getSingletonEntity(): EntityId {
+    return this.singletonEntity;
+  }
+
+  /**
    * Sets or updates a global singleton component.
    */
   public setSingleton<T>(id: ComponentId, value: T): void {
@@ -361,6 +369,12 @@ export class World {
    * Deletes an entity, cleans up its data, and recycles its ID.
    */
   public deleteEntity(entity: EntityId): void {
+    // Safety: prevent accidental deletion of the global singleton entity
+    if (entity === this.singletonEntity) {
+      console.error("Critical Error: Attempted to delete the Singleton Entity.");
+      return;
+    }
+
       // 0. Clean up relationships pointing TO this entity
       this.relationships.cleanup(entity);
 

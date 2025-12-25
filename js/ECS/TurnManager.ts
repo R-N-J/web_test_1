@@ -1,22 +1,27 @@
 import { World } from "./World";
 import { Scheduler } from "./Scheduler";
 import { BaseSystem } from "./System";
+import { Components, Clock } from "./ComponentIds"; // Ensure Clock interface is exported there
 
 // brain of the game loo, phases of a turn (Player -> NPCs -> World).
 
 export class TurnManager {
-  private turnCount = 0;
   private _isPlayerTurn = true;
   private _isPaused = false;
 
-  constructor(private world: World, private scheduler: Scheduler) {}
+  constructor(private world: World, private scheduler: Scheduler) {
+    // Initialize the singleton if it doesn't exist
+    if (!this.world.hasSingleton(Components.CLOCK)) {
+      this.world.setSingleton<Clock>(Components.CLOCK, { turn: 0 });
+    }
+  }
 
   public get isPlayerTurn(): boolean {
-    return this._isPlayerTurn;
+    return this._isPlayerTurn && !this._isPaused;
   }
 
   public get turnNumber(): number {
-    return this.turnCount;
+    return this.world.getSingleton<Clock>(Components.CLOCK)?.turn ?? 0;
   }
 
   /**
@@ -26,7 +31,12 @@ export class TurnManager {
     if (!this._isPlayerTurn || this._isPaused) return;
 
     this._isPlayerTurn = false;
-    this.turnCount++;
+
+    // Increment turn count via the non-structural update API
+    this.world.updateComponent<Clock>(this.world.getSingletonEntity(), Components.CLOCK, (clock) => {
+      clock.turn++;
+      return clock;
+    });
 
     // 1. Logic Phase: Run any one-shot logic per turn
     // (e.g. updating cooldowns or poison ticks via specific systems)
@@ -70,7 +80,7 @@ export class TurnManager {
    * Resets the turn counter. Useful when starting a new game.
    */
   public reset(): void {
-    this.turnCount = 0;
+    this.world.setSingleton<Clock>(Components.CLOCK, { turn: 0 });
     this._isPlayerTurn = true;
     this._isPaused = false;
   }
