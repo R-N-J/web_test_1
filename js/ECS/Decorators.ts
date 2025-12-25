@@ -47,6 +47,16 @@ export function All(...componentIds: number[]) {
 }
 
 /**
+ * Alias for All. The entity must possess these components.
+ */
+export function And(...componentIds: number[]) {
+  return All(...componentIds);
+}
+
+
+
+
+/**
  * The entity must possess AT LEAST ONE of these components.
  */
 export function One(...componentIds: number[]) {
@@ -57,6 +67,9 @@ export function One(...componentIds: number[]) {
 }
 
 /**
+ * The entity must possess AT LEAST ONE of these components.
+ // ... existing code ...
+ /**
  * The entity may NOT possess any of these components.
  */
 export function Exclude(...componentIds: number[]) {
@@ -65,6 +78,42 @@ export function Exclude(...componentIds: number[]) {
     data.exclude |= buildMask(componentIds);
   };
 }
+
+/**
+ * The entity must NOT possess ANY of these components. (Semantic alias for Exclude)
+ */
+export function NoneOf(...componentIds: number[]) {
+  return Exclude(...componentIds);
+}
+
+/**
+ * The entity must possess AT LEAST ONE of these components. (Semantic alias for One)
+ */
+export function AnyOf(...componentIds: number[]) {
+  return One(...componentIds);
+}
+
+/**
+ * Merges an existing Aspect object into the system's requirements.
+ * Useful for reusing shared queries across multiple systems.
+ */
+export function Match(aspect: Aspect) {
+  return function(constructor: Constructor): void {
+    const data = getOrCreateAspectData(constructor);
+    data.all |= aspect.all;
+    data.one |= aspect.one;
+    data.exclude |= aspect.exclude;
+  };
+}
+
+
+/**
+ * Alias for Exclude. The entity may NOT possess these components.
+ */
+export function ButNot(...componentIds: number[]) {
+  return Exclude(...componentIds);
+}
+
 
 /**
  * Associates the system with a specific entity group.
