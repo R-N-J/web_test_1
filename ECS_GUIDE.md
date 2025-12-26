@@ -2,6 +2,73 @@
 
 Welcome to the Rogue1 ECS (Entity-Component-System). This is a high-performance, archetype-based ECS designed for efficiency and ease of use.
 
+## Table of Contents
+- [Core Concepts](#core-concepts)
+- [Architecture: Archetypes and SoA](#architecture-archetypes-and-soa)
+  - [What are Archetypes?](#what-are-archetypes)
+  - [Struct-of-Arrays (SoA) in JavaScript](#struct-of-arrays-soa-in-javascript)
+- [1. Setting Up the World](#1-setting-up-the-world)
+  - [Defining Components](#defining-components)
+  - [Initializing the World](#initializing-the-world)
+- [2. Entities and Components](#2-entities-and-components)
+  - [Creating an Entity](#creating-an-entity)
+  - [Adding Components](#adding-components)
+  - [Component Interfaces and Type Safety](#component-interfaces-and-type-safety)
+  - [Accessing and Modifying Data](#accessing-and-modifying-data)
+  - [Removing Components and Deleting Entities](#removing-components-and-deleting-entities)
+- [3. Querying Entities (Aspects and Views)](#3-querying-entities-aspects-and-views)
+  - [Why Query?](#why-query)
+  - [Aspects: The Filters](#aspects-the-filters)
+  - [Using Views](#using-views)
+  - [High-Performance Queries: viewColumns](#high-performance-queries-viewcolumns)
+  - [Single Entity Matching](#single-entity-matching)
+  - [Querying by Tag or Group](#querying-by-tag-or-group)
+  - [Why use these methods? (The QueryManager)](#why-use-these-methods-the-querymanager)
+- [4. Tags and Groups](#4-tags-and-groups)
+  - [Tags (Unique 1-to-1)](#tags-unique-1-to-1)
+  - [Groups (1-to-Many)](#groups-1-to-many)
+- [5. Relationships](#5-relationships)
+  - [Why use Relationships?](#why-use-relationships)
+  - [1-to-1 Relationships (Exclusive)](#1-to-1-relationships-exclusive)
+  - [1-to-Many Relationships (Non-Exclusive)](#1-to-many-relationships-non-exclusive)
+  - [Symmetric Relationships](#symmetric-relationships)
+  - [Retrieving Targets](#retrieving-targets)
+  - [Removing Relationships](#removing-relationships)
+  - [Automatic Cleanup and Integrity](#automatic-cleanup-and-integrity)
+- [6. Tags vs. Groups vs. Relationships](#6-tags-vs-groups-vs-relationships)
+  - [When to use what?](#when-to-use-what)
+- [7. Prefabs](#7-prefabs)
+  - [Defining a Prefab](#defining-a-prefab)
+  - [Spawning a Prefab](#spawning-a-prefab)
+  - [Loading Prefabs Externally](#loading-prefabs-externally)
+- [8. Observers](#8-observers)
+  - [Why use Observers?](#why-use-observers)
+  - [Component Observers](#component-observers)
+  - [Mask Observers](#mask-observers)
+  - [Managers vs. Systems in Observers](#managers-vs-systems-in-observers)
+  - [Interaction Examples](#interaction-examples)
+- [9. Systems, Scheduler, and TurnManager](#9-systems-scheduler-and-turnmanager)
+  - [Different Types of Systems](#different-types-of-systems)
+  - [The Scheduler](#the-scheduler)
+  - [The TurnManager](#the-turnmanager)
+  - [Putting It All Together: The Best Way](#putting-it-all-together-the-best-way)
+- [10. Decorators](#10-decorators)
+  - [Aspect Decorators](#aspect-decorators)
+  - [Filtering Decorators](#filtering-decorators)
+  - [Execution Decorators](#execution-decorators)
+  - [Why use Decorators?](#why-use-decorators)
+- [11. The ECS Engine Flow](#11-the-ecs-engine-flow)
+- [12. Advanced Features](#12-advanced-features)
+  - [Singletons](#singletons)
+  - [Snapshots (Saving/Loading)](#snapshots-savingloading)
+  - [Batch Editing](#batch-editing)
+- [13. Performance Best Practices](#13-performance-best-practices)
+- [14. Comparison with Other ECS Architectures](#14-comparison-with-other-ecs-architectures)
+- [15. Drawbacks and Considerations](#15-drawbacks-and-considerations)
+- [Method Cheat Sheet](#method-cheat-sheet)
+
+---
+
 ## Core Concepts
 
 - **World**: The container for all entities, components, and systems.
@@ -176,7 +243,114 @@ world.deleteEntity(player);
 
 ---
 
-## 3. Tags and Groups
+## 3. Querying Entities (Aspects and Views)
+
+Querying is the process of finding entities that match specific criteria. In Rogue1, this is primarily done using **Aspects** to define filters and **Views** to iterate over the results efficiently.
+
+### Why Query?
+In an ECS, you rarely want to iterate over *all* entities. Instead, systems usually focus on entities that have a specific set of components. For example:
+- A `MovementSystem` only cares about entities with `POSITION` and `VELOCITY`.
+- A `RenderSystem` only cares about entities with `POSITION` and `RENDER`.
+- A `PoisonSystem` might care about entities with `HEALTH` and a `POISONED` tag.
+
+Querying allows the ECS to provide you with exactly the entities you need, pre-filtered for performance.
+
+### Aspects: The Filters
+An `Aspect` defines the requirements for an entity to be included in a query. It uses bitwise masks under the hood for near-instant matching against Archetypes.
+
+#### Factory Methods
+| Method | Description |
+| :--- | :--- |
+| `Aspect.all(...ids)` | Matches entities that have **ALL** of the specified components. |
+| `Aspect.one(...ids)` | Matches entities that have **AT LEAST ONE** of the specified components. |
+| `Aspect.exclude(...ids)`| Matches entities that have **NONE** of the specified components. |
+
+#### Composing Complex Queries
+You can chain methods to create complex requirements:
+
+```typescript
+import { Aspect } from './ECS/Aspect';
+
+// Entities that have POSITION and HEALTH, but are NOT DEAD
+const aliveFighters = Aspect.all(Components.POSITION, Components.HEALTH)
+                            .butNot(Components.DEAD);
+
+// Entities that have either FIRE_RESIST or WATER_RESIST
+const resistant = Aspect.one(Components.FIRE_RESIST, Components.WATER_RESIST);
+
+// Combining requirements from another Aspect
+const combined = aliveFighters.and(resistant);
+```
+
+### Using Views
+A `view` is the most common way to iterate over entities matching an aspect.
+
+```typescript
+for (const entity of world.view(aliveFighters)) {
+  const pos = world.getComponent<Position>(entity, Components.POSITION);
+  // ...
+}
+```
+
+### High-Performance Queries: `viewColumns`
+If you are iterating over many entities and need to access multiple components, `world.view(aspect)` can have overhead because it involves looking up component data for each entity individually.
+
+For performance-critical loops (like physics or rendering), use `viewColumns`. It yields the raw data arrays (columns) from each matching Archetype, allowing you to iterate over them directly. This is much faster because it leverages **SoA (Struct-of-Arrays)** cache locality.
+
+```typescript
+const aspect = Aspect.all(Components.POSITION, Components.VELOCITY);
+
+// Iterating via columns (Fastest)
+// Use destructuring to get entities and the requested columns in order
+for (const { entities, columns: [posCol, velCol] } of world.viewColumns(aspect, Components.POSITION, Components.VELOCITY)) {
+  const count = entities.length;
+  for (let i = 0; i < count; i++) {
+    const pos = posCol[i] as Position;
+    const vel = velCol[i] as Velocity;
+
+    pos.x += vel.dx;
+    pos.y += vel.dy;
+  }
+}
+```
+
+- **`viewColumns(aspect, ...ids)`**: Returns an iterator. It skips any Archetype that happens to be missing a requested column (though this shouldn't happen if using `Aspect.all`).
+- **`viewColumnsStrict(aspect, ...ids)`**: Similar to `viewColumns` but throws an error if a requested column is missing. Use this when your `Aspect.all()` requirements guarantee the columns exist.
+
+### Single Entity Matching
+Sometimes you have a specific `EntityId` and want to check if it matches an `Aspect`:
+
+```typescript
+if (world.matches(someEntity, Aspect.all(Components.BURNING))) {
+    // Apply fire damage logic
+}
+```
+
+### Querying by Tag or Group
+While Aspects are for component-based queries, you can also query via the `TagManager` and `GroupManager` wrappers on the `World`. These are often faster than Aspects if you only need to find a single unique entity or a pre-defined set.
+
+```typescript
+// Find a unique entity by tag
+for (const player of world.viewTag('PLAYER')) {
+    // Guaranteed to run at most once
+}
+
+// Iterate over a pre-categorized group
+for (const enemy of world.viewGroup('ENEMIES')) {
+    // Process only entities explicitly added to the 'ENEMIES' group
+}
+```
+
+### Why use these methods? (The QueryManager)
+The `World` query methods use an internal `QueryManager` which provides several critical benefits:
+
+1.  **Result Caching**: The first time you use an `Aspect`, the engine scans all Archetypes. The results are cached. Subsequent queries using the same `Aspect` (or a System using it) are near-instant.
+2.  **Automatic Reactivity**: When an entity gains or loses components and moves to a new Archetype, the `QueryManager` automatically updates all active cached queries. You never have to worry about "stale" results.
+3.  **Low Overhead**: By using bitwise masks for matching, the cost of checking if an Archetype fits a query is extremely low, regardless of how many entities are in the world.
+
+---
+
+## 4. Tags and Groups
 
 Managing specific entities or collections of entities is handled by the `TagManager` and `GroupManager`. These are lightweight systems that sit outside the main component-based Archetype system, providing fast lookups and organization.
 
@@ -232,7 +406,94 @@ world.groups.removeFromGroup('ENEMIES', orcEntity);
 
 ---
 
-## 4. Tags vs. Groups vs. Relationships
+## 5. Relationships
+
+Relationships allow entities to reference other entities (e.g., "A is owned by B", "C is targeting D"). They are built on top of the Component system but provide a specialized API for managing entity-to-entity links.
+
+### Why use Relationships?
+- **Hierarchies**: Items in an inventory (`REL_OWNED_BY`), equipment.
+- **AI Targeting**: A monster targeting the player (`REL_TARGETING`).
+- **Social**: Friendly vs Hostile factions (`REL_MEMBER_OF`).
+- **World State**: A lever controlling a door (`REL_CONTROLS`).
+
+### 1-to-1 Relationships (Exclusive)
+By default, adding a relationship is "exclusive". If you add a new target, it replaces the old one. This is perfect for relationships where an entity can only have one target at a time.
+
+```typescript
+const REL_TARGETS = 101;
+
+// monster -> REL_TARGETS -> player
+world.relationships.add(monster, REL_TARGETS, player);
+
+// If the monster changes targets, the old one is replaced automatically
+world.relationships.add(monster, REL_TARGETS, anotherEntity);
+```
+
+### 1-to-Many Relationships (Non-Exclusive)
+If you pass `false` for the `exclusive` parameter, the relationship becomes a collection (stored internally as a `Set`).
+
+```typescript
+const REL_MEMBER_OF = 102;
+
+// An entity can belong to multiple factions
+world.relationships.add(player, REL_MEMBER_OF, factionA, false);
+world.relationships.add(player, REL_MEMBER_OF, factionB, false);
+```
+
+### Symmetric Relationships
+Useful for bidirectional links where both entities should point to each other.
+
+```typescript
+world.relationships.addSymmetric(portalA, portalB, REL_LINKED_TO);
+// Now portalA links to portalB AND portalB links to portalA.
+```
+
+### Retrieving Targets
+There are several ways to retrieve the targets of a relationship:
+
+```typescript
+// 1. Get raw value (EntityId | Set<EntityId> | undefined)
+const target = world.relationships.getTargets(monster, REL_TARGETS);
+
+// 2. Get always as an array (Recommended for loops)
+const factions = world.relationships.getTargetsArray(player, REL_MEMBER_OF);
+factions.forEach(f => console.log("Member of:", f));
+
+// 3. Reverse lookup: Who is targeting this entity?
+// Returns an IterableIterator<EntityId>
+const hunters = world.relationships.getRelated(REL_TARGETS, player);
+for (const hunter of hunters) {
+  console.log(`${hunter} is hunting the player!`);
+}
+
+// 4. Count relations: How many entities target this one?
+const hunterCount = world.relationships.countRelated(REL_TARGETS, player);
+```
+
+### Removing Relationships
+You can remove a specific target from a collection, or clear all targets for a relationship at once.
+
+```typescript
+// Remove a specific link (from a 1-to-Many set)
+world.relationships.remove(player, REL_MEMBER_OF, factionA);
+
+// Clear ALL targets for a relationship (works for both 1-to-1 and 1-to-Many)
+world.relationships.clearRelations(monster, REL_TARGETS);
+
+// Reset the entire internal relationship index (usually handled by world.clear())
+world.relationships.clear();
+```
+
+### Automatic Cleanup and Integrity
+A major advantage of using the `RelationshipManager` is **automatic referential integrity**. When an entity is deleted via `world.deleteEntity(id)`:
+1. All relationships where that entity was the **subject** are removed.
+2. All relationships where that entity was the **target** are also removed from any other entities that were pointing to it.
+
+This prevents "Ghost ID" bugs where a system tries to process a target entity that no longer exists in the world.
+
+---
+
+## 6. Tags vs. Groups vs. Relationships
 
 While they might seem similar at first glance, each serves a specific purpose. Choosing the right one is key to performance and code clarity.
 
@@ -262,7 +523,7 @@ While they might seem similar at first glance, each serves a specific purpose. C
 
 ---
 
-## 5. Prefabs
+## 7. Prefabs
 
 Prefabs are templates used to spawn complex entities with predefined components and relationships.
 
@@ -372,119 +633,6 @@ const orc = world.prefabs.spawn("orc_warrior");
 
 ---
 
-## 6. Querying Entities (Aspects and Views)
-
-To find entities with specific components, use `Aspect`.
-
-### Creating an Aspect
-```typescript
-import { Aspect } from './ECS/Aspect';
-
-// Entities with BOTH Position AND Health
-const fighterAspect = Aspect.all(Components.POSITION, Components.HEALTH);
-
-// Entities with Position but NOT Health
-const ghostAspect = Aspect.all(Components.POSITION).butNot(Components.HEALTH);
-
-// Entities with EITHER Render OR Position
-const visibleAspect = Aspect.one(Components.RENDER, Components.POSITION);
-```
-
-### Using Views
-A `view` is the most common way to iterate over entities matching an aspect.
-```typescript
-for (const entity of world.view(fighterAspect)) {
-  const pos = world.getComponent(entity, Components.POSITION);
-  // ...
-}
-```
-
----
-
-## 7. Relationships
-
-Relationships allow entities to reference other entities (e.g., "A is owned by B", "C is targeting D"). They are built on top of the Component system but provide a specialized API for managing entity-to-entity links.
-
-### Why use Relationships?
-- **Hierarchies**: Items in an inventory (`REL_OWNED_BY`), equipment.
-- **AI Targeting**: A monster targeting the player (`REL_TARGETING`).
-- **Social**: Friendly vs Hostile factions (`REL_MEMBER_OF`).
-- **World State**: A lever controlling a door (`REL_CONTROLS`).
-
-### 1-to-1 Relationships (Exclusive)
-By default, adding a relationship is "exclusive". If you add a new target, it replaces the old one. This is perfect for relationships where an entity can only have one target at a time.
-
-```typescript
-const REL_TARGETS = 101;
-
-// monster -> REL_TARGETS -> player
-world.relationships.add(monster, REL_TARGETS, player);
-
-// If the monster changes targets, the old one is replaced automatically
-world.relationships.add(monster, REL_TARGETS, anotherEntity);
-```
-
-### 1-to-Many Relationships (Non-Exclusive)
-If you pass `false` for the `exclusive` parameter, the relationship becomes a collection (stored internally as a `Set`).
-
-```typescript
-const REL_MEMBER_OF = 102;
-
-// An entity can belong to multiple factions
-world.relationships.add(player, REL_MEMBER_OF, factionA, false);
-world.relationships.add(player, REL_MEMBER_OF, factionB, false);
-```
-
-### Symmetric Relationships
-Useful for bidirectional links where both entities should point to each other.
-
-```typescript
-world.relationships.addSymmetric(portalA, portalB, REL_LINKED_TO);
-// Now portalA links to portalB AND portalB links to portalA.
-```
-
-### Retrieving Targets
-There are several ways to retrieve the targets of a relationship:
-
-```typescript
-// 1. Get raw value (EntityId | Set<EntityId> | undefined)
-const target = world.relationships.getTargets(monster, REL_TARGETS);
-
-// 2. Get always as an array (Recommended for loops)
-const factions = world.relationships.getTargetsArray(player, REL_MEMBER_OF);
-factions.forEach(f => console.log("Member of:", f));
-
-// 3. Reverse lookup: Who is targeting this entity?
-// Returns an IterableIterator<EntityId>
-const hunters = world.relationships.getRelated(REL_TARGETS, player);
-for (const hunter of hunters) {
-  console.log(`${hunter} is hunting the player!`);
-}
-
-// 4. Count relations: How many entities target this one?
-const hunterCount = world.relationships.countRelated(REL_TARGETS, player);
-```
-
-### Removing Relationships
-You can remove a specific target from a collection, or clear all targets for a relationship at once.
-
-```typescript
-// Remove a specific link (from a 1-to-Many set)
-world.relationships.remove(player, REL_MEMBER_OF, factionA);
-
-// Clear ALL targets for a relationship (works for both 1-to-1 and 1-to-Many)
-world.relationships.clear(monster, REL_TARGETS);
-```
-
-### Automatic Cleanup and Integrity
-A major advantage of using the `RelationshipManager` is **automatic referential integrity**. When an entity is deleted via `world.deleteEntity(id)`:
-1. All relationships where that entity was the **subject** are removed.
-2. All relationships where that entity was the **target** are also removed from any other entities that were pointing to it.
-
-This prevents "Ghost ID" bugs where a system tries to process a target entity that no longer exists in the world.
-
----
-
 ## 8. Observers
 
 Observers allow you to react to changes in the ECS state, such as when components are added or removed, or when an entity's composition changes. They are essential for bridging the gap between state changes and side effects (like UI or audio) or for maintaining data integrity in external managers.
@@ -557,7 +705,7 @@ world.subscribeOnRemove(Components.TARGETABLE, (entity) => {
 ```typescript
 // When an 'Owned' component is removed, ensure the relationship is also cleaned up
 world.subscribeOnRemove(Components.REL_OWNED_BY, (entity) => {
-    relationshipManager.clear(entity, Components.REL_OWNED_BY);
+    world.relationships.clearRelations(entity, Components.REL_OWNED_BY);
 });
 ```
 
@@ -774,7 +922,24 @@ Decorators bring a modern, type-safe, and highly readable syntax to Rogue1 that 
 
 ---
 
-## 11. Advanced Features
+## 11. The ECS Engine Flow
+
+Understanding the flow of data and execution is key to using the ECS effectively.
+
+1.  **Initialization**: Components are registered, World is created, and Systems are added to the Scheduler.
+2.  **Input/Action**: The player provides input (e.g., pressing a key).
+3.  **Turn Transition**: `turnManager.nextTurn()` is called.
+    -   Turn counter is incremented in the `CLOCK` singleton.
+    -   `scheduler.update(1.0)` is triggered.
+4.  **System Execution**: The Scheduler runs systems in the order they were added.
+    -   Systems query the World for entities matching their `Aspect`.
+    -   `processEntity` is called for each match, modifying component data.
+5.  **Reactivity**: If components are added/removed, entities move between `Archetypes` automatically.
+6.  **Rendering**: A dedicated RenderSystem (often a `PassiveSystem` or last in the Scheduler) draws the current state of the World.
+
+---
+
+## 12. Advanced Features
 
 ### Singletons
 Useful for global data (e.g., Game Settings, Input State).
@@ -803,23 +968,6 @@ world.edit(entity)
   .remove(Components.HEALTH)
   .apply();
 ```
-
----
-
-## 12. The ECS Engine Flow
-
-Understanding the flow of data and execution is key to using the ECS effectively.
-
-1.  **Initialization**: Components are registered, World is created, and Systems are added to the Scheduler.
-2.  **Input/Action**: The player provides input (e.g., pressing a key).
-3.  **Turn Transition**: `turnManager.nextTurn()` is called.
-    -   Turn counter is incremented in the `CLOCK` singleton.
-    -   `scheduler.update(1.0)` is triggered.
-4.  **System Execution**: The Scheduler runs systems in the order they were added.
-    -   Systems query the World for entities matching their `Aspect`.
-    -   `processEntity` is called for each match, modifying component data.
-5.  **Reactivity**: If components are added/removed, entities move between `Archetypes` automatically.
-6.  **Rendering**: A dedicated RenderSystem (often a `PassiveSystem` or last in the Scheduler) draws the current state of the World.
 
 ---
 
@@ -866,6 +1014,43 @@ While many ECS libraries require imperative setup (passing filters to constructo
 
 ---
 
+## 15. Drawbacks and Considerations
+
+While the Rogue1 ECS is powerful and optimized, there are trade-offs and "gotchas" that you should be aware of to avoid performance pitfalls and bugs.
+
+### 1. Structural Changes are Expensive
+Every time you call `addComponent`, `removeComponent`, or `deleteEntity`, the entity must be moved from one Archetype to another.
+- **Why?** Data is moved from one set of SoA columns to another.
+- **The Negative**: Doing this many times in a single frame for the same entity can be slow.
+- **What to watch out for**: Avoid toggling components frequently (e.g., adding/removing a `VISIBLE` tag every frame). Use a boolean inside a component instead, or use **Batch Editing** via `world.edit(entity)`.
+
+### 2. Manual Component ID Management
+The system relies on unique numeric IDs for components (e.g., `0`, `1`, `100`).
+- **The Negative**: If you accidentally assign the same ID to two different components, the ECS will treat them as the same, leading to "impossible" bugs.
+- **What to watch out for**: Always define IDs in a central place like `ComponentIds.ts` and use the `as const satisfies Record<string, ComponentId>` pattern to catch duplicates at compile time.
+
+### 3. Archetype fragmentation
+If your entities have highly varied combinations of components, you will end up with many Archetypes, each containing only a few entities.
+- **The Negative**: While query performance remains decent, you lose some of the benefits of SoA (cache locality) if arrays are very short.
+- **What to watch out for**: Avoid creating "snowflake" entities with unique one-off component combinations if possible.
+
+### 4. Component Registration is Mandatory
+You **must** register all components via `world.registerComponent` (or `bootstrapEcs`) before creating any entities.
+- **The Negative**: Forgetting to register a component can lead to non-deterministic Archetype IDs, which will break Save/Load functionality.
+- **What to watch out for**: Always use a central bootstrap function.
+
+### 5. Memory vs. Performance Trade-off
+The SoA approach prioritizes iteration speed over memory minimalism.
+- **The Negative**: Empty slots in Archetype columns (from deleted entities) are eventually reused, but the internal arrays only grow, they never shrink unless the world is cleared.
+- **What to watch out for**: If you spawn and delete millions of entities with unique Archetypes, memory usage could grow. For most roguelikes, this is not an issue.
+
+### 6. Relationships have Overhead
+While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an internal reverse index to do so.
+- **The Negative**: Adding or removing relationships is slightly slower than adding a standard component because of this indexing.
+- **What to watch out for**: Use Relationships for meaningful entity-to-entity links (ownership, targeting), but don't use them for simple flags that don't need referential integrity.
+
+---
+
 ## Method Cheat Sheet
 
 | Method | Description |
@@ -884,6 +1069,9 @@ While many ECS libraries require imperative setup (passing filters to constructo
 | `world.groups.getEntities(group)` | Returns all entities in a group. |
 | `world.prefabs.spawn(name)` | Creates an entity from a template. |
 | `world.relationships.add(s, r, t)` | Links two entities with a relationship. |
+| `world.relationships.clearRelations(s, r)`| Removes all targets for relationship `r` on `s`. |
+| `world.relationships.clear()`| Resets the internal relationship index. |
+| `world.clear()` | Resets the entire world, deleting all entities. |
 | `turnManager.nextTurn()` | Advances the game by one turn. |
 | `turnManager.isPlayerTurn` | Boolean: Is it the player's turn to act? |
 | `scheduler.add(system)` | Registers a system for execution. |
