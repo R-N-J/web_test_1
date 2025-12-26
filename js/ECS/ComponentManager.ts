@@ -54,20 +54,23 @@ export class ComponentManager {
     // Primitives and null are safe as-is
     if (value === null || typeof value !== "object") return value;
 
-    const sc = (globalThis as unknown as { structuredClone?: (v: unknown) => unknown }).structuredClone;
-    if (typeof sc === "function") {
-      return sc(value);
+    // Use built-in structuredClone if available
+    if (typeof globalThis.structuredClone === "function") {
+      try {
+        return globalThis.structuredClone(value);
+      } catch {
+        // Fall through
+      }
     }
 
+    // FINAL FALLBACK
     try {
       return JSON.parse(JSON.stringify(value)) as unknown;
-    } catch (err) {
-      // Dev-mode warning. If this fires, register a serializer for this componentId.
+    } catch {
       if (typeof __DEV__ !== "undefined" && __DEV__) {
-        console.warn(
-          "[ECS] Snapshot deep-clone failed. Value will be saved by reference. " +
-          "Register a ComponentSerializer for this ComponentId to fix it.",
-          { value, error: err }
+        throw new Error(
+          `[ECS] Snapshot CRITICAL FAILURE: Component value is too complex to clone. ` +
+          `You MUST register a ComponentSerializer for this data type to prevent state corruption.`
         );
       }
       return value;
