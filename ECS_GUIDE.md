@@ -487,7 +487,14 @@ This prevents "Ghost ID" bugs where a system tries to process a target entity th
 
 ## 8. Observers
 
-Observers allow you to react to changes in the ECS state, such as when components are added or removed, or when an entity's composition changes.
+Observers allow you to react to changes in the ECS state, such as when components are added or removed, or when an entity's composition changes. They are essential for bridging the gap between state changes and side effects (like UI or audio) or for maintaining data integrity in external managers.
+
+### Why use Observers?
+
+While **Systems** are great for logic that runs every frame or turn on a group of entities, **Observers** are best for:
+- **Reactive Side Effects**: Logging a message when an entity is stunned, playing a sound when an item is dropped, or triggering a particle effect when a shield breaks.
+- **Data Synchronization**: Automatically adding an entity to a `GroupManager` when it gains a specific component, or unregistering a `Tag` when an entity is destroyed.
+- **Immediate Response**: Logic that must happen exactly when a component is attached, rather than waiting for the next system update.
 
 ### Component Observers
 You can subscribe to be notified when a specific component is added to or removed from any entity.
@@ -509,11 +516,48 @@ world.unsubscribeOnAdd(Components.HEALTH, onHealthAdded);
 ```
 
 ### Mask Observers
-Mask observers are triggered whenever an entity's component composition changes (any component added or removed).
+Mask observers are triggered whenever an entity's component composition changes (any component added or removed). The internal ECS `QueryManager` uses these to keep system entity lists up to date.
 
 ```typescript
 world.subscribeOnMaskChange((entity, oldMask, newMask) => {
   console.log(`Entity ${entity} changed from ${oldMask} to ${newMask}`);
+});
+```
+
+### Managers vs. Systems in Observers
+
+A common question is whether an observer should call a **System** or a **Manager**.
+
+- **Call Managers**: This is the preferred approach. Managers (like `MessageLog`, `TagManager`, or `RelationshipManager`) provide immediate utility functions to update global state or UI.
+- **Avoid calling Systems**: Systems are designed to be driven by the `Scheduler`. Calling `system.update()` or `system.process()` from an observer can break the intended execution order and cause unpredictable side effects. If you need a system to react to a change, have the observer update a component or a manager that the system then inspects during its normal update cycle.
+
+### Interaction Examples
+
+#### Interacting with MessageLog
+```typescript
+world.subscribeOnAdd(Components.STUNNED, (entity) => {
+    const name = world.getComponent<Name>(entity, Components.NAME)?.value || "Someone";
+    messageLog.addMessage(`${name} is stunned!`, COLOR.YELLOW);
+});
+```
+
+#### Interacting with TagManager or GroupManager
+```typescript
+// Automatically group all entities that can be targeted
+world.subscribeOnAdd(Components.TARGETABLE, (entity) => {
+    groupManager.add("targets", entity);
+});
+
+world.subscribeOnRemove(Components.TARGETABLE, (entity) => {
+    groupManager.removeFromGroup("targets", entity);
+});
+```
+
+#### Interacting with RelationshipManager
+```typescript
+// When an 'Owned' component is removed, ensure the relationship is also cleaned up
+world.subscribeOnRemove(Components.REL_OWNED_BY, (entity) => {
+    relationshipManager.clear(entity, Components.REL_OWNED_BY);
 });
 ```
 
@@ -523,50 +567,142 @@ world.subscribeOnMaskChange((entity, oldMask, newMask) => {
 
 Systems encapsulate logic. The `Scheduler` manages their execution, and the `TurnManager` controls the high-level game loop.
 
-### Systems
-The `IteratingSystem` is the most common base class.
+### Different Types of Systems
+Rogue1 provides several specialized system base classes to handle different logic patterns efficiently.
 
+| System Type | Purpose | Best Use Case |
+| :--- | :--- | :--- |
+| `IteratingSystem` | Processes every entity matching an `Aspect`. | Movement, Combat, AI, Physics. |
+| `IntervalSystem` | Processes entities every N-th update/turn. | Stamina regen, Hunger, Poison damage. |
+| `SortedIteratingSystem` | Processes entities in a specific sorted order. | Rendering order (Z-index), Initiative order. |
+| `PassiveSystem` | Logic that is not automatically run on entities. | Renderers, Input handling, Event managers. |
+
+#### Why use which?
+- **Choose `IteratingSystem`** for standard logic that should happen for everyone, every turn.
+- **Choose `IntervalSystem`** to save performance or model logic that shouldn't happen too fast (e.g., ticking down a "Hungry" status).
+- **Choose `SortedIteratingSystem`** when the *order* of entities matters. For example, in a tactical game, you might sort by an "Initiative" component.
+- **Choose `PassiveSystem`** when you want the structure of a system (Aspects, world access) but you want to trigger the logic yourself (e.g., calling `render()` from a requestAnimationFrame loop).
+
+#### Examples
+
+**IteratingSystem (Movement)**
 ```typescript
-import { IteratingSystem } from './ECS/System';
-
 class MovementSystem extends IteratingSystem {
   constructor(world: World) {
-    super(world, Aspect.all(Components.POSITION));
+    super(world, Aspect.all(Components.POSITION, Components.VELOCITY));
   }
 
   processEntity(entity: EntityId, dt: number) {
     const pos = this.getComponent<Position>(entity, Components.POSITION);
-    pos.x += 1;
+    const vel = this.getComponent<Velocity>(entity, Components.VELOCITY);
+
+    pos.x += vel.dx;
+    pos.y += vel.dy;
+  }
+}
+```
+
+**IntervalSystem (Stamina Regen)**
+```typescript
+class StaminaRegenSystem extends IntervalSystem {
+  constructor(world: World) {
+    // Run every 5 turns
+    super(world, Aspect.all(Components.STAMINA), 5);
+  }
+
+  processEntity(entity: EntityId, dt: number) {
+    this.mutateComponent<Stamina>(entity, Components.STAMINA, (s) => {
+      s.current = Math.min(s.max, s.current + 1);
+    });
   }
 }
 ```
 
 ### The Scheduler
-The `Scheduler` maintains a list of systems and updates them in order.
+The `Scheduler` is the central coordinator for all systems. It ensures that game logic is deterministic by running systems in the exact order they were added.
+
+#### How to use it
+You typically create one `Scheduler` at game start, add your systems to it, and then call its `update()` method in your game loop.
 
 ```typescript
 import { Scheduler } from './ECS/Scheduler';
 
 const scheduler = new Scheduler();
-scheduler.add(new MovementSystem(world));
-scheduler.add(new RenderSystem(world));
 
-// In your game loop:
-scheduler.update(dt);
+// Order matters!
+scheduler.add(new AISystem(world));        // 1. Monsters decide what to do
+scheduler.add(new MovementSystem(world));  // 2. Everyone moves
+scheduler.add(new CollisionSystem(world)); // 3. Resolve position conflicts
+scheduler.add(new RenderSystem(world));    // 4. Draw the result
+
+// Inside your main loop:
+scheduler.update(1.0);
 ```
 
+**Key Methods:**
+- `add(system)`: Adds a system to the end of the execution chain.
+- `get(SystemClass)`: Returns the instance of a system. Useful if `CombatSystem` needs to trigger something in `ParticleSystem`.
+- `setEnabled(SystemClass, boolean)`: Pauses or resumes a specific system.
+- `clear()`: Removes all systems and calls their `cleanup()` hooks (crucial for level transitions).
+
 ### The TurnManager
-For turn-based games, use the `TurnManager` to coordinate between player actions and world updates.
+The `TurnManager` is the "brain" of a turn-based game. It coordinates between the Player's input and the World's systems, and tracks the passage of time via a `CLOCK` singleton.
+
+#### How to use it
+Instead of calling `scheduler.update()` directly, you use the `TurnManager` to advance the game state.
 
 ```typescript
 import { TurnManager } from './ECS/TurnManager';
 
 const turnManager = new TurnManager(world, scheduler);
 
-// When the player performs an action:
-turnManager.nextTurn();
-// This increments the turn clock and ticks the scheduler once.
+// 1. Check if it's the player's turn to act
+if (turnManager.isPlayerTurn) {
+    handlePlayerInput();
+}
+
+// 2. Once the player performs an action (e.g., moves):
+function onPlayerAction() {
+    turnManager.nextTurn();
+}
 ```
+
+When `nextTurn()` is called:
+1. It increments the `turn` count in the `CLOCK` singleton.
+2. It calls `scheduler.update(1.0)`, triggering all registered systems.
+3. It resets the state to wait for the next player action.
+
+### Putting It All Together: The Best Way
+The combination of Systems, the Scheduler, and the TurnManager provides a powerful, clean architecture for roguelikes.
+
+**The Recommended Flow:**
+1.  **State is Data**: All game state (Player HP, Monster positions, Turn count) lives in **Components**.
+2.  **Logic is in Systems**: No logic lives on the entity objects. The `MovementSystem` handles all movement.
+3.  **Scheduler guarantees Order**: You never have to worry about a monster attacking a player *after* the player has already moved away, because you control the sequence in the `Scheduler`.
+4.  **TurnManager handles Timing**: It acts as the gatekeeper, ensuring that the `AISystem` and `MovementSystem` only run when a turn actually passes.
+
+**Example of the complete cycle:**
+```typescript
+// 1. Player presses 'Right'
+const moved = PlayerSystem.tryMove(player, { x: 1, y: 0 });
+
+// 2. If the move was valid, advance the world
+if (moved) {
+    turnManager.nextTurn();
+}
+
+// 3. Inside nextTurn(), the Scheduler runs:
+//    - AISystem: Monster detects player is nearby, sets its Velocity.
+//    - MovementSystem: Moves the monster toward the player.
+//    - StaminaSystem: Ticks down because an action was taken.
+//    - VisibilitySystem: Updates the player's FOV for the new position.
+
+// 4. The RenderSystem (triggered after update) draws the updated world.
+```
+
+This approach is considered "The Best Way" because it ensures **Predictability**, **Performance** (via SoA archetypes), and **Ease of Debugging** (you always know which system modified which data and when).
+
+---
 
 ## 10. Decorators
 
@@ -749,6 +885,8 @@ While many ECS libraries require imperative setup (passing filters to constructo
 | `world.prefabs.spawn(name)` | Creates an entity from a template. |
 | `world.relationships.add(s, r, t)` | Links two entities with a relationship. |
 | `turnManager.nextTurn()` | Advances the game by one turn. |
+| `turnManager.isPlayerTurn` | Boolean: Is it the player's turn to act? |
+| `scheduler.add(system)` | Registers a system for execution. |
 | `world.saveSnapshot()` | Serializes the entire world state. |
 | `Aspect.all(...ids)` | Creates a filter for "all of these". |
 | `@All` / `@And` | Decorator: Entity must have ALL of these. |

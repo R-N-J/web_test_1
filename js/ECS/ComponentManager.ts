@@ -92,6 +92,16 @@ export class ComponentManager {
     return s ? s.deserialize(value) : value;
   }
 
+  /**
+   * Creates a deep copy of a component value using the registered serializer
+   * or the default deep-clone policy.
+   */
+  public cloneValue(id: ComponentId, value: unknown): unknown {
+    // Serialization + Deserialization is the safest way to ensure a clean clone
+    // for complex types registered with serializers.
+    return this.deserializeValue(id, this.serializeValue(id, value));
+  }
+
   public subscribeOnAdd(id: ComponentId, observer: ComponentObserver): void {
     if (!this.onAddObservers.has(id)) this.onAddObservers.set(id, []);
     this.onAddObservers.get(id)!.push(observer);

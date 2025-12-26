@@ -417,6 +417,47 @@ export class World {
   }
 
   /**
+   * Creates an exact structural and data copy of an existing entity.
+   * Note: Tags are NOT duplicated as they must be unique.
+   *
+   * Planned to be used for Mirror Image or Doppelganger effect.
+   *
+   * @param source The entity to duplicate.
+   * @returns The new entity ID.
+   */
+  public duplicateEntity(source: EntityId): EntityId {
+    if (!this.isValid(source)) {
+      throw new Error(`Cannot duplicate invalid entity: ${source}`);
+    }
+
+    const newEntity = this.createEntity();
+    const sourceMask = this.getMask(source);
+    const editor = this.edit(newEntity);
+
+    // Iterate through all registered components and copy if present on source
+    for (const compId of this.getRegisteredComponents()) {
+      const bit = 1n << BigInt(compId);
+      if ((sourceMask & bit) !== 0n) {
+        const val = this.getComponent(source, compId);
+        // Deep clone the value via ComponentManager logic
+        editor.add(compId, this.components.cloneValue(compId, val));
+      }
+    }
+
+    editor.commit();
+
+    // Optional: Add to same groups as source
+    for (const groupName of this.groups.save() ? Object.keys(this.groups.save()) : []) {
+      if (this.groups.has(groupName, source)) {
+        this.groups.add(groupName, newEntity);
+      }
+    }
+
+    return newEntity;
+  }
+
+
+  /**
    * Used by EntityEditor to perform one structural move (single batch move).
    */
   public applyBatchChanges(

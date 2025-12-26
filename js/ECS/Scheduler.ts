@@ -20,13 +20,6 @@ export class Scheduler {
     return undefined;
   }
 
-  /**
-   * Removes a system and triggers its cleanup logic.
-   // ... existing code ...
-   public setEnabled<T extends BaseSystem>(type: SystemConstructor<T>, enabled: boolean): void {
-   const system = this.get(type);
-   if (system) system.toggle(enabled);
-   }
 
    /**
    * Wipes all systems and triggers their cleanup hooks.

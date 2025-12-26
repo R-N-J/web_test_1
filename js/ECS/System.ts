@@ -158,7 +158,6 @@ export abstract class IteratingSystem extends BaseSystem {
     return this.world.mutateComponent(entity, id, mutator);
   }
 
-
   /**
    * Shortcut to get a global singleton component.
    */
@@ -198,7 +197,6 @@ export abstract class IteratingSystem extends BaseSystem {
       }
     }
   }
-
 
   /**
    * Optimized: Processes an entire chunk of memory (Archetype) at once.
@@ -273,31 +271,7 @@ export abstract class PassiveSystem extends BaseSystem {
   update(_dt: number): void { /* Passive: doesn't update on tick */ }
 }
 
-/**
- * Executes logic once after a delay.
- */
-export class DelayedAction {
-  constructor(public delay: number, public action: () => void) {}
-}
 
-export class TimeManager extends BaseSystem {
-  private actions: DelayedAction[] = [];
-
-  public delay(ms: number, callback: () => void): void {
-    this.actions.push(new DelayedAction(ms / 1000, callback));
-  }
-
-  update(dt: number): void {
-    for (let i = this.actions.length - 1; i >= 0; i--) {
-      const a = this.actions[i];
-      a.delay -= dt;
-      if (a.delay <= 0) {
-        a.action();
-        this.actions.splice(i, 1);
-      }
-    }
-  }
-}
 
 
 

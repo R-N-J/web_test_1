@@ -1,5 +1,5 @@
 import { World } from "./World";
-import { Scheduler } from "./Scheduler";
+import { Scheduler, SystemConstructor } from "./Scheduler";
 import { BaseSystem } from "./System";
 import { Components, Clock } from "./ComponentIds"; // Ensure Clock interface is exported there
 
@@ -60,8 +60,8 @@ export class TurnManager {
   /**
    * Helper to enable/disable specific system types during turn transitions.
    */
-  public setSystemState<T extends BaseSystem>(type: { new (...args: any[]): T }, enabled: boolean): void {
-    this.scheduler.setEnabled(type as any, enabled);
+  public setSystemState<T extends BaseSystem>(type: SystemConstructor<T>, enabled: boolean): void {
+    this.scheduler.setEnabled(type, enabled);
   }
 
   /**
