@@ -44,10 +44,10 @@ export abstract class IteratingSystem extends BaseSystem {
     this.requiredGroup = getSystemGroup(this.constructor);
     this.requiredTag = getSystemTag(this.constructor);
 
-    // Seed membership for already-existing entities (important when loading or building worlds).
-    this.initializeMembership();
 
-    // Subscribe to structural changes
+    // remove initializeMembership. It's no longer needed. Have the system subscribe to mask changes instead.
+    // We still subscribe to structural changes, but ONLY to trigger hooks
+    // like onEntityAdded/Removed. We no longer maintain a local 'membership' Set.
     this.maskObserver = (entity, oldMask, newMask) => {
       const oldMatch = this.aspect.matches(oldMask);
       const newMatch = this.aspect.matches(newMask);
@@ -55,10 +55,8 @@ export abstract class IteratingSystem extends BaseSystem {
       if (oldMatch === newMatch) return;
 
       if (newMatch) {
-        this.membership.add(entity);
         this.onEntityAdded(entity);
       } else {
-        this.membership.delete(entity);
         this.onEntityRemoved(entity);
       }
     };
@@ -68,25 +66,34 @@ export abstract class IteratingSystem extends BaseSystem {
 
   /**
    * Checks if a specific entity currently matches this system's Aspect.
-   * This is fast (O(1) Set lookup).
+   * Now uses the world's mask for a live check.
    */
   protected matches(entity: EntityId): boolean {
-    return this.membership.has(entity);
+    return this.world.matches(entity, this.aspect);
   }
 
   /**
    * Returns the total number of entities currently matched by this system.
+   * Calculated on-demand by summing matching archetype lengths.
    */
   public getMatchedCount(): number {
-    return this.membership.size;
+    let count = 0;
+    for (const arch of this.world.getArchetypes(this.aspect)) {
+      count += arch.entities.length;
+    }
+    return count;
   }
+
 
   /**
    * Executes a callback for every entity currently matched by this system.
    */
   protected forEach(callback: (entity: EntityId) => void): void {
-    for (const entity of this.membership) {
-      callback(entity);
+    for (const arch of this.world.getArchetypes(this.aspect)) {
+      const entities = arch.entities;
+      for (let i = 0; i < entities.length; i++) {
+        callback(entities[i]);
+      }
     }
   }
 
@@ -179,8 +186,6 @@ export abstract class IteratingSystem extends BaseSystem {
   update(dt: number): void {
     if (!this.enabled) return;
 
-    // Logic Improvement: If a group or tag is required, we use the specific
-    // view methods instead of scanning all archetypes.
     if (this.requiredTag) {
       for (const entity of this.world.viewTag(this.requiredTag)) {
         if (this.world.matches(entity, this.aspect)) this.processEntity(entity, dt);
@@ -190,9 +195,10 @@ export abstract class IteratingSystem extends BaseSystem {
         if (this.world.matches(entity, this.aspect)) this.processEntity(entity, dt);
       }
     } else {
-      // Standard behavior: scan matching archetypes
       const matchingArchetypes = this.world.getArchetypes(this.aspect);
       for (const arch of matchingArchetypes) {
+        // Efficiency fix: skip archetypes that have been cleared but not yet garbage collected
+        if (arch.entities.length === 0) continue;
         this.processArchetype(arch, dt);
       }
     }
@@ -200,7 +206,7 @@ export abstract class IteratingSystem extends BaseSystem {
 
   /**
    * Optimized: Processes an entire chunk of memory (Archetype) at once.
-   * High-performance systems can override this to fetch raw columns.
+   * for High Performance, Override this if you want to use world.viewColumnsStrict to fetch raw columns.
    */
   protected processArchetype(arch: Archetype, dt: number): void {
     const entities = arch.entities;
@@ -210,6 +216,7 @@ export abstract class IteratingSystem extends BaseSystem {
       this.processEntity(entities[i], dt);
     }
   }
+
 
   abstract processEntity(entity: number, dt: number): void;
 }
