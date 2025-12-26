@@ -3,6 +3,14 @@ import { EntityManager } from "./EntityManager";
 import { ComponentManager } from "./ComponentManager";
 
 export class RelationshipManager {
+  /**
+   * Index for fast cleanup: TargetEntityId -> Map<RelationId, Set<SubjectEntityId>>
+   * This allows O(1) lookups to find who is pointing at a deleted entity.
+   */
+  private targetToSubjects = new Map<EntityId, Map<ComponentId, Set<EntityId>>>();
+
+
+
   constructor(
     private entities: EntityManager,
     private components: ComponentManager
@@ -20,16 +28,21 @@ export class RelationshipManager {
     const hasRelation = this.entities.hasComponent(subject, relationId);
 
     if (exclusive) {
-      // If component already exists, just overwrite the stored target (non-structural).
+      // If component already exists, we must untrack the old target first
       if (hasRelation) {
+        const oldTarget = this.entities.getComponentValue<EntityId>(subject, relationId);
+        if (oldTarget !== undefined) this.untrackTarget(oldTarget, relationId, subject);
+
         this.entities.setComponentValue(subject, relationId, target);
+        this.trackTarget(target, relationId, subject);
         return;
       }
 
-      // Otherwise, structural add (needs the bit in the mask).
+      // Otherwise, structural add
       const loc = this.entities.getLocation(subject);
       const oldMask = loc?.arch.mask ?? 0n;
       this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, target);
+      this.trackTarget(target, relationId, subject);
       return;
     }
 
@@ -37,23 +50,24 @@ export class RelationshipManager {
     const existing = this.getTargets(subject, relationId);
 
     if (existing instanceof Set) {
-      // Already a set: mutate in place (non-structural)
       existing.add(target);
+      this.trackTarget(target, relationId, subject);
       return;
     }
 
-    // Upgrade "no relation" or "single relation value" to a Set
     const newSet = new Set<EntityId>();
-    if (existing !== undefined) newSet.add(existing);
+    if (existing !== undefined) {
+      newSet.add(existing);
+      // existing was already tracked as a single value, no need to re-track
+    }
     newSet.add(target);
+    this.trackTarget(target, relationId, subject);
 
     if (hasRelation) {
-      // Component exists already, just replace stored value with the Set (non-structural)
       this.entities.setComponentValue(subject, relationId, newSet);
       return;
     }
 
-    // Component not present: structural add required
     const loc = this.entities.getLocation(subject);
     const oldMask = loc?.arch.mask ?? 0n;
     this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, newSet);
@@ -85,6 +99,9 @@ export class RelationshipManager {
   /**
    * Removes a specific target from a relationship.
    */
+  /**
+   * Removes a specific target from a relationship.
+   */
   public remove(subject: EntityId, relationId: ComponentId, target?: EntityId): void {
     const loc = this.entities.getLocation(subject);
     if (!loc) return;
@@ -93,14 +110,43 @@ export class RelationshipManager {
 
     if (val instanceof Set && target !== undefined) {
       val.delete(target);
+      this.untrackTarget(target, relationId, subject);
       if (val.size === 0) {
         this.removeComponent(subject, relationId);
       }
     } else {
       // If no target specified or it's a single value, remove the whole component
+      if (typeof val === "number") {
+        this.untrackTarget(val, relationId, subject);
+      } else if (val instanceof Set) {
+        for (const t of val) this.untrackTarget(t, relationId, subject);
+      }
       this.removeComponent(subject, relationId);
     }
   }
+
+  private trackTarget(target: EntityId, relationId: ComponentId, subject: EntityId): void {
+    if (!this.targetToSubjects.has(target)) {
+      this.targetToSubjects.set(target, new Map());
+    }
+    const relations = this.targetToSubjects.get(target)!;
+    if (!relations.has(relationId)) {
+      relations.set(relationId, new Set());
+    }
+    relations.get(relationId)!.add(subject);
+  }
+
+  private untrackTarget(target: EntityId, relationId: ComponentId, subject: EntityId): void {
+    const relations = this.targetToSubjects.get(target);
+    if (!relations) return;
+    const subjects = relations.get(relationId);
+    if (subjects) {
+      subjects.delete(subject);
+      if (subjects.size === 0) relations.delete(relationId);
+    }
+    if (relations.size === 0) this.targetToSubjects.delete(target);
+  }
+
 
   private removeComponent(subject: EntityId, relationId: ComponentId): void {
     const currentMask = this.entities.getMask(subject);
@@ -111,6 +157,35 @@ export class RelationshipManager {
       this.components.transmute(subject, newMask);
     }
   }
+
+  /**
+   * Rebuilds the back-reference index by scanning all archetypes.
+   * Useful after loading a snapshot.
+   */
+  public rebuild(): void {
+    this.clear();
+
+    for (const arch of this.components.getArchetypes()) {
+      for (const [compId, column] of arch.columns) {
+        for (let i = 0; i < arch.entities.length; i++) {
+          const val = column[i];
+          const subject = arch.entities[i];
+
+          if (typeof val === "number" && this.entities.isValid(val)) {
+            this.trackTarget(val, compId, subject);
+          } else if (val instanceof Set) {
+            for (const target of val) {
+              if (typeof target === "number" && this.entities.isValid(target)) {
+                this.trackTarget(target, compId, subject);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+
   /**
    * Returns the target(s) of a relationship.
    * Returns a single EntityId for exclusive, or a Set<EntityId> for non-exclusive.
@@ -174,28 +249,41 @@ export class RelationshipManager {
     return count;
   }
 
+
   /**
    * Removes all targets for a specific relationship on a subject.
    */
-  public clear(subject: EntityId, relationId: ComponentId): void {
+  public clearRelations(subject: EntityId, relationId: ComponentId): void {
     this.removeComponent(subject, relationId);
   }
 
+  /**
+   * Resets the entire internal index.
+   * Call this during World.clear() to drop all indexing data.
+   */
+  public clear(): void {
+    this.targetToSubjects.clear();
+  }
+
+
   public cleanup(deletedEntity: EntityId): void {
-    for (const arch of this.components.getArchetypes()) {
-      for (const [compId, column] of arch.columns) {
-        for (let i = arch.entities.length - 1; i >= 0; i--) {
-          const val = column[i];
-          if (val === deletedEntity) {
-            this.remove(arch.entities[i], compId);
-          } else if (val instanceof Set && val.has(deletedEntity)) {
-            val.delete(deletedEntity);
-            if (val.size === 0) {
-              this.remove(arch.entities[i], compId);
-            }
-          }
-        }
+    const relations = this.targetToSubjects.get(deletedEntity);
+    if (!relations) return;
+
+    // Use a copy of the relations to avoid concurrent modification issues during removal
+    const relationEntries = Array.from(relations.entries());
+
+    for (const [relationId, subjects] of relationEntries) {
+      const subjectArray = Array.from(subjects);
+      for (const subject of subjectArray) {
+        this.remove(subject, relationId, deletedEntity);
       }
     }
+
+    this.targetToSubjects.delete(deletedEntity);
   }
+
+
+
+
 }

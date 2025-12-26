@@ -169,7 +169,7 @@ export class World {
    * A streaming view of all entities matching an aspect.
    * Use this for memory-efficient iteration.
    */
-  public *view(aspect: Aspect): IterableIterator<EntityId> {
+  public* view(aspect: Aspect): IterableIterator<EntityId> {
     const archetypes = this.getArchetypes(aspect);
     for (const arch of archetypes) {
       const count = arch.entities.length;
@@ -179,7 +179,7 @@ export class World {
     }
   }
 
-  public *viewGroup(group: string): IterableIterator<EntityId> {
+  public* viewGroup(group: string): IterableIterator<EntityId> {
     // Pass 'this' so the manager can filter out recycled IDs automatically
     const entities = this.groups.getEntities(group, this);
     for (const e of entities) yield e;
@@ -211,7 +211,7 @@ export class World {
     return this.groups.count(group);
   }
 
-  public *viewTag(tag: string): IterableIterator<EntityId> {
+  public* viewTag(tag: string): IterableIterator<EntityId> {
     const entity = this.tags.getEntity(tag);
     // Safety: only yield if the entity exists AND is still valid/active
     if (entity !== undefined && this.entities.isValid(entity)) {
@@ -225,7 +225,7 @@ export class World {
    * Example usage:
    * for (const { entities, columns: [pos, vel] } of world.viewColumns(aspect, POS, VEL)) { ... }
    */
-  public *viewColumns(
+  public* viewColumns(
     aspect: Aspect,
     ...componentIds: ComponentId[]
   ): IterableIterator<{ arch: Archetype; entities: EntityId[]; columns: unknown[][] }> {
@@ -246,7 +246,7 @@ export class World {
 
       if (!ok) continue;
 
-      yield { arch, entities: arch.entities, columns: cols };
+      yield {arch, entities: arch.entities, columns: cols};
     }
   }
 
@@ -257,7 +257,7 @@ export class World {
    * Use this when your Aspect logically guarantees the columns exist (e.g. Aspect.all(...)).
    * This helps catch registration/serialization mistakes early.
    */
-  public *viewColumnsStrict(
+  public* viewColumnsStrict(
     aspect: Aspect,
     ...componentIds: ComponentId[]
   ): IterableIterator<{ arch: Archetype; entities: EntityId[]; columns: unknown[][] }> {
@@ -276,7 +276,7 @@ export class World {
         cols.push(col);
       }
 
-      yield { arch, entities: arch.entities, columns: cols };
+      yield {arch, entities: arch.entities, columns: cols};
     }
   }
 
@@ -328,7 +328,6 @@ export class World {
   }
 
 
-
   /**
    * Checks if an entity possesses a specific component.
    */
@@ -375,28 +374,28 @@ export class World {
       return;
     }
 
-      // 0. Clean up relationships pointing TO this entity
-      this.relationships.cleanup(entity);
+    // 0. Clean up relationships pointing TO this entity
+    this.relationships.cleanup(entity);
 
-      // 1. Clean up from Archetypes
-      const loc = this.entities.getLocation(entity);
-      const oldMask = loc?.arch.mask ?? 0n;
+    // 1. Clean up from Archetypes
+    const loc = this.entities.getLocation(entity);
+    const oldMask = loc?.arch.mask ?? 0n;
 
-      if (loc) {
-        const movedEntityId = loc.arch.removeEntity(loc.row);
+    if (loc) {
+      const movedEntityId = loc.arch.removeEntity(loc.row);
 
-        if (movedEntityId !== entity) {
-          const movedLoc = this.entities.getLocation(movedEntityId);
-          if (movedLoc) {
-            this.entities.setLocation(movedEntityId, movedLoc.arch, loc.row);
-          }
+      if (movedEntityId !== entity) {
+        const movedLoc = this.entities.getLocation(movedEntityId);
+        if (movedLoc) {
+          this.entities.setLocation(movedEntityId, movedLoc.arch, loc.row);
         }
-
-        this.entities.removeLocation(entity);
       }
 
-      // NEW: structural exit event (entity is effectively removed from all aspects)
-      if (oldMask !== 0n) {
+      this.entities.removeLocation(entity);
+    }
+
+    // NEW: structural exit event (entity is effectively removed from all aspects)
+    if (oldMask !== 0n) {
       this.components.emitMaskChange(entity, oldMask, 0n);
     }
 
@@ -467,7 +466,7 @@ export class World {
     removals: Set<ComponentId>
   ): void {
     for (const id of additions.keys()) {
-        this.components.addRegisteredComponent(id);
+      this.components.addRegisteredComponent(id);
     }
     this.components.applyBatchChanges(entity, newMask, additions, removals);
   }
@@ -487,7 +486,9 @@ export class World {
     // 4. Reset Tags and Groups
     this.tags.load({}); // TagManager.load({}) effectively clears it
     this.groups.load({}); // GroupManager.load({}) effectively clears it
-    // 5. Note: PrefabManager doesn't usually need clearing as
+    // 5. Reset Relationship index
+    this.relationships.clear();
+    // 6. Note: PrefabManager doesn't usually need clearing as
     // blueprints persist across level changes.
   }
 
@@ -578,9 +579,12 @@ export class World {
       }
     }
 
+    // Rebuild the relationship index after data is loaded
+    this.relationships.rebuild();
+
     this.tags.load(snapshot.tags);
     this.groups.load(snapshot.groups);
   }
 
-}
 
+}
