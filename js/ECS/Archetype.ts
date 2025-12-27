@@ -1,6 +1,8 @@
 export type ComponentId = number;
 export type EntityId = number;
 
+
+
 /**
  * Stores entities of a specific component composition in Struct of Arrays (SoA) format.
  */

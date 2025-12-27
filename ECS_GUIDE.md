@@ -127,10 +127,10 @@ const arch_Pos_Health = {
 The first step is to create a `World` instance and register your components. It is crucial to register all components before creating entities to ensure performance and consistency.
 
 ### Defining Components
-Components are identified by unique numeric IDs. It is best to define them in a central place like `ComponentIds.ts`. Use a constant object and TypeScript's `as const satisfies Record<string, ComponentId>` to ensure type safety.
+Components are identified by unique numeric IDs. It is best to define them in a central place like `ComponentRegistry.ts`. Use a constant object and TypeScript's `as const satisfies Record<string, ComponentId>` to ensure type safety.
 
 ```typescript
-// js/ECS/ComponentIds.ts
+// js/ECS/ComponentRegistry.ts
 export const Components = {
   // Core
   POSITION: 0,
@@ -193,7 +193,7 @@ if (pos) {
   console.log(pos.x, pos.y);
 }
 ```
-It is a best practice to keep these interfaces in the same file as your `Components` ID definitions (e.g., `ComponentIds.ts`).
+It is a best practice to keep these interfaces in the same file as your `Components` ID definitions (e.g., `ComponentRegistry.ts`).
 
 ### Accessing and Modifying Data
 There are four primary ways to interact with component data. Understanding the difference between them is crucial for performance and preventing bugs.
@@ -586,7 +586,7 @@ Create a file like `js/entities/prefabs.json`:
 ]
 ```
 
-*(Note: Use the numeric IDs defined in your `ComponentIds.ts` for the `id` fields.)*
+*(Note: Use the numeric IDs defined in your `ComponentRegistry.ts` for the `id` fields.)*
 
 #### 2. Create a Loading Utility
 In your `js/entities/` folder (or wherever you manage content), create a loader that fetches this data and registers it with the `World`.
@@ -627,7 +627,7 @@ const orc = world.prefabs.spawn("orc_warrior");
 ```
 
 ### Key Considerations:
-1.  **Numeric IDs:** Your JSON must use the actual numbers from `ComponentIds.ts`. If you change those numbers in code but don't update your database/JSON, your prefabs will break or assign data to the wrong components.
+1.  **Numeric IDs:** Your JSON must use the actual numbers from `ComponentRegistry.ts`. If you change those numbers in code but don't update your database/JSON, your prefabs will break or assign data to the wrong components.
 2.  **Complex Data:** If your component values contain non-JSON types (like `Set` or `Map`), you must ensure you have registered `ComponentSerializers` in your `World` so the `PrefabManager` (which uses the `EntityEditor`) handles the data correctly.
 3.  **Relationships:** The `targetTag` in the JSON relies on an entity with that tag already existing in the `World` (via `world.tags.register`) at the moment you call `spawn()`.
 
@@ -1027,7 +1027,7 @@ Every time you call `addComponent`, `removeComponent`, or `deleteEntity`, the en
 ### 2. Manual Component ID Management
 The system relies on unique numeric IDs for components (e.g., `0`, `1`, `100`).
 - **The Negative**: If you accidentally assign the same ID to two different components, the ECS will treat them as the same, leading to "impossible" bugs.
-- **What to watch out for**: Always define IDs in a central place like `ComponentIds.ts` and use the `as const satisfies Record<string, ComponentId>` pattern to catch duplicates at compile time.
+- **What to watch out for**: Always define IDs in a central place like `ComponentRegistry.ts` and use the `as const satisfies Record<string, ComponentId>` pattern to catch duplicates at compile time.
 
 ### 3. Archetype fragmentation
 If your entities have highly varied combinations of components, you will end up with many Archetypes, each containing only a few entities.

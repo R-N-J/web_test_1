@@ -1,7 +1,7 @@
 import { World } from "./World";
 import { Scheduler, SystemConstructor } from "./Scheduler";
 import { BaseSystem } from "./System";
-import { Components, Clock } from "./ComponentIds"; // Ensure Clock interface is exported there
+import { InternalComponents, Clock } from "./InternalComponents";
 
 // brain of the game loo, phases of a turn (Player -> NPCs -> World).
 
@@ -11,8 +11,8 @@ export class TurnManager {
 
   constructor(private world: World, private scheduler: Scheduler) {
     // Initialize the singleton if it doesn't exist
-    if (!this.world.hasSingleton(Components.CLOCK)) {
-      this.world.setSingleton<Clock>(Components.CLOCK, { turn: 0 });
+    if (!this.world.hasSingleton(InternalComponents.CLOCK)) {
+      this.world.setSingleton<Clock>(InternalComponents.CLOCK, { turn: 0 });
     }
   }
 
@@ -21,7 +21,7 @@ export class TurnManager {
   }
 
   public get turnNumber(): number {
-    return this.world.getSingleton<Clock>(Components.CLOCK)?.turn ?? 0;
+    return this.world.getSingleton<Clock>(InternalComponents.CLOCK)?.turn ?? 0;
   }
 
   /**
@@ -33,7 +33,7 @@ export class TurnManager {
     this._isPlayerTurn = false;
 
     // Increment turn count via the non-structural update API
-    this.world.updateComponent<Clock>(this.world.getSingletonEntity(), Components.CLOCK, (clock) => {
+    this.world.updateComponent<Clock>(this.world.getSingletonEntity(), InternalComponents.CLOCK, (clock) => {
       clock.turn++;
       return clock;
     });
@@ -80,9 +80,8 @@ export class TurnManager {
    * Resets the turn counter. Useful when starting a new game.
    */
   public reset(): void {
-    this.world.setSingleton<Clock>(Components.CLOCK, { turn: 0 });
+    this.world.setSingleton<Clock>(InternalComponents.CLOCK, {turn: 0});
     this._isPlayerTurn = true;
     this._isPaused = false;
   }
-
 }
