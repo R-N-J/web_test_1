@@ -35,7 +35,7 @@ export abstract class IteratingSystem extends BaseSystem {
   protected requiredGroup?: string;
   protected requiredTag?: string;
 
-  private membership = new Set<EntityId>();
+
   private readonly maskObserver: MaskObserver;
 
   constructor(protected world: World, aspect?: Aspect) {
@@ -45,7 +45,7 @@ export abstract class IteratingSystem extends BaseSystem {
     this.requiredTag = getSystemTag(this.constructor);
 
 
-    // remove initializeMembership. It's no longer needed. Have the system subscribe to mask changes instead.
+    // Remove the initializeMembership. Now the system subscribes to mask changes instead.
     // We still subscribe to structural changes, but ONLY to trigger hooks
     // like onEntityAdded/Removed. We no longer maintain a local 'membership' Set.
     this.maskObserver = (entity, oldMask, newMask) => {
@@ -107,20 +107,6 @@ export abstract class IteratingSystem extends BaseSystem {
    */
   protected onEntityRemoved(_entity: EntityId): void {}
 
-  /**
-   * Iterates the world once to seed the membership set and fire onEntityAdded for existing matches.
-   */
-  private initializeMembership(): void {
-    const archetypes = this.world.getArchetypes(this.aspect);
-    for (const arch of archetypes) {
-      for (const e of arch.entities) {
-        if (!this.membership.has(e)) {
-          this.membership.add(e);
-          this.onEntityAdded(e);
-        }
-      }
-    }
-  }
 
   /**
    * Ensure we unsubscribe to avoid leaks when systems are removed from the Scheduler.
