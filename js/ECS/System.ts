@@ -7,15 +7,48 @@ import type { MaskObserver } from "./ComponentManager";
 
 export abstract class BaseSystem {
   public enabled = true;
+  private _initialized = false; // Track first run
 
   abstract update(dt: number): void;
 
   /**
-   * Toggles the system's processing state.
+   * Internal wrapper to ensure onEnable is called before the first update.
+   */
+  public runUpdate(dt: number): void {
+    if (!this.enabled) return;
+
+    if (!this._initialized) {
+      this.onEnable();
+      this._initialized = true;
+    }
+
+    this.update(dt);
+  }
+
+  /** Hook for one-time setup that requires the World to be fully populated. */
+  protected onEnable(): void {}
+
+  /**
+   * Toggles the system's processing state and triggers lifecycle hooks.
    */
   public toggle(state?: boolean): void {
-    this.enabled = state !== undefined ? state : !this.enabled;
+    const newState = state !== undefined ? state : !this.enabled;
+    if (this.enabled === newState) return;
+
+    this.enabled = newState;
+    if (this.enabled) {
+      this.onResume();
+    } else {
+      this.onPause();
+    }
   }
+
+  /** Called when the system is enabled/resumed. */
+  protected onResume(): void {}
+
+  /** Called when the system is disabled/paused. */
+  protected onPause(): void {}
+
 
   /**
    * Called when the system is removed from the world.

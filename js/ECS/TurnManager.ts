@@ -70,10 +70,12 @@ export class TurnManager {
    */
   public pause(): void {
     this._isPaused = true;
+    this.scheduler.pauseAll(); // Notify all systems
   }
 
   public resume(): void {
     this._isPaused = false;
+    this.scheduler.resumeAll(); // Notify all systems
   }
 
   /**
@@ -82,6 +84,6 @@ export class TurnManager {
   public reset(): void {
     this.world.setSingleton<Clock>(InternalComponents.CLOCK, {turn: 0});
     this._isPlayerTurn = true;
-    this._isPaused = false;
+    this.resume();
   }
 }

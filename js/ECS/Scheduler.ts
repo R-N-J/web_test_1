@@ -49,15 +49,33 @@ export class Scheduler {
   public setEnabled<T extends BaseSystem>(type: SystemConstructor<T>, enabled: boolean): void {
     for (const s of this.systems) {
       if (s.constructor === type) {
-        s.toggle(enabled);
+        s.toggle(enabled); // This now triggers onPause/onResume
       }
+    }
+  }
+
+  /**
+   * Pauses all systems in the scheduler.
+   */
+  public pauseAll(): void {
+    for (const s of this.systems) {
+      s.toggle(false);
+    }
+  }
+
+  /**
+   * Resumes all systems in the scheduler.
+   */
+  public resumeAll(): void {
+    for (const s of this.systems) {
+      s.toggle(true);
     }
   }
 
   public update(dt: number): void {
     for (const system of this.systems) {
       if (system.enabled) {
-        system.update(dt);
+        system.runUpdate(dt); // Use the wrapper instead of calling .update directly
       }
     }
   }
