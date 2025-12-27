@@ -13,7 +13,7 @@ export type ComponentObserver = (entity: EntityId, componentId: ComponentId) => 
 
 /**
  * Serializer for a single component type (by ComponentId).
- * Use this for snapshot save/load of non-JSON-native values (Set, Map, classes, etc).
+ * Use this for snapshot save/load of non-JSON-native values (Set, Map, classes, etc.).
  */
 export interface ComponentSerializer {
   serialize(value: unknown): unknown;
@@ -177,6 +177,7 @@ export class ComponentManager {
       targetArch = new Archetype(newMask, componentIds);
       this.archetypes.set(newMask, targetArch);
       this.queryManager.registerArchetype(targetArch);
+      this.queryManager.invalidateCache(); // Re-sync existing queries
     }
 
     const newRow = targetArch.addEntity(entity, dataToMigrate);
@@ -210,7 +211,7 @@ export class ComponentManager {
   ): void {
     const oldLocation = this.entityManager.getLocation(entity);
 
-    // If same archetype, this is NON-structural (no mask change).
+    // If the same archetype, this is NON-structural (no mask change).
     if (oldLocation && oldLocation.arch.mask === newMask) {
       for (const [id, val] of additions) {
         const col = oldLocation.arch.columns.get(id);
@@ -246,9 +247,10 @@ export class ComponentManager {
       newMask,
       this.registeredComponents.filter((id: ComponentId) => (newMask & (1n << BigInt(id))) !== 0n)
     );
+    this.queryManager.invalidateCache(); // Ensure batch moves are reflected in queries
+
     const newRow = targetArch.addEntity(entity, dataToMigrate);
     this.entityManager.setLocation(entity, targetArch, newRow);
-
     // NEW: structural event
     this.emitMaskChange(entity, oldMask, newMask);
   }

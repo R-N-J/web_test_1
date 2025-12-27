@@ -5,7 +5,7 @@ export class QueryManager {
   // Cache: Aspect.all + Aspect.one + Aspect.exclude -> List of matching Archetypes
   private queryCache = new Map<string, Archetype[]>();
   private activeAspects = new Map<string, Aspect>();
-
+  private isCacheDirty = false;
 
   /**
    * Generates a unique stable key for an Aspect.
@@ -14,9 +14,23 @@ export class QueryManager {
     return `${aspect.all}:${aspect.one}:${aspect.exclude}`;
   }
 
-  public getArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
-    const key = this.getAspectKey(aspect);
+  /**
+   * Marks the cache as needing a rebuild.
+   * Call this when the global list of archetypes changes structurally.
+   */
+  public invalidateCache(): void {
+    this.isCacheDirty = true;
+  }
 
+  public getArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
+    if (this.isCacheDirty) {
+      this.queryCache.clear();
+      // We keep activeAspects so we know what queries to rebuild if needed,
+      // but clearing queryCache forces a re-scan.
+      this.isCacheDirty = false;
+    }
+
+    const key = this.getAspectKey(aspect);
     // If we've seen this query before, return the cached list
     if (this.hasQuery(aspect)) {
       return this.queryCache.get(key)!;
