@@ -114,11 +114,13 @@ export class EntityEditor {
   }
 
   /**
-   * Finalizes the changes and performs exactly one memory move in the World.
-   * Returns the entity ID for assignment.
+   * Finalizes the changes.
+   * In our engine, this can be called manually for immediate effect,
+   * but will also be called automatically by World.flush() if omitted.
    */
   public commit(): EntityId {
     this.world.applyBatchChanges(this.entity, this.newMask, this.additions, this.removals);
+    this.world.finalizeEditor(this); // Remove from tracking
     return this.entity;
   }
 }

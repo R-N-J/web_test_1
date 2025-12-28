@@ -48,6 +48,8 @@ export class World {
   private components = new ComponentManager(this.entities, this.queries);
   public readonly relationships = new RelationshipManager(this.entities, this.components);
   public readonly prefabs = new PrefabManager(this);
+  private activeEditors = new Set<EntityEditor>(); // NEW: Track uncommitted builders
+
   private mapperCache = new Map<ComponentId, Mapper<unknown>>();
   public readonly events = new EventBus();
 
@@ -454,12 +456,23 @@ export class World {
   }
 
   /**
-   * Starts a batch edit for an entity to avoid multiple memory moves.
+   * Starts a batch edit for an entity.
+   * Tracks the editor so it can be auto-committed if the user forgets.
    */
   public edit(entity: EntityId): EntityEditor {
     const loc = this.entities.getLocation(entity);
-    return new EntityEditor(this, entity, loc?.arch.mask ?? 0n);
+    const editor = new EntityEditor(this, entity, loc?.arch.mask ?? 0n);
+    this.activeEditors.add(editor);
+    return editor;
   }
+
+  /**
+   * Used by EntityEditor.commit() to remove itself from the tracking Set.
+   */
+  public finalizeEditor(editor: EntityEditor): void {
+    this.activeEditors.delete(editor);
+  }
+
 
   /**
    * Fluent API: Creates a new entity and returns an editor to build it.
@@ -532,10 +545,15 @@ export class World {
   }
 
   /**
-   * Executes all queued structural changes.
+   * Executes all queued structural changes AND any uncommitted editors..
    */
   public flush(): void {
-    // Process queue in chunks to handle cases where an observer might trigger more deferred ops
+    // 1. Auto-commit any editors created during systems execution
+    for (const editor of this.activeEditors) {
+      editor.commit(); // This now removes itself from the Set via finalizeEditor
+    }
+
+    // 2. Process the structural queue (ADD, REMOVE, DELETE)
     while (this.deferredQueue.length > 0) {
       const ops = this.deferredQueue;
       this.deferredQueue = []; // Clear for next batch
