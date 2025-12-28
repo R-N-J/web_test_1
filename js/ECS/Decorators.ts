@@ -7,6 +7,44 @@ const ASPECT_METADATA_KEY = "__ecs_aspect__";
 const GROUP_METADATA_KEY = "__ecs_group__";
 const TAG_METADATA_KEY = "__ecs_tag__";
 const INTERVAL_METADATA_KEY = "__ecs_interval__";
+const SUBSCRIBE_METADATA_KEY = "__ecs_subscriptions__";
+
+
+export interface SubscriptionMetadata {
+  eventType: string;
+  methodName: string;
+}
+
+/**
+ * Interface for a constructor that has been decorated with @Subscribe.
+ */
+interface DecoratedConstructor {
+  [SUBSCRIBE_METADATA_KEY]?: SubscriptionMetadata[];
+}
+
+/**
+ * Marks a method as an event listener.
+ * Uses 'object' and index signatures to avoid 'any'.
+ */
+export function Subscribe(eventType: string) {
+  return function(target: object, propertyKey: string): void {
+    const constructor = target.constructor as unknown as DecoratedConstructor;
+
+    if (!constructor[SUBSCRIBE_METADATA_KEY]) {
+      constructor[SUBSCRIBE_METADATA_KEY] = [];
+    }
+
+    constructor[SUBSCRIBE_METADATA_KEY].push({ eventType, methodName: propertyKey });
+  };
+}
+
+/**
+ * Internal: Retrieves all @Subscribe metadata for an instance.
+ */
+export function getSubscriptions(instance: object): SubscriptionMetadata[] {
+  const constructor = instance.constructor as unknown as DecoratedConstructor;
+  return constructor[SUBSCRIBE_METADATA_KEY] || [];
+}
 
 /**
  * Internal interface to satisfy the compiler while building the bitmasks

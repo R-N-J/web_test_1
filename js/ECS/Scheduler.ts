@@ -1,12 +1,18 @@
 import { BaseSystem } from "./System";
+import { World } from "./World";
 
 export type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): T };
 
 export class Scheduler {
   private systems: BaseSystem[] = [];
 
+  constructor(private world: World) {} // Ensure the scheduler has world access
+
   public add(system: BaseSystem): void {
     this.systems.push(system);
+
+    // Resolution: Auto-register systems with the world's event bus
+    this.world.events.register(system);
   }
 
   /**

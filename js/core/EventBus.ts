@@ -1,48 +1,85 @@
 // js/core/EventBus.ts
+import { getSubscriptions, SubscriptionMetadata } from "../ECS/Decorators";
 
+
+/**
+ * The core interface for all events in the system.
+ */
+export interface BaseEvent {
+  type: string;
+  cancelled?: boolean;
+}
+
+
+/**
+ * strictly typed events.
+ */
 export type GameEvent =
   | { type: 'MESSAGE_LOGGED'; text: string; color: string; bold?: boolean; underline?: boolean; reverse?: boolean }
   | { type: 'SCREEN_SHAKE'; intensity: number };
 
-export type Handler<T extends GameEvent['type']> = (data: Extract<GameEvent, { type: T }>) => void;
+
+// Helper to make the EventBus work with BOTH the union and new custom events
+type AnyEvent = GameEvent | BaseEvent;
+
+export type Handler<T extends string> = (event: Extract<AnyEvent, { type: T }>) => void;
+
+/**
+ * Internal signature for storage.
+ * We use 'any' here specifically to allow the Map to hold handlers for different event shapes.
+ */
+type InternalHandler<T extends BaseEvent = BaseEvent> = (event: T) => void;
 
 export class EventBus {
-  private handlers: { [K in GameEvent['type']]?: Handler<K>[] } = {};
-
   /**
-   * Register a callback for a specific event type.
+   * We use InternalHandler<BaseEvent> here. This tells ESLint:
+   * "I know these functions take at least a BaseEvent."
    */
-  public subscribe<T extends GameEvent['type']>(type: T, handler: Handler<T>): void {
-    if (!this.handlers[type]) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.handlers[type] = [] as any;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this.handlers[type] as any[]).push(handler);
-  }
+  private handlers = new Map<string, Set<InternalHandler<BaseEvent>>>();
 
-  /**
-   * Broadcast an event to all subscribers.
-   */
-  public publish<T extends GameEvent['type']>(event: Extract<GameEvent, { type: T }>): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const typeHandlers = this.handlers[event.type] as Handler<any>[] | undefined;
-    if (typeHandlers) {
-      // Use a copy to avoid issues if a handler unsubscribes during execution
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      [...typeHandlers].forEach(handler => handler(event as any));
+  public register(subscriber: object): void {
+    const meta: SubscriptionMetadata[] = getSubscriptions(subscriber);
+    const indexedSubscriber = subscriber as Record<string, unknown>;
+
+    for (const sub of meta) {
+      const method = indexedSubscriber[sub.methodName];
+
+      if (typeof method === 'function') {
+        // We cast the bound method to InternalHandler<BaseEvent>.
+        // This is safe because our event bus logic ensures only
+        // objects matching BaseEvent are ever passed in.
+        const boundHandler = method.bind(subscriber) as InternalHandler<BaseEvent>;
+        this.subscribe(sub.eventType, boundHandler as unknown as Handler<string>);
+      }
     }
   }
 
-  /**
-   * Remove a specific handler for an event type.
-   */
-  public unsubscribe<T extends GameEvent['type']>(type: T, handler: Handler<T>): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const typeHandlers = this.handlers[type] as Handler<any>[] | undefined;
+  public subscribe<T extends string>(type: T, handler: Handler<T>): void {
+    if (!this.handlers.has(type)) {
+      this.handlers.set(type, new Set());
+    }
+
+    // Cast the specific handler to the base handler for storage.
+    this.handlers.get(type)!.add(handler as unknown as InternalHandler<BaseEvent>);
+  }
+
+  public publish<T extends AnyEvent>(event: T): void {
+    const typeHandlers = this.handlers.get(event.type);
+    if (!typeHandlers) return;
+
+    for (const handler of typeHandlers) {
+      if ((event as BaseEvent).cancelled) break;
+
+      // Since handler is typed as InternalHandler<BaseEvent>,
+      // and event matches BaseEvent, this call is now strictly typed and valid.
+      handler(event as BaseEvent);
+    }
+  }
+
+  public unsubscribe<T extends string>(type: T, handler: Handler<T>): void {
+    const typeHandlers = this.handlers.get(type);
     if (typeHandlers) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.handlers[type] = typeHandlers.filter(h => h !== handler) as any;
+      typeHandlers.delete(handler as unknown as InternalHandler<BaseEvent>);
     }
   }
 }

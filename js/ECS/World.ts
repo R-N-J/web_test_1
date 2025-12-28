@@ -9,6 +9,7 @@ import { ComponentManager, ComponentObserver, MaskObserver } from "./ComponentMa
 import { RelationshipManager } from "./RelationshipManager";
 import { PrefabManager } from "./PrefabManager";
 import type { ComponentSerializer } from "./ComponentManager";
+import { EventBus } from "../core/EventBus"; // Add this import from Core
 
 export interface WorldSnapshot {
   version: number;
@@ -38,6 +39,8 @@ export class World {
   private components = new ComponentManager(this.entities, this.queries);
   public readonly relationships = new RelationshipManager(this.entities, this.components);
   public readonly prefabs = new PrefabManager(this);
+  public readonly events = new EventBus();
+
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
