@@ -11,7 +11,8 @@ import { PrefabManager } from "./PrefabManager";
 import type { ComponentSerializer } from "./ComponentManager";
 import { Mapper } from "./Mapper";
 import { EventBus } from "../core/EventBus"; // Add this import from Core
-
+import { SceneManager } from "./SceneManager";
+import { Scheduler } from "./Scheduler"; // Add this import
 
 type DeferredOp =
   | { type: 'ADD'; entity: EntityId; component: ComponentId; value: unknown }
@@ -55,6 +56,7 @@ export class World {
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
+  public scenes?: SceneManager; // Make this optional until scheduler is set
 
   private singletonEntity: EntityId;
 
@@ -64,6 +66,14 @@ export class World {
   constructor() {
     this.singletonEntity = this.createEntity();
     this.tags.register("__world_singletons__", this.singletonEntity);
+    // SceneManager requires a scheduler, so we initialize it in setScheduler()
+  }
+
+  /**
+   * Links the scheduler to the world and initializes dependent managers.
+   */
+  public setScheduler(scheduler: Scheduler): void {
+    this.scenes = new SceneManager(this, scheduler);
   }
 
   /**

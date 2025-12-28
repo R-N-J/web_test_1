@@ -28,12 +28,19 @@ export const InternalComponents = {
   CLOCK: ENGINE_COMPONENT_ID_START,
   // ... other engine components as needed.  All as examples for now.
   ENGINE_STATS: ENGINE_COMPONENT_ID_START + 1, // for profiling
-  INPUT: ENGINE_COMPONENT_ID_START + 2,       // Keyboard/Mouse state singleton
-  SCREEN: ENGINE_COMPONENT_ID_START + 3       // Viewport/Camera dimensions
+  PROGRESS: ENGINE_COMPONENT_ID_START + 2, // Track current scene/level metadata
+  INPUT: ENGINE_COMPONENT_ID_START + 3,       // Keyboard/Mouse state singleton
+  SCREEN: ENGINE_COMPONENT_ID_START + 4       // Viewport/Camera dimensions
 } as const satisfies Record<string, ComponentId>;
 
 export interface Clock {
   turn: number;
+}
+export interface GameProgress {
+  levelNumber: number;
+  difficulty: number;
+  seed: number; // For procedural generation
+  nextSceneType: string;
 }
 
 //
