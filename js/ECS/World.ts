@@ -462,6 +462,15 @@ export class World {
   }
 
   /**
+   * Fluent API: Creates a new entity and returns an editor to build it.
+   * Usage: world.buildEntity().add(ID, val).tag('hero').commit();
+   */
+  public buildEntity(): EntityEditor {
+    const entity = this.createEntity();
+    return this.edit(entity);
+  }
+
+  /**
    * Creates an exact structural and data copy of an existing entity.
    * Note: Tags are NOT duplicated as they must be unique.
    *

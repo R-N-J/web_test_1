@@ -107,9 +107,19 @@ export class EntityEditor {
   }
 
   /**
-   * Finalizes the changes and performs exactly one memory move in the World.
+   * Returns the ID of the entity being edited.
    */
-  public commit(): void {
+  public get entityId(): EntityId {
+    return this.entity;
+  }
+
+  /**
+   * Finalizes the changes and performs exactly one memory move in the World.
+   * Returns the entity ID for assignment.
+   */
+  public commit(): EntityId {
     this.world.applyBatchChanges(this.entity, this.newMask, this.additions, this.removals);
+    return this.entity;
   }
 }
+
