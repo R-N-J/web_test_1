@@ -63,6 +63,11 @@ export function registerAllComponents(world: World, userComponents: Record<strin
   ];
 
   for (const [name, id] of allEntries) {
+    if (ComponentNames.has(id)) {
+      const msg = `[ECS] CRITICAL: Component ID Collision! ID ${id} is used by both '${ComponentNames.get(id)}' and '${name}'. IDs must be unique.`;
+      console.error(msg);
+      throw new Error(msg);
+    }
     ComponentNames.set(id, name);
     world.registerComponent(id);
   }

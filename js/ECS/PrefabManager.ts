@@ -56,7 +56,11 @@ export class PrefabManager {
    */
   public spawn(name: string, overrides: Map<ComponentId, unknown> = new Map()): EntityId {
     const template = this.templates.get(name);
-    if (!template) throw new Error(`Prefab "${name}" not found`);
+    if (!template) {
+      const msg = `[ECS] CRITICAL: Prefab Template '${name}' not found. Ensure it is registered with the PrefabManager during bootstrap.`;
+      console.error(msg);
+      throw new Error(msg);
+    }
 
     const entity = this.world.createEntity();
     const editor = this.world.edit(entity);

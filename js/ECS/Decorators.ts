@@ -8,6 +8,78 @@ const GROUP_METADATA_KEY = "__ecs_group__";
 const TAG_METADATA_KEY = "__ecs_tag__";
 const INTERVAL_METADATA_KEY = "__ecs_interval__";
 const SUBSCRIBE_METADATA_KEY = "__ecs_subscriptions__";
+const ORDER_METADATA_KEY = "__ecs_order__";
+const PRIORITY_METADATA_KEY = "__ecs_priority__";
+
+
+export interface OrderMetadata {
+  after: string[]; // Names of systems to run after
+  before: string[]; // Names of systems to run before
+}
+
+
+/**
+ * Ensures this system runs AFTER the specified system names.
+ * Replaced 'any' with 'unknown' and a specific object return type.
+ */
+export function After(...systemNames: string[]) {
+  return function(constructor: { new (...args: unknown[]): object }): void {
+    const meta = getOrderMetadata(constructor);
+    meta.after.push(...systemNames);
+  };
+}
+
+/**
+ * Ensures this system runs BEFORE the specified system names.
+ */
+export function Before(...systemNames: string[]) {
+  return function(constructor: { new (...args: unknown[]): object }): void {
+    const meta = getOrderMetadata(constructor);
+    meta.before.push(...systemNames);
+  };
+}
+
+/**
+ * Internal: Retrieves or creates the order metadata on a constructor.
+ // ... existing code ...
+
+/**
+ * Internal: Retrieves or creates the order metadata on a constructor.
+ */
+function getOrderMetadata(constructor: object): OrderMetadata {
+  const c = constructor as unknown as Record<string, OrderMetadata>;
+  if (!c[ORDER_METADATA_KEY]) {
+    c[ORDER_METADATA_KEY] = { after: [], before: [] };
+  }
+  return c[ORDER_METADATA_KEY];
+}
+
+/**
+ * Retrieves the defined order for a system instance.
+ */
+export function getSystemOrder(instance: object): OrderMetadata {
+  const constructor = instance.constructor as unknown as Record<string, OrderMetadata>;
+  return constructor[ORDER_METADATA_KEY] || { after: [], before: [] };
+}
+
+
+/**
+ * Sets a numerical priority. Lower numbers run earlier.
+ * Default is 1000.
+ */
+export function Priority(value: number) {
+  return function(constructor: { new (...args: unknown[]): object }): void {
+    const c = constructor as unknown as Record<string, number>;
+    c[PRIORITY_METADATA_KEY] = value;
+  };
+}
+
+export function getSystemPriority(instance: object): number {
+  const constructor = instance.constructor as unknown as Record<string, number>;
+  return constructor[PRIORITY_METADATA_KEY] ?? 1000;
+}
+
+
 
 
 export interface SubscriptionMetadata {

@@ -61,10 +61,12 @@ Welcome to the Rogue1 ECS (Entity-Component-System). This is a high-performance,
 - [12. Advanced Features](#12-advanced-features)
   - [Singletons](#singletons)
   - [Snapshots (Saving/Loading)](#snapshots-savingloading)
-  - [Batch Editing](#batch-editing)
-- [13. Performance Best Practices](#13-performance-best-practices)
-- [14. Comparison with Other ECS Architectures](#14-comparison-with-other-ecs-architectures)
-- [15. Drawbacks and Considerations](#15-drawbacks-and-considerations)
+  - [Batch Editing and Fluent API](#batch-editing-and-fluent-api)
+  - [Component Mappers](#component-mappers)
+- [13. Event Bus](#13-event-bus)
+- [14. Performance Best Practices](#14-performance-best-practices)
+- [15. Comparison with Other ECS Architectures](#15-comparison-with-other-ecs-architectures)
+- [16. Drawbacks and Considerations](#16-drawbacks-and-considerations)
 - [Method Cheat Sheet](#method-cheat-sheet)
 
 ---
@@ -871,6 +873,9 @@ Instead of passing an `Aspect` to the `super()` call, you can use these decorato
 ### Execution Decorators
 - **@Interval(period)**: Only used with `IntervalSystem`. Defines how many "ticks" (turns) occur between executions.
 
+### Event Bus Decorators
+- **@Subscribe(eventType)**: Subscribes a system method to the World's event bus. The method will be called whenever an event of `eventType` is published.
+
 ### Examples
 
 **Standard System with Aliases:**
@@ -959,19 +964,132 @@ world.loadSnapshot(saveGame);
 ```
 *Note: Make sure to register Serializers if you use complex types like `Set` or `Map` in components.*
 
-### Batch Editing
-When adding/removing many components at once, use `edit()` to avoid multiple archetype transitions.
+### Batch Editing and Fluent API
+When adding/removing many components at once, use `edit()` to avoid multiple archetype transitions. For creating new entities, `buildEntity()` provides a clean, fluent API.
 
+#### Using world.edit()
+Use this for existing entities to bundle multiple changes:
 ```typescript
 world.edit(entity)
   .add(Components.POSITION, { x: 0, y: 0 })
   .remove(Components.HEALTH)
-  .apply();
+  .commit(); // Performs exactly one structural move
 ```
+
+#### Using world.buildEntity()
+This is the preferred way to spawn and configure new entities in one go:
+```typescript
+const player = world.buildEntity()
+  .add(Components.POSITION, { x: 10, y: 10 })
+  .add(Components.PLAYER_TAG, {})
+  .tag("hero")
+  .group("friendly")
+  .commit();
+```
+
+### Component Mappers
+For ultra-high-performance access to components, especially in tight loops or frequently updated logic, use `Mapper`. Mappers provide a direct way to access component data for a specific type, bypassing some of the internal lookup overhead of `world.getComponent`.
+
+```typescript
+// 1. Get a mapper (cached by the world)
+const posMapper = world.getMapper<Position>(Components.POSITION);
+
+// 2. Use it for fast access
+if (posMapper.has(entity)) {
+  const pos = posMapper.get(entity);
+  posMapper.set(entity, { x: pos.x + 1, y: pos.y });
+}
+
+// 3. Support for update/mutate
+posMapper.mutate(entity, p => p.x += 1);
+```
+
+Mappers are particularly useful when you have a system that doesn't use `viewColumns` but still needs to access a specific component frequently across many different entities.
 
 ---
 
-## 13. Performance Best Practices
+## 13. Event Bus
+The Rogue1 ECS includes a built-in `EventBus` plugged directly into the `World`. This allows for decoupled communication between systems and other parts of the game engine.
+
+### Using the Event Bus
+You can access the event bus via `world.events`.
+
+```typescript
+// Publishing an event
+world.events.publish({ type: 'SCREEN_SHAKE', intensity: 5 });
+
+// Manual subscription
+const handler = (ev) => console.log("Shake!", ev.intensity);
+world.events.subscribe('SCREEN_SHAKE', handler);
+```
+
+### The @Subscribe Decorator
+The most powerful way to use the Event Bus is via the `@Subscribe` decorator in your Systems. When you add a system to the `Scheduler`, it is **automatically registered** to the event bus.
+
+```typescript
+import { BaseSystem } from './ECS/System';
+import { Subscribe } from './ECS/Decorators';
+
+class AudioSystem extends BaseSystem {
+  @Subscribe('MONSTER_DEATH')
+  onMonsterDeath(event: { type: string, enemyId: EntityId }) {
+    this.playSfx('death_squish');
+  }
+}
+```
+
+### Event Bus Implementation Details
+
+| Feature | Description |
+| :--- | :--- |
+| **Decoupled** | Systems don't need to know about each other; they only need to know about event types. |
+| **Auto-Registration** | The `Scheduler` automatically calls `world.events.register(system)` when a system is added. |
+| **Decorator Support** | Use `@Subscribe('EVENT_TYPE')` on any system method. |
+| **Cancellation** | If an event has a `cancelled` property, handlers can set it to `true` to stop the event from reaching further subscribers. |
+| **Synchronous** | Events are processed immediately when `publish()` is called. |
+
+### Event Bus Examples
+
+#### 1. Communication between Systems
+```typescript
+class CombatSystem extends BaseSystem {
+  onAttack(attacker: EntityId, target: EntityId) {
+    // ... logic ...
+    this.world.events.publish({ type: 'ENTITY_DAMAGED', entity: target, amount: 10 });
+  }
+}
+
+class UiSystem extends BaseSystem {
+  @Subscribe('ENTITY_DAMAGED')
+  onDamage(ev: { entity: EntityId, amount: number }) {
+    this.showFloatingText(ev.entity, `-${ev.amount}`, "red");
+  }
+}
+```
+
+#### 2. Cancelling Events
+```typescript
+class ProtectionSystem extends BaseSystem {
+  @Subscribe('ENTITY_DAMAGED')
+  onDamage(ev: { entity: EntityId, amount: number, cancelled?: boolean }) {
+    if (this.hasShield(ev.entity)) {
+      ev.cancelled = true; // Stop the damage event!
+      this.playSfx('shield_clink');
+    }
+  }
+}
+```
+
+| Method | Description |
+| :--- | :--- |
+| `world.events.publish(event)` | Dispatches an event to all subscribers. |
+| `world.events.subscribe(type, cb)` | Manually listen for an event. |
+| `world.events.register(obj)` | Registers all `@Subscribe` methods on an object instance. |
+| `@Subscribe(type)` | Method decorator for automatic system subscriptions. |
+
+---
+
+## 14. Performance Best Practices
 
 1. **Avoid `getComponent` inside hot loops**: If you are in a custom system, use `viewColumns` or `requireColumn` to access raw data arrays.
 2. **Reuse Aspects**: Don't create `new Aspect(...)` every frame. Store them as static members or constants. Decorators do this automatically for you.
@@ -980,7 +1098,7 @@ world.edit(entity)
 
 ---
 
-## 14. Comparison with Other ECS Architectures
+## 15. Comparison with Other ECS Architectures
 
 If you are coming from other ECS libraries (like `bitecs`, `gecs`, or `tiny-ecs`), here is how Rogue1 compares and what it tries to do differently:
 
@@ -1014,7 +1132,7 @@ While many ECS libraries require imperative setup (passing filters to constructo
 
 ---
 
-## 15. Drawbacks and Considerations
+## 16. Drawbacks and Considerations
 
 While the Rogue1 ECS is powerful and optimized, there are trade-offs and "gotchas" that you should be aware of to avoid performance pitfalls and bugs.
 
@@ -1056,14 +1174,19 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | Method | Description |
 | :--- | :--- |
 | `world.createEntity()` | Returns a new `EntityId`. |
+| `world.buildEntity()` | Fluent API to create and configure a new entity. |
+| `world.edit(entity)` | Starts a batch edit for an existing entity. |
 | `world.addComponent(e, id, val)` | Adds a component to an entity. |
 | `world.getComponent<T>(e, id)` | Retrieves component data with type T. |
+| `world.getMapper<T>(id)` | Returns a high-performance Component Mapper. |
 | `world.setComponent<T>(e, id, v)` | Overwrites component data. |
 | `world.updateComponent<T>(e, i, cb)`| Updates via callback (reassigns). |
 | `world.mutateComponent<T>(e, i, cb)`| Updates via callback (in-place). |
 | `world.subscribeOnAdd(id, cb)` | React to component addition. |
 | `world.subscribeOnRemove(id, cb)` | React to component removal. |
 | `world.subscribeOnMaskChange(cb)` | React to any component change on an entity. |
+| `world.events.publish(event)` | Dispatches an event to the Event Bus. |
+| `@Subscribe(type)` | Decorator for auto-subscribing system methods to events. |
 | `world.view(aspect)` | Returns an iterator for entities matching an aspect. |
 | `world.tags.getEntity(tag)` | Finds an entity by its unique tag. |
 | `world.groups.getEntities(group)` | Returns all entities in a group. |

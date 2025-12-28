@@ -42,7 +42,11 @@ export class Archetype {
    */
   public requireColumn<T>(id: ComponentId): T[] {
     const col = this.getColumn<T>(id);
-    if (!col) throw new Error(`Component ${id} not found in archetype ${this.mask}`);
+    if (!col) {
+      const msg = `[ECS] CRITICAL: Archetype missing required column for Component ${id}. This usually means the System Aspect requested a component that doesn't exist in this layout.`;
+      console.error(msg);
+      throw new Error(msg);
+    }
     return col;
   }
 

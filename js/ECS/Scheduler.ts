@@ -1,6 +1,7 @@
 import { BaseSystem } from "./System";
 import { World } from "./World";
 import { InternalComponents, EngineStats } from "./InternalComponents";
+import { getSystemOrder, getSystemPriority } from "./Decorators";
 
 export type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): T };
 
@@ -24,7 +25,61 @@ export class Scheduler {
 
     // Resolution: Auto-register systems with the world's event bus
     this.world.events.register(system);
+    // Perform a robust sort
+    this.systems = this.topologicalSort(this.systems);
   }
+
+
+  /**
+   * Pro-level Topological Sort to resolve @Before and @After dependencies.
+   */
+  private topologicalSort(systems: BaseSystem[]): BaseSystem[] {
+    // Pro-Tip: Pre-sort by priority so systems without rules
+    // are naturally ordered by their numerical weight.
+    const sortedSystems = [...systems].sort((a, b) =>
+      getSystemPriority(a) - getSystemPriority(b)
+    );
+
+    const sorted: BaseSystem[] = [];
+    const visited = new Set<BaseSystem>();
+    const temp = new Set<BaseSystem>();
+
+    const visit = (sys: BaseSystem) => {
+      if (temp.has(sys)) {
+        const msg = `[ECS] CRITICAL: Circular dependency detected involving ${sys.constructor.name}`;
+        console.error(msg);
+        throw new Error(msg);
+      }
+      if (visited.has(sys)) return;
+
+      temp.add(sys);
+
+      const order = getSystemOrder(sys);
+      const sysName = sys.constructor.name;
+
+      // Check against the priority-ordered list
+      for (const other of sortedSystems) {
+        const otherName = other.constructor.name;
+        const otherOrder = getSystemOrder(other);
+
+        if (order.after.includes(otherName) || otherOrder.before.includes(sysName)) {
+          visit(other);
+        }
+      }
+
+      temp.delete(sys);
+      visited.add(sys);
+      sorted.push(sys);
+    };
+
+    for (const sys of sortedSystems) {
+      if (!visited.has(sys)) visit(sys);
+    }
+
+    return sorted;
+  }
+
+
 
   /**
    * Retrieves a system instance by its class type.

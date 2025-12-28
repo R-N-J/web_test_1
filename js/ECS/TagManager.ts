@@ -14,8 +14,10 @@ export class TagManager {
       this.tags.delete(existingTag);
     }
 
-    if (this.tags.has(tag)) {
-      throw new Error(`Tag ${tag} is already assigned to entity ${this.tags.get(tag)}`);
+    if (this.tags.has(tag) && this.tags.get(tag) !== entity) {
+      const msg = `[ECS] CRITICAL: Tag Collision! Tag '${tag}' is already assigned to entity ${this.tags.get(tag)}. Cannot reassign to ${entity}.`;
+      console.error(msg);
+      throw new Error(msg);
     }
     this.tags.set(tag, entity);
     this.entities.set(entity, tag);
