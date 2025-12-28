@@ -1,41 +1,30 @@
-// js/core/EventBus.ts
 import { getSubscriptions, SubscriptionMetadata } from "../ECS/Decorators";
 
-
-/**
- * The core interface for all events in the system.
- */
 export interface BaseEvent {
   type: string;
   cancelled?: boolean;
 }
 
-
-/**
- * strictly typed events.
- */
 export type GameEvent =
   | { type: 'MESSAGE_LOGGED'; text: string; color: string; bold?: boolean; underline?: boolean; reverse?: boolean }
   | { type: 'SCREEN_SHAKE'; intensity: number };
 
-
-// Helper to make the EventBus work with BOTH the union and new custom events
 type AnyEvent = GameEvent | BaseEvent;
 
 export type Handler<T extends string> = (event: Extract<AnyEvent, { type: T }>) => void;
 
 /**
- * Internal signature for storage.
- * We use 'any' here specifically to allow the Map to hold handlers for different event shapes.
+ * We define a base signature that is compatible with all event handlers.
+ * By using 'BaseEvent' here, we ensure that every handler in our system
+ * is logically capable of being stored in the Map.
  */
-type InternalHandler<T extends BaseEvent = BaseEvent> = (event: T) => void;
+type BaseHandler = (event: BaseEvent) => void;
 
 export class EventBus {
   /**
-   * We use InternalHandler<BaseEvent> here. This tells ESLint:
-   * "I know these functions take at least a BaseEvent."
+   * Internal storage uses the base signature.
    */
-  private handlers = new Map<string, Set<InternalHandler<BaseEvent>>>();
+  private handlers = new Map<string, Set<BaseHandler>>();
 
   public register(subscriber: object): void {
     const meta: SubscriptionMetadata[] = getSubscriptions(subscriber);
@@ -45,11 +34,11 @@ export class EventBus {
       const method = indexedSubscriber[sub.methodName];
 
       if (typeof method === 'function') {
-        // We cast the bound method to InternalHandler<BaseEvent>.
-        // This is safe because our event bus logic ensures only
-        // objects matching BaseEvent are ever passed in.
-        const boundHandler = method.bind(subscriber) as InternalHandler<BaseEvent>;
-        this.subscribe(sub.eventType, boundHandler as unknown as Handler<string>);
+        // We bind the method and cast it to our BaseHandler signature.
+        // This is a single, safe cast because the method is guaranteed to
+        // accept an event object (which satisfies BaseEvent).
+        const handler = method.bind(subscriber) as BaseHandler;
+        this.subscribe(sub.eventType, handler as unknown as Handler<string>);
       }
     }
   }
@@ -59,8 +48,10 @@ export class EventBus {
       this.handlers.set(type, new Set());
     }
 
-    // Cast the specific handler to the base handler for storage.
-    this.handlers.get(type)!.add(handler as unknown as InternalHandler<BaseEvent>);
+    // We cast to BaseHandler for storage.
+    // This is safe because our 'publish' method ensures that only events
+    // of the correct 'type' are sent to these handlers.
+    this.handlers.get(type)!.add(handler as BaseHandler);
   }
 
   public publish<T extends AnyEvent>(event: T): void {
@@ -70,8 +61,8 @@ export class EventBus {
     for (const handler of typeHandlers) {
       if ((event as BaseEvent).cancelled) break;
 
-      // Since handler is typed as InternalHandler<BaseEvent>,
-      // and event matches BaseEvent, this call is now strictly typed and valid.
+      // Since handler expects BaseEvent and event matches BaseEvent,
+      // this is now a strictly typed call.
       handler(event as BaseEvent);
     }
   }
@@ -79,7 +70,12 @@ export class EventBus {
   public unsubscribe<T extends string>(type: T, handler: Handler<T>): void {
     const typeHandlers = this.handlers.get(type);
     if (typeHandlers) {
-      typeHandlers.delete(handler as unknown as InternalHandler<BaseEvent>);
+      // Single cast to the storage signature for the Set lookup.
+      typeHandlers.delete(handler as BaseHandler);
     }
+  }
+
+  public clear(): void {
+    this.handlers.clear();
   }
 }

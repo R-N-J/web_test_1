@@ -27,7 +27,7 @@ export const USER_COMPONENT_ID_START = 100;
 export const InternalComponents = {
   CLOCK: ENGINE_COMPONENT_ID_START,
   // ... other engine components as needed.  All as examples for now.
-  ENGINE_STATS: ENGINE_COMPONENT_ID_START + 1, // Entity counts, memory usage
+  ENGINE_STATS: ENGINE_COMPONENT_ID_START + 1, // for profiling
   INPUT: ENGINE_COMPONENT_ID_START + 2,       // Keyboard/Mouse state singleton
   SCREEN: ENGINE_COMPONENT_ID_START + 3       // Viewport/Camera dimensions
 } as const satisfies Record<string, ComponentId>;
@@ -36,10 +36,16 @@ export interface Clock {
   turn: number;
 }
 
+//
 // Note Viewport / Camera State  Data: { x: number, y: number, zoom: number, width: number, height: number }
 export interface Screen {
   width: number;
   height: number;
+}
+
+export interface SystemPerf {
+  name: string;
+  duration: number; // milliseconds
 }
 
 
@@ -47,7 +53,8 @@ export interface Screen {
 export interface EngineStats {
   entities: number;
   archetypes: number;
-  systemsTimeMs: number;
+  systems: SystemPerf[];
+  lastUpdateMs: number;
 }
 
 //Note Data: { keysDown: Set<string>, mouseX: number, mouseY: number, leftClick: boolean }

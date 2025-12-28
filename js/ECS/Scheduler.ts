@@ -1,12 +1,23 @@
 import { BaseSystem } from "./System";
 import { World } from "./World";
+import { InternalComponents, EngineStats } from "./InternalComponents";
 
 export type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): T };
 
 export class Scheduler {
   private systems: BaseSystem[] = [];
 
-  constructor(private world: World) {} // Ensure the scheduler has world access
+  constructor(private world: World) {
+    // Initialize stats singleton if it doesn't exist
+    if (!this.world.hasSingleton(InternalComponents.ENGINE_STATS)) {
+      this.world.setSingleton<EngineStats>(InternalComponents.ENGINE_STATS, {
+        entities: 0,
+        archetypes: 0,
+        systems: [],
+        lastUpdateMs: 0
+      });
+    }
+  }
 
   public add(system: BaseSystem): void {
     this.systems.push(system);
@@ -79,10 +90,38 @@ export class Scheduler {
   }
 
   public update(dt: number): void {
+    const startTime = performance.now();
+    const systemStats: { name: string, duration: number }[] = [];
+
+    // Enter deferred mode to protect system iteration
+    this.world.setDeferred(true);
+
     for (const system of this.systems) {
       if (system.enabled) {
-        system.runUpdate(dt); // Use the wrapper instead of calling .update directly
+        const sysStart = performance.now();
+
+        system.runUpdate(dt);
+
+        systemStats.push({
+          name: system.constructor.name,
+          duration: performance.now() - sysStart
+        });
       }
     }
+
+    // Exit deferred mode and apply all structural changes at once
+    this.world.setDeferred(false);
+
+    // Update global engine stats singleton
+    this.world.mutateComponent<EngineStats>(
+      this.world.getSingletonEntity(),
+      InternalComponents.ENGINE_STATS,
+      (stats) => {
+        stats.systems = systemStats;
+        stats.lastUpdateMs = performance.now() - startTime;
+        // Optimization: only update entity counts occasionally or if needed
+        stats.archetypes = this.world.getArchetypeCount();
+      }
+    );
   }
 }

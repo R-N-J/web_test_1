@@ -9,7 +9,16 @@ import { ComponentManager, ComponentObserver, MaskObserver } from "./ComponentMa
 import { RelationshipManager } from "./RelationshipManager";
 import { PrefabManager } from "./PrefabManager";
 import type { ComponentSerializer } from "./ComponentManager";
+import { Mapper } from "./Mapper";
 import { EventBus } from "../core/EventBus"; // Add this import from Core
+
+
+type DeferredOp =
+  | { type: 'ADD'; entity: EntityId; component: ComponentId; value: unknown }
+  | { type: 'REMOVE'; entity: EntityId; component: ComponentId }
+  | { type: 'DELETE'; entity: EntityId }
+  | { type: 'BATCH'; entity: EntityId; mask: bigint; additions: Map<ComponentId, unknown>; removals: Set<ComponentId> };
+
 
 export interface WorldSnapshot {
   version: number;
@@ -39,13 +48,16 @@ export class World {
   private components = new ComponentManager(this.entities, this.queries);
   public readonly relationships = new RelationshipManager(this.entities, this.components);
   public readonly prefabs = new PrefabManager(this);
+  private mapperCache = new Map<ComponentId, Mapper<unknown>>();
   public readonly events = new EventBus();
-
 
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
 
   private singletonEntity: EntityId;
+
+  private deferredQueue: DeferredOp[] = [];
+  private isDeferred = false;
 
   constructor() {
     this.singletonEntity = this.createEntity();
@@ -132,7 +144,23 @@ export class World {
     this.components.unsubscribeOnRemove(id, observer);
   }
 
+  /**
+   * Enables or disables deferred mode.
+   * When true, structural changes are queued instead of applied immediately.
+   */
+  public setDeferred(state: boolean): void {
+    this.isDeferred = state;
+    if (!state && this.deferredQueue.length > 0) {
+      this.flush();
+    }
+  }
+
   public addComponent(entity: EntityId, componentId: ComponentId, value: unknown): void {
+    if (this.isDeferred) {
+      this.deferredQueue.push({ type: 'ADD', entity, component: componentId, value });
+      return;
+    }
+
     this.components.addRegisteredComponent(componentId);
 
     // If the entity already has this component, treat this as "replace value" (non-structural).
@@ -150,6 +178,10 @@ export class World {
   }
 
   public removeComponent(entity: EntityId, componentId: ComponentId): void {
+    if (this.isDeferred) {
+      this.deferredQueue.push({ type: 'REMOVE', entity, component: componentId });
+      return;
+    }
     const loc = this.entities.getLocation(entity);
     if (!loc) return;
 
@@ -353,6 +385,13 @@ export class World {
   }
 
   /**
+   * Returns the total number of unique archetypes in the world.
+   */
+  public getArchetypeCount(): number {
+    return this.components.getArchetypeCount();
+  }
+
+  /**
    * Returns all component IDs currently registered in the engine.
    */
   public getRegisteredComponents(): ComponentId[] {
@@ -371,6 +410,10 @@ export class World {
    * Deletes an entity, cleans up its data, and recycles its ID.
    */
   public deleteEntity(entity: EntityId): void {
+    if (this.isDeferred) {
+      this.deferredQueue.push({ type: 'DELETE', entity });
+      return;
+    }
     // Safety: prevent accidental deletion of the global singleton entity
     if (entity === this.singletonEntity) {
       console.error("Critical Error: Attempted to delete the Singleton Entity.");
@@ -468,11 +511,55 @@ export class World {
     additions: Map<ComponentId, unknown>,
     removals: Set<ComponentId>
   ): void {
+    if (this.isDeferred) {
+      this.deferredQueue.push({ type: 'BATCH', entity, mask: newMask, additions: new Map(additions), removals: new Set(removals) });
+      return;
+    }
+
     for (const id of additions.keys()) {
       this.components.addRegisteredComponent(id);
     }
     this.components.applyBatchChanges(entity, newMask, additions, removals);
   }
+
+  /**
+   * Executes all queued structural changes.
+   */
+  public flush(): void {
+    // Process queue in chunks to handle cases where an observer might trigger more deferred ops
+    while (this.deferredQueue.length > 0) {
+      const ops = this.deferredQueue;
+      this.deferredQueue = []; // Clear for next batch
+
+      for (const op of ops) {
+        if (!this.isValid(op.entity) && op.type !== 'DELETE') continue;
+
+        switch (op.type) {
+          case 'ADD': this.addComponent(op.entity, op.component, op.value); break;
+          case 'REMOVE': this.removeComponent(op.entity, op.component); break;
+          case 'DELETE': this.deleteEntity(op.entity); break;
+          case 'BATCH': this.applyBatchChanges(op.entity, op.mask, op.additions, op.removals); break;
+        }
+      }
+    }
+  }
+
+
+  /**
+   * Returns a Component Mapper for ultra-fast access.
+   * Mappers are cached and reused for the same ComponentId.
+   */
+  public getMapper<T>(id: ComponentId): Mapper<T> {
+    let mapper = this.mapperCache.get(id);
+    if (!mapper) {
+      // Create as unknown and store it
+      mapper = new Mapper<unknown>(this, id);
+      this.mapperCache.set(id, mapper);
+    }
+    // Cast to the requested generic type T when returning
+    return mapper as unknown as Mapper<T>;
+  }
+
 
   /**
    * Resets the entire world state.
@@ -491,7 +578,11 @@ export class World {
     this.groups.load({}); // GroupManager.load({}) effectively clears it
     // 5. Reset Relationship index
     this.relationships.clear();
-    // 6. Note: PrefabManager doesn't usually need clearing as
+    // Clear the mapper cache to avoid holding references to old World state
+    this.mapperCache.clear();
+    // 6. Clear Event Bus handlers
+    this.events.clear();
+    // Note: PrefabManager doesn't usually need clearing as
     // blueprints persist across level changes.
   }
 

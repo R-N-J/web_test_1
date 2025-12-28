@@ -3,7 +3,7 @@ import { Aspect } from "./Aspect";
 import { Archetype, EntityId } from "./Archetype";
 import { getSystemAspect, getSystemInterval, getSystemGroup, getSystemTag } from "./Decorators";
 import type { MaskObserver } from "./ComponentManager";
-
+import { Mapper } from "./Mapper";
 
 export abstract class BaseSystem {
   public enabled = true;
@@ -95,6 +95,13 @@ export abstract class IteratingSystem extends BaseSystem {
     };
 
     this.world.subscribeOnMaskChange(this.maskObserver);
+  }
+
+  /**
+   * Helper to get a Mapper from the world.
+   */
+  protected getMapper<T>(id: number): Mapper<T> {
+    return this.world.getMapper<T>(id);
   }
 
   /**
