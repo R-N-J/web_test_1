@@ -56,6 +56,7 @@ Welcome to the Rogue1 ECS (Entity-Component-System). This is a high-performance,
   - [Aspect Decorators](#aspect-decorators)
   - [Filtering Decorators](#filtering-decorators)
   - [Execution Decorators](#execution-decorators)
+  - [Event Bus Decorators](#event-bus-decorators)
   - [Why use Decorators?](#why-use-decorators)
 - [11. The ECS Engine Flow](#11-the-ecs-engine-flow)
 - [12. Advanced Features](#12-advanced-features)
@@ -872,11 +873,29 @@ Instead of passing an `Aspect` to the `super()` call, you can use these decorato
 
 ### Execution Decorators
 - **@Interval(period)**: Only used with `IntervalSystem`. Defines how many "ticks" (turns) occur between executions.
+- **@Priority(value)**: Sets a numerical priority for the system. Systems with lower values run first (default is `1000`).
+- **@Before(...systemNames)**: Ensures this system runs **before** the specified systems (by class name).
+- **@After(...systemNames)**: Ensures this system runs **after** the specified systems (by class name).
 
 ### Event Bus Decorators
 - **@Subscribe(eventType)**: Subscribes a system method to the World's event bus. The method will be called whenever an event of `eventType` is published.
 
 ### Examples
+
+**System Ordering and Priority:**
+```typescript
+import { Priority, Before, After } from './ECS/Decorators';
+
+@Priority(10)
+class EarlySystem extends IteratingSystem { /* Runs early due to low priority value */ }
+
+@After('EarlySystem')
+@Before('PhysicsSystem')
+class LogicSystem extends IteratingSystem { /* Runs after EarlySystem but before PhysicsSystem */ }
+
+@Priority(2000)
+class LateSystem extends IteratingSystem { /* Runs late due to high priority value */ }
+```
 
 **Standard System with Aliases:**
 ```typescript
@@ -967,13 +986,15 @@ world.loadSnapshot(saveGame);
 ### Batch Editing and Fluent API
 When adding/removing many components at once, use `edit()` to avoid multiple archetype transitions. For creating new entities, `buildEntity()` provides a clean, fluent API.
 
+Both `edit()` and `buildEntity()` use an `EntityEditor` to bundle changes. In the latest version, calling `.commit()` is **optional**—the `World` will automatically commit any active editors at the end of the current update (via `world.flush()`).
+
 #### Using world.edit()
 Use this for existing entities to bundle multiple changes:
 ```typescript
 world.edit(entity)
   .add(Components.POSITION, { x: 0, y: 0 })
-  .remove(Components.HEALTH)
-  .commit(); // Performs exactly one structural move
+  .remove(Components.HEALTH);
+  // .commit() is optional here
 ```
 
 #### Using world.buildEntity()
@@ -984,8 +1005,14 @@ const player = world.buildEntity()
   .add(Components.PLAYER_TAG, {})
   .tag("hero")
   .group("friendly")
-  .commit();
+  .commit(); // commit() returns the EntityId
 ```
+
+#### Why call .commit() manually?
+While the engine will "auto-flush" changes if you forget, calling `.commit()` manually provides several benefits:
+1. **Immediate EntityId**: `.commit()` returns the `EntityId` of the created/edited entity.
+2. **Immediate Effect**: Structural changes (archetype moves) are applied instantly. If you need to query for the entity or access its data via `world.getComponent` later in the *same* system update, you must commit.
+3. **Clarity**: It explicitly marks the end of the builder chain.
 
 ### Component Mappers
 For ultra-high-performance access to components, especially in tight loops or frequently updated logic, use `Mapper`. Mappers provide a direct way to access component data for a specific type, bypassing some of the internal lookup overhead of `world.getComponent`.
@@ -1174,8 +1201,8 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | Method | Description |
 | :--- | :--- |
 | `world.createEntity()` | Returns a new `EntityId`. |
-| `world.buildEntity()` | Fluent API to create and configure a new entity. |
-| `world.edit(entity)` | Starts a batch edit for an existing entity. |
+| `world.buildEntity()` | Fluent API to create a new entity (commit() optional). |
+| `world.edit(entity)` | Starts a batch edit for an entity (commit() optional). |
 | `world.addComponent(e, id, val)` | Adds a component to an entity. |
 | `world.getComponent<T>(e, id)` | Retrieves component data with type T. |
 | `world.getMapper<T>(id)` | Returns a high-performance Component Mapper. |
@@ -1207,4 +1234,7 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | `@Group(name)` | Decorator: Limits system to a Group. |
 | `@Tag(name)` | Decorator: Limits system to a specific Tagged entity. |
 | `@Interval(n)` | Decorator: System execution period (turns). |
+| `@Priority(v)` | Decorator: Sets system execution priority. |
+| `@Before('Name')` | Decorator: Ensures system runs before 'Name'. |
+| `@After('Name')` | Decorator: Ensures system runs after 'Name'. |
 | `system.update(dt)` | Executes the system logic. |
