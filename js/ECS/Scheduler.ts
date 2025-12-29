@@ -1,7 +1,8 @@
 import { BaseSystem } from "./System";
 import { World } from "./World";
 import { InternalComponents, EngineStats } from "./InternalComponents";
-import { getSystemOrder, getSystemPriority } from "./Decorators";
+import { getSystemOrder, getSystemPriority, getInjectMetadata } from "./Decorators";
+
 
 export type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): T };
 
@@ -21,12 +22,40 @@ export class Scheduler {
   }
 
   public add(system: BaseSystem): void {
+    // Perform Dependency Injection
+    this.injectDependencies(system);
     this.systems.push(system);
 
     // Resolution: Auto-register systems with the world's event bus
     this.world.events.register(system);
     // Perform a robust sort
     this.systems = this.topologicalSort(this.systems);
+  }
+
+  /**
+   * Performs automated dependency injection based on @Inject decorators.
+   */
+  private injectDependencies(system: BaseSystem): void {
+    const injections = getInjectMetadata(system);
+    const systemAsRecord = system as unknown as Record<string, unknown>;
+
+    for (const inject of injections) {
+      if (inject.type === 'MAPPER' && inject.id !== undefined) {
+        systemAsRecord[inject.propertyKey] = this.world.getMapper(inject.id);
+      } else if (inject.type === 'EVENT_BUS') {
+        systemAsRecord[inject.propertyKey] = this.world.events;
+      } else if (inject.type === 'MANAGER') {
+        // Automatically link common managers found on the world
+        const worldAsRecord = this.world as unknown as Record<string, unknown>;
+        if (worldAsRecord[inject.propertyKey]) {
+          systemAsRecord[inject.propertyKey] = worldAsRecord[inject.propertyKey];
+        } else {
+          const msg = `[ECS] Injection Failed: System '${system.constructor.name}' requested manager '${inject.propertyKey}', but it wasn't found on the World object.`;
+          console.error(msg);
+          throw new Error(msg);
+        }
+      }
+    }
   }
 
 

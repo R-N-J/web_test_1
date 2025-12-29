@@ -10,11 +10,44 @@ const INTERVAL_METADATA_KEY = "__ecs_interval__";
 const SUBSCRIBE_METADATA_KEY = "__ecs_subscriptions__";
 const ORDER_METADATA_KEY = "__ecs_order__";
 const PRIORITY_METADATA_KEY = "__ecs_priority__";
+const INJECT_METADATA_KEY = "__ecs_inject__";
+
+
+
 
 
 export interface OrderMetadata {
   after: string[]; // Names of systems to run after
   before: string[]; // Names of systems to run before
+}
+export interface InjectMetadata { // Renamed from WireMetadata
+  propertyKey: string;
+  type: 'MAPPER' | 'MANAGER' | 'EVENT_BUS';
+  id?: number; // ComponentId for Mappers
+}
+/**
+ * Automatically injects a dependency into this property.
+ * @param id Optional ComponentId if injecting a Mapper.
+ */
+export function Inject(id?: number) { // Renamed from Wire
+  return function(target: object, propertyKey: string): void {
+    const constructor = target.constructor as unknown as Record<string, InjectMetadata[]>;
+    if (!constructor[INJECT_METADATA_KEY]) {
+      constructor[INJECT_METADATA_KEY] = [];
+    }
+
+    // Determine what we are injecting based on the property name or ID presence
+    let type: InjectMetadata['type'] = 'MANAGER';
+    if (id !== undefined) type = 'MAPPER';
+    if (propertyKey === 'events') type = 'EVENT_BUS';
+
+    constructor[INJECT_METADATA_KEY].push({ propertyKey, type, id });
+  };
+}
+
+export function getInjectMetadata(instance: object): InjectMetadata[] { // Renamed from getWireMetadata
+  const constructor = instance.constructor as unknown as Record<string, InjectMetadata[]>;
+  return constructor[INJECT_METADATA_KEY] || [];
 }
 
 

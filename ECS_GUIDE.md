@@ -59,15 +59,22 @@ Welcome to the Rogue1 ECS (Entity-Component-System). This is a high-performance,
   - [Event Bus Decorators](#event-bus-decorators)
   - [Why use Decorators?](#why-use-decorators)
 - [11. The ECS Engine Flow](#11-the-ecs-engine-flow)
-- [12. Advanced Features](#12-advanced-features)
+- [12. Scene Management](#12-scene-management)
+  - [What is a Scene?](#what-is-a-scene)
+  - [When to use Scenes?](#when-to-use-scenes)
+  - [How to use Scenes](#how-to-use-scenes)
+  - [Tutorial: Implementing Scenes](#tutorial-implementing-scenes)
+  - [Directory Structure](#directory-structure)
+  - [Scene Transitions: Pro Patterns](#scene-transitions-pro-patterns)
+- [13. Advanced Features](#13-advanced-features)
   - [Singletons](#singletons)
   - [Snapshots (Saving/Loading)](#snapshots-savingloading)
   - [Batch Editing and Fluent API](#batch-editing-and-fluent-api)
   - [Component Mappers](#component-mappers)
-- [13. Event Bus](#13-event-bus)
-- [14. Performance Best Practices](#14-performance-best-practices)
-- [15. Comparison with Other ECS Architectures](#15-comparison-with-other-ecs-architectures)
-- [16. Drawbacks and Considerations](#16-drawbacks-and-considerations)
+- [14. Event Bus](#14-event-bus)
+- [15. Performance Best Practices](#15-performance-best-practices)
+- [16. Comparison with Other ECS Architectures](#16-comparison-with-other-ecs-architectures)
+- [17. Drawbacks and Considerations](#17-drawbacks-and-considerations)
 - [Method Cheat Sheet](#method-cheat-sheet)
 
 ---
@@ -149,16 +156,31 @@ export interface Health { current: number; max: number; }
 ```
 
 ### Initializing the World
-Always use a bootstrap function to initialize your world. This ensures that all components and serializers are registered in the correct order.
+Setting up the world involves a specific "Wiring Phase" to ensure that the World, Scheduler, and SceneManager are correctly linked.
 
 ```typescript
 import { World } from './ECS/World';
-import { bootstrapEcs } from './ECS/ComponentIds';
+import { Scheduler } from './ECS/Scheduler';
+import { bootstrapEcs } from './ECS/ComponentRegistry';
+import { Components } from './ComponentIds';
+import { MainMenuScene } from './core/scenes/MainMenuScene';
 
+// 1. Create the World (The Data Root)
 const world = new World();
 
+// 2. Create the Scheduler (The Logic Root) and link it to the World
+const scheduler = new Scheduler(world);
+
+// 3. Complete the link (The Wiring Phase)
+// This initializes the SceneManager inside the world
+world.setScheduler(scheduler);
+
+// 4. Initialize the rest
 // bootstrapEcs registers all IDs and any custom serializers
-bootstrapEcs(world);
+bootstrapEcs(world, Components);
+
+// 5. Start your first scene
+world.scenes?.switchTo(new MainMenuScene());
 ```
 
 ---
@@ -963,7 +985,184 @@ Understanding the flow of data and execution is key to using the ECS effectively
 
 ---
 
-## 12. Advanced Features
+## 12. Scene Management
+
+A **Scene** represents a distinct state of your game (e.g., Main Menu, Options, Dungeon Level 1, Game Over). Scenes allow you to organize your logic and data by lifecycle.
+
+### What is a Scene?
+In Rogue1, a Scene is a class or object that implements the `Scene` interface. It defines how to set up the `World` and `Scheduler` when that state becomes active.
+
+```typescript
+export interface Scene {
+  /** A unique identifier for the scene, useful for logging and debugging. */
+  readonly name: string;
+
+  /**
+   * Executed by the SceneManager when this scene becomes active.
+   * Setup your systems and initial entities here.
+   */
+  onEnter(world: World): void;
+
+  /**
+   * Executed by the SceneManager before the world is cleared and
+   * the next scene is loaded. Clean up or save state here.
+   */
+  onExit(world: World): void;
+}
+```
+
+### When to use Scenes?
+Use Scenes to separate distinct logical phases of your game:
+- **MainMenuScene**: Sets up UI systems, background music, and handles "New Game" logic.
+- **DungeonScene**: Sets up physics, AI, rendering, and generates procedural levels.
+- **GameOverScene**: Displays final scores and waits for player input to restart.
+
+### How to use Scenes
+The `SceneManager` (accessible via `world.scenes`) handles the transitions between scenes.
+
+```typescript
+// Initializing and switching to the first scene
+world.scenes?.switchTo(new MainMenuScene());
+```
+
+When `switchTo(nextScene)` is called:
+1.  **onExit**: The current scene's `onExit` method is called.
+2.  **world.clear()**: The World is completely reset. All entities, tags, and groups are deleted.
+3.  **onEnter**: The new scene's `onEnter` method is called.
+
+### Tutorial: Implementing Scenes
+
+#### 1. Generic Scenes (Environment Types)
+You can create generic scene classes that change behavior based on input parameters.
+```typescript
+class DungeonScene implements Scene {
+  constructor(private theme: 'ICE' | 'FIRE') {}
+  readonly name = `Dungeon (${this.theme})`;
+
+  onEnter(world: World) {
+    // 1. Add Core Systems
+    world.scheduler.add(new MovementSystem(world));
+
+    // 2. Add Theme-specific Systems
+    if (this.theme === 'ICE') {
+      world.scheduler.add(new SlipperyFloorSystem(world));
+    }
+
+    // 3. Generate the level
+    DungeonGenerator.generate(world, this.theme);
+  }
+
+  onExit(world: World) {
+    console.log("Leaving the dungeon...");
+  }
+}
+```
+
+#### 2. Unique Levels and Bosses
+For special levels, you can create dedicated scene implementations.
+```typescript
+class BossScene implements Scene {
+  readonly name = "Dragon's Lair";
+  onEnter(world: World) {
+    // Spawn the boss prefab
+    world.prefabs.spawn("BOSS_DRAGON");
+    // Change the music
+    AudioManager.playBgm("boss_theme");
+  }
+  onExit(world: World) {}
+}
+```
+
+#### 3. Game Modes
+Scenes can also represent different game modes or rulesets.
+```typescript
+class HardcoreModeScene extends DungeonScene {
+  onEnter(world: World) {
+    super.onEnter(world);
+    world.scheduler.add(new PermadeathSystem(world));
+  }
+}
+```
+
+### Directory Structure
+To keep your project clean, it is recommended to separate the engine-level `Scene` definitions from your actual game implementation.
+
+```text
+ ├── js/ECS/             <-- The Engine
+ │    ├── Scene.ts       <-- The Interface (The Contract)
+ │    └── SceneManager.ts <-- The Logic
+ └── js/core/            <-- Your Game Logic
+      └── scenes/
+           ├── DungeonScene.ts <-- Implementation
+           └── MenuScene.ts    <-- Implementation
+```
+
+### Scene Transitions: Pro Patterns
+
+Transitions are typically handled using one of two patterns:
+
+#### 1. The Portal/Trigger Pattern (System-driven)
+Used when an in-game event (like a player stepping on a stair) triggers a change.
+
+```typescript
+@All(Components.POSITION, Components.STAIRS)
+class StairsSystem extends IteratingSystem {
+  processEntity(stairs: EntityId) {
+    const player = this.world.tags.getEntity("player");
+    if (this.isAtSamePosition(stairs, player)) {
+       // Trigger the switch
+       const stairsData = this.world.getComponent<Stairs>(stairs, Components.STAIRS);
+       this.world.scenes?.switchTo(new DungeonScene(stairsData.destLevel));
+    }
+  }
+}
+```
+
+#### 2. The Game Director Pattern (Data-driven)
+A central "Director" system monitors the `World` state and triggers transitions when certain conditions are met.
+
+```typescript
+class GameDirector extends BaseSystem {
+  update(dt: number) {
+    const stats = this.world.getSingleton<GameProgress>(InternalComponents.PROGRESS);
+
+    if (stats.bossDefeated) {
+      this.world.scenes?.switchTo(new VictoryScene());
+    }
+
+    if (stats.playerHp <= 0) {
+      this.world.scenes?.switchTo(new GameOverScene());
+    }
+  }
+}
+```
+
+### Using the Progress Singleton
+The `PROGRESS` singleton (see `InternalComponents.ts`) is the recommended place to store cross-turn metadata, such as current level number or game seeds.
+
+Since `world.clear()` is called during scene transitions, if you need to persist data *between* scenes (e.g., player XP or inventory), you should:
+1.  Capture the data in `onExit`.
+2.  Pass it to the constructor of the next scene.
+3.  Re-apply it to the world in `onEnter`.
+
+```typescript
+class DungeonScene implements Scene {
+  onExit(world: World) {
+    // Save important progress to a global object or local storage
+    const xp = world.getSingleton<PlayerStats>(Components.STATS).xp;
+    GameState.lastXp = xp;
+  }
+
+  onEnter(world: World) {
+    // Restore progress to the new world state
+    world.setSingleton(Components.STATS, { xp: GameState.lastXp });
+  }
+}
+```
+
+---
+
+## 13. Advanced Features
 
 ### Singletons
 Useful for global data (e.g., Game Settings, Input State).
@@ -1035,7 +1234,7 @@ Mappers are particularly useful when you have a system that doesn't use `viewCol
 
 ---
 
-## 13. Event Bus
+## 14. Event Bus
 The Rogue1 ECS includes a built-in `EventBus` plugged directly into the `World`. This allows for decoupled communication between systems and other parts of the game engine.
 
 ### Using the Event Bus
@@ -1116,7 +1315,7 @@ class ProtectionSystem extends BaseSystem {
 
 ---
 
-## 14. Performance Best Practices
+## 15. Performance Best Practices
 
 1. **Avoid `getComponent` inside hot loops**: If you are in a custom system, use `viewColumns` or `requireColumn` to access raw data arrays.
 2. **Reuse Aspects**: Don't create `new Aspect(...)` every frame. Store them as static members or constants. Decorators do this automatically for you.
@@ -1125,7 +1324,7 @@ class ProtectionSystem extends BaseSystem {
 
 ---
 
-## 15. Comparison with Other ECS Architectures
+## 16. Comparison with Other ECS Architectures
 
 If you are coming from other ECS libraries (like `bitecs`, `gecs`, or `tiny-ecs`), here is how Rogue1 compares and what it tries to do differently:
 
@@ -1159,7 +1358,7 @@ While many ECS libraries require imperative setup (passing filters to constructo
 
 ---
 
-## 16. Drawbacks and Considerations
+## 17. Drawbacks and Considerations
 
 While the Rogue1 ECS is powerful and optimized, there are trade-offs and "gotchas" that you should be aware of to avoid performance pitfalls and bugs.
 
@@ -1222,6 +1421,7 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | `world.relationships.clearRelations(s, r)`| Removes all targets for relationship `r` on `s`. |
 | `world.relationships.clear()`| Resets the internal relationship index. |
 | `world.clear()` | Resets the entire world, deleting all entities. |
+| `world.scenes.switchTo(scene)` | Teardowns current scene and enters the next. |
 | `turnManager.nextTurn()` | Advances the game by one turn. |
 | `turnManager.isPlayerTurn` | Boolean: Is it the player's turn to act? |
 | `scheduler.add(system)` | Registers a system for execution. |

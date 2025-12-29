@@ -13,6 +13,7 @@ import { Mapper } from "./Mapper";
 import { EventBus } from "../core/EventBus"; // Add this import from Core
 import { SceneManager } from "./SceneManager";
 import { Scheduler } from "./Scheduler"; // Add this import
+import { AssetManager } from "./AssetManager";
 
 type DeferredOp =
   | { type: 'ADD'; entity: EntityId; component: ComponentId; value: unknown }
@@ -52,6 +53,7 @@ export class World {
   private activeEditors = new Set<EntityEditor>(); // NEW: Track uncommitted builders
 
   private mapperCache = new Map<ComponentId, Mapper<unknown>>();
+  public readonly assets = new AssetManager();
   public readonly events = new EventBus();
 
   public readonly tags = new TagManager();
@@ -621,6 +623,8 @@ export class World {
     this.events.clear();
     // Note: PrefabManager doesn't usually need clearing as
     // blueprints persist across level changes.
+    // Note: Usually we don't clear assets here as they persist across levels,
+    // but the option is there if needed.
   }
 
   /**
