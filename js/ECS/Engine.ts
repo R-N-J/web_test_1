@@ -5,18 +5,26 @@ import { ComponentId } from "./Archetype";
 import { bootstrapEcs } from "./ComponentRegistry";
 import { Scene } from "./Scene";
 import { PrefabDefinition } from "./PrefabManager";
+import { Director } from "./Director";
+
 
 export interface EngineConfiguration {
   components: Record<string, ComponentId>;
   systems: { new (world: World): BaseSystem }[];
+  director?: { new (world: World): Director };
   prefabs?: PrefabDefinition[];
   assets?: { key: string, url: string, type: 'JSON' | 'AUDIO' }[]; // Asset manifest
 }
 
+/**
+ * The 'Framework' wrapper. This class manages the
+ * lifecycle and discovery of systems and data.
+ */
 export class Engine {
   public readonly world: World;
   public readonly scheduler: Scheduler;
   private initPromise: Promise<void> | null = null;
+  public director?: Director; // Access to the active director
 
   constructor(config: EngineConfiguration) {
     console.log(`[ECS Framework] Initializing...`);
@@ -57,11 +65,26 @@ export class Engine {
     }
 
     // Store the aggregate promise so the user can 'await engine.whenReady()'
-    this.initPromise = Promise.all(assetPromises).then(() => {
-      console.log(`[ECS Framework] All assets loaded.`);
-    });
+    this.initPromise = assetPromises.length > 0
+      ? Promise.all(assetPromises).then(() => console.log(`[ECS Framework] All assets loaded.`))
+      : Promise.resolve(); // If no assets, we are ready immediately
 
-    // 4. Discovery: Systems (The Logic)
+
+    // 4. Discovery: Director (The Brain)
+    if (config.director) {
+      try {
+        this.director = new config.director(this.world);
+        this.scheduler.add(this.director);
+        console.log(`[ECS Framework] Director '${config.director.name}' initialized.`);
+      } catch (e) {
+        const msg = `[ECS Framework] CRITICAL: Failed to initialize Director '${config.director.name}'.`;
+        console.error(msg, e);
+        throw new Error(msg);
+      }
+    }
+
+
+    // 5. Discovery: Systems (The Logic)
     // This is the most important try/catch. It catches errors in the system constructors
     // or failed @Inject dependencies and identifies exactly which system failed.
     for (const SystemClass of config.systems) {

@@ -9,6 +9,8 @@ export abstract class BaseSystem {
   public enabled = true;
   private _initialized = false; // Track first run
 
+  constructor(protected world: World) {}
+
   abstract update(dt: number): void;
 
   /**
@@ -72,7 +74,8 @@ export abstract class IteratingSystem extends BaseSystem {
   private readonly maskObserver: MaskObserver;
 
   constructor(protected world: World, aspect?: Aspect) {
-    super();
+    // Pass world to BaseSystem
+    super(world);
     this.aspect = aspect || getSystemAspect(this.constructor);
     this.requiredGroup = getSystemGroup(this.constructor);
     this.requiredTag = getSystemTag(this.constructor);
