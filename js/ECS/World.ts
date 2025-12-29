@@ -14,6 +14,7 @@ import { EventBus } from "../core/EventBus"; // Add this import from Core
 import { SceneManager } from "./SceneManager";
 import { Scheduler } from "./Scheduler"; // Add this import
 import { AssetManager } from "./AssetManager";
+import { StorageManager } from "./StorageManager";
 
 type DeferredOp =
   | { type: 'ADD'; entity: EntityId; component: ComponentId; value: unknown }
@@ -54,6 +55,7 @@ export class World {
 
   private mapperCache = new Map<ComponentId, Mapper<unknown>>();
   public readonly assets = new AssetManager();
+  public readonly storage = new StorageManager(this);
   public readonly events = new EventBus();
 
   public readonly tags = new TagManager();
