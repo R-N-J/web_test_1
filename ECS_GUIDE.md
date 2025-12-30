@@ -1,92 +1,90 @@
 # Rogue1 ECS Guide
 
-Welcome to the Rogue1 ECS (Entity-Component-System). This is a high-performance, archetype-based ECS designed for efficiency and ease of use.
+Welcome to Rogue1 ECS. This is a high-performance, **Professional-grade ECS Framework** designed for building complex, data-driven games (specifically Roguelikes) with ease and speed.
 
-## Table of Contents
-- [Core Concepts](#core-concepts)
-- [Architecture: Archetypes and SoA](#architecture-archetypes-and-soa)
-  - [What are Archetypes?](#what-are-archetypes)
-  - [Struct-of-Arrays (SoA) in JavaScript](#struct-of-arrays-soa-in-javascript)
-- [1. Setting Up the World](#1-setting-up-the-world)
-  - [Defining Components](#defining-components)
-  - [Initializing the World](#initializing-the-world)
-- [2. Entities and Components](#2-entities-and-components)
-  - [Creating an Entity](#creating-an-entity)
-  - [Adding Components](#adding-components)
-  - [Component Interfaces and Type Safety](#component-interfaces-and-type-safety)
-  - [Accessing and Modifying Data](#accessing-and-modifying-data)
-  - [Removing Components and Deleting Entities](#removing-components-and-deleting-entities)
-- [3. Querying Entities (Aspects and Views)](#3-querying-entities-aspects-and-views)
-  - [Why Query?](#why-query)
-  - [Aspects: The Filters](#aspects-the-filters)
-  - [Using Views](#using-views)
-  - [High-Performance Queries: viewColumns](#high-performance-queries-viewcolumns)
-  - [Single Entity Matching](#single-entity-matching)
-  - [Querying by Tag or Group](#querying-by-tag-or-group)
-  - [Why use these methods? (The QueryManager)](#why-use-these-methods-the-querymanager)
-- [4. Tags and Groups](#4-tags-and-groups)
-  - [Tags (Unique 1-to-1)](#tags-unique-1-to-1)
-  - [Groups (1-to-Many)](#groups-1-to-many)
-- [5. Relationships](#5-relationships)
-  - [Why use Relationships?](#why-use-relationships)
-  - [1-to-1 Relationships (Exclusive)](#1-to-1-relationships-exclusive)
-  - [1-to-Many Relationships (Non-Exclusive)](#1-to-many-relationships-non-exclusive)
-  - [Symmetric Relationships](#symmetric-relationships)
-  - [Retrieving Targets](#retrieving-targets)
-  - [Removing Relationships](#removing-relationships)
-  - [Automatic Cleanup and Integrity](#automatic-cleanup-and-integrity)
-- [6. Tags vs. Groups vs. Relationships](#6-tags-vs-groups-vs-relationships)
-  - [When to use what?](#when-to-use-what)
-- [7. Prefabs](#7-prefabs)
-  - [Defining a Prefab](#defining-a-prefab)
-  - [Spawning a Prefab](#spawning-a-prefab)
-  - [Loading Prefabs Externally](#loading-prefabs-externally)
-- [8. Observers](#8-observers)
-  - [Why use Observers?](#why-use-observers)
-  - [Component Observers](#component-observers)
-  - [Mask Observers](#mask-observers)
-  - [Managers vs. Systems in Observers](#managers-vs-systems-in-observers)
-  - [Interaction Examples](#interaction-examples)
-- [9. Systems, Scheduler, and TurnManager](#9-systems-scheduler-and-turnmanager)
-  - [Different Types of Systems](#different-types-of-systems)
-  - [The Scheduler](#the-scheduler)
-  - [The TurnManager](#the-turnmanager)
-  - [Putting It All Together: The Best Way](#putting-it-all-together-the-best-way)
-- [10. Decorators](#10-decorators)
-  - [Aspect Decorators](#aspect-decorators)
-  - [Filtering Decorators](#filtering-decorators)
-  - [Execution Decorators](#execution-decorators)
-  - [Event Bus Decorators](#event-bus-decorators)
-  - [Why use Decorators?](#why-use-decorators)
-- [11. The ECS Engine Flow](#11-the-ecs-engine-flow)
-- [12. Scene Management](#12-scene-management)
-  - [What is a Scene?](#what-is-a-scene)
-  - [When to use Scenes?](#when-to-use-scenes)
-  - [How to use Scenes](#how-to-use-scenes)
-  - [Tutorial: Implementing Scenes](#tutorial-implementing-scenes)
-  - [Directory Structure](#directory-structure)
-  - [Scene Transitions: Pro Patterns](#scene-transitions-pro-patterns)
-- [13. Advanced Features](#13-advanced-features)
-  - [Singletons](#singletons)
-  - [Snapshots (Saving/Loading)](#snapshots-savingloading)
-  - [Batch Editing and Fluent API](#batch-editing-and-fluent-api)
-  - [Component Mappers](#component-mappers)
-- [14. Event Bus](#14-event-bus)
-- [15. Performance Best Practices](#15-performance-best-practices)
-- [16. Comparison with Other ECS Architectures](#16-comparison-with-other-ecs-architectures)
-- [17. Drawbacks and Considerations](#17-drawbacks-and-considerations)
-- [Method Cheat Sheet](#method-cheat-sheet)
+---
+
+## What is an ECS?
+If you are new to game development, **ECS (Entity-Component-System)** is an architectural pattern that favors **composition over inheritance**.
+
+1.  **Entity**: A simple ID (like `5`). It represents an object in your game (a player, a sword, a dragon). It has no data and no logic.
+2.  **Component**: Pure data attached to an Entity. (e.g., `Position {x: 10, y: 10}`, `Health {hp: 100}`). Components have no logic.
+3.  **System**: The "brain" of your game. A System looks for all Entities that have a specific set of Components (e.g., all things with both `Position` and `Health`) and performs logic on them.
+
+**Why use it?**
+In traditional programming, you might have a `Player` class that inherits from `Creature`. As your game grows, this "Inheritance Tree" becomes a mess. With ECS, you just mix and match components. Want a player that can fly? Just add a `Flight` component.
+
+---
+
+## Library vs. Framework
+Rogue1 is more than just a library; it is a complete **Framework**.
+
+*   **As a Library**: You can use the `World` and `Archetype` logic on its own, manually wiring up your loops and managers. This is great for small projects or if you want absolute control.
+*   **As a Framework**: You use the `Engine` bootstrapper. It provides **Auto-Discovery**, **Dependency Injection**, **Scene Management**, and **Standardized Managers** (Assets, Storage, Events). This is the recommended way for professional game development.
 
 ---
 
 ## Core Concepts
 
-- **World**: The container for all entities, components, and systems.
-- **Entity**: A unique ID representing a "thing" in your game.
-- **Component**: Pure data attached to an entity (e.g., Position, Health).
-- **System**: Logic that processes entities with specific component combinations.
-- **Aspect**: A filter used to query entities (e.g., "all entities with Position and Health").
-- **Archetype**: A group of entities that share the exact same set of components, stored in a Struct-of-Arrays (SoA) format for performance.
+- **World**: The "Data Container". It holds all entities and components.
+- **Engine**: The "Bootstrapper". It handles initialization and discovery.
+- **Scheduler**: The "Logic Orchestrator". It manages the execution order of your systems.
+- **Director**: The "Strategic Authority". A special service that handles high-level game flow (Win/Loss, Level Transitions).
+- **Managers**: Specialized services (e.g., `AssetManager`, `SceneManager`, `StorageManager`).
+- **Aspect**: A filter used by systems to find specific entities (e.g., "Give me everything with Position").
+- **Archetype**: A group of entities that share the exact same set of components, stored in a high-performance format.
+
+---
+
+## The Framework Architecture: A Professional Toolkit
+
+Rogue1 ECS provides a suite of tools that work together to make coding feel "clean":
+
+-   **Archetypes (SoA)**: Blazing fast performance for large-scale simulations.
+-   **Mappers & @Inject**: Simplified coding. No more digging through the world to find data; it's injected right where you need it.
+-   **Topological Sorting**: Perfect execution order. Systems run exactly when they should based on their dependencies.
+-   **Event Bus with @Subscribe**: Decoupled communication. Systems can talk to each other without knowing the other exists.
+-   **Deferred Operations**: Safety first. Structural changes (like deleting an entity) are queued during updates to prevent crashes.
+-   **Scene Management**: Clean game flow. Transitions between menus and levels are handled automatically.
+-   **Engine Discovery**: Clean configuration. Tell the Engine what systems and components you have, and it does the wiring for you.
+
+---
+
+## Table of Contents
+- [Architecture: Archetypes and SoA](#architecture-archetypes-and-soa)
+- [1. Setting Up the Engine (The Framework Way)](#1-setting-up-the-engine-the-framework-way)
+  - [Defining Components](#defining-components)
+  - [Configuring the Engine](#configuring-the-engine)
+- [2. Setting Up the World (The Library Way)](#2-setting-up-the-world-the-library-way)
+- [3. Entities and Components](#3-entities-and-components)
+  - [Creating an Entity](#creating-an-entity)
+  - [Adding Components](#adding-components)
+  - [Component Interfaces and Type Safety](#component-interfaces-and-type-safety)
+  - [Accessing and Modifying Data](#accessing-and-modifying-data)
+- [4. Querying Entities (Aspects and Views)](#4-querying-entities-aspects-and-views)
+- [5. Tags and Groups](#5-tags-and-groups)
+- [6. Relationships](#6-relationships)
+- [7. Prefabs](#7-prefabs)
+- [8. Observers](#8-observers)
+- [9. Systems, Scheduler, and TurnManager](#9-systems-scheduler-and-turnmanager)
+  - [Different Types of Systems](#different-types-of-systems)
+  - [The Scheduler (The Library Way)](#the-scheduler-the-library-way)
+  - [The TurnManager (The Library Way)](#the-turnmanager-the-library-way)
+- [10. The Strategic Authority: The Director](#10-the-strategic-authority-the-director)
+- [11. Decorators](#11-decorators)
+  - [Injecting Dependencies (@Inject)](#injecting-dependencies-inject)
+- [12. Standard Services](#12-standard-services)
+  - [12.1 EventBus: Decoupled Communication](#121-eventbus-decoupled-communication)
+  - [12.2 AssetManager: External Data](#122-assetmanager-external-data)
+  - [12.3 StorageManager: Persistence](#123-storagemanager-persistence)
+  - [12.4 SceneManager: Game Flow](#124-scenemanager-game-flow)
+- [13. Advanced Features](#13-advanced-features)
+  - [Component Mappers](#component-mappers)
+- [14. Tutorial: Building a Game from Scratch](#14-tutorial-building-a-game-from-scratch)
+- [15. Performance Best Practices](#15-performance-best-practices)
+- [16. Comparison with Other ECS Architectures](#16-comparison-with-other-ecs-architectures)
+- [17. Drawbacks and Considerations](#17-drawbacks-and-considerations)
+- [Method Cheat Sheet](#method-cheat-sheet)
 
 ---
 
@@ -132,22 +130,21 @@ const arch_Pos_Health = {
 
 ---
 
-## 1. Setting Up the World
+## 1. Setting Up the Engine (The Framework Way)
 
-The first step is to create a `World` instance and register your components. It is crucial to register all components before creating entities to ensure performance and consistency.
+The recommended way to start a Rogue1 project is using the `Engine` class. It automates the "Wiring Phase" and handles component registration, prefab discovery, and system initialization in one declarative configuration.
 
 ### Defining Components
-Components are identified by unique numeric IDs. It is best to define them in a central place like `ComponentRegistry.ts`. Use a constant object and TypeScript's `as const satisfies Record<string, ComponentId>` to ensure type safety.
+Components are identified by unique numeric IDs. Define them in a central place like `ComponentRegistry.ts`.
 
 ```typescript
-// js/ECS/ComponentRegistry.ts
+// js/core/ComponentRegistry.ts
+import { ComponentId } from './ECS/Archetype';
+
 export const Components = {
-  // Core
   POSITION: 0,
   HEALTH: 1,
   RENDER: 2,
-
-  // Relationships
   REL_OWNED_BY: 100,
 } as const satisfies Record<string, ComponentId>;
 
@@ -155,8 +152,92 @@ export interface Position { x: number; y: number; }
 export interface Health { current: number; max: number; }
 ```
 
-### Initializing the World
-Setting up the world involves a specific "Wiring Phase" to ensure that the World, Scheduler, and SceneManager are correctly linked.
+### Configuring the Engine
+You provide a configuration object to the `Engine`. It will automatically bootstrap the world and link all services.
+
+```typescript
+import { Engine } from './ECS/Engine';
+import { Components } from './core/ComponentRegistry';
+import { MovementSystem } from './core/systems/MovementSystem';
+import { MyGameDirector } from './core/MyGameDirector';
+import { MainMenuScene } from './core/scenes/MainMenuScene';
+
+const engine = new Engine({
+  components: Components,
+  systems: [
+    MovementSystem,
+    AISystem,
+    RenderSystem
+  ],
+  director: MyGameDirector,
+  prefabs: [ /* Your prefab definitions */ ],
+  assets: [
+    { key: 'player_walk', url: 'assets/sfx/walk.mp3', type: 'AUDIO' }
+  ]
+});
+
+// Wait for assets to load, then start the first scene
+engine.whenReady().then(() => {
+  engine.start(new MainMenuScene());
+});
+```
+
+### Engine Discovery and Configuration
+The `Engine` class uses a process called **Discovery** to automatically wire up your game. When you pass the `EngineConfiguration` object, it performs several key steps:
+
+1.  **Schema Discovery**: Registers all component IDs from your `Components` object.
+2.  **Prefab Discovery**: Loads all entity templates into the `PrefabManager`.
+3.  **Asset Discovery**: Initiates parallel loading for all declared assets (JSON/Audio).
+4.  **Director Discovery**: Instantiates your global game controller and adds it to the scheduler.
+5.  **System Discovery**: Instantiates all logic systems and performs **Dependency Injection**.
+6.  **Topological Sorting**: Automatically orders systems based on their `@Before` and `@After` decorators.
+
+#### Tutorial: The EngineConfiguration Object
+The configuration object is the "Manifest" of your game.
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `components` | `Record<string, number>` | Your central component ID registry. |
+| `systems` | `Class[]` | List of System classes (not instances). |
+| `director` | `Class?` | Optional global `Director` class. |
+| `prefabs` | `PrefabDefinition[]?` | Array of entity blueprints. |
+| `assets` | `AssetEntry[]?` | List of external files to preload. |
+
+**Example: A full configuration**
+```typescript
+const config: EngineConfiguration = {
+  // 1. Data Definitions
+  components: Components,
+
+  // 2. Logic Systems
+  systems: [
+    MovementSystem,
+    CombatSystem,
+    AISystem,
+    RenderSystem
+  ],
+
+  // 3. Strategic Controller
+  director: MyGameDirector,
+
+  // 4. Data Templates
+  prefabs: [
+    { name: 'ORC', components: { [Components.HEALTH]: { hp: 20 } } }
+  ],
+
+  // 5. External Resources
+  assets: [
+    { key: 'map_data', url: 'data/dungeon.json', type: 'JSON' },
+    { key: 'hit_sound', url: 'sounds/hit.wav', type: 'AUDIO' }
+  ]
+};
+```
+
+---
+
+## 2. Setting Up the World (The Library Way)
+
+If you prefer to wire everything yourself, or you aren't using the full framework features, you can initialize the components manually.
 
 ```typescript
 import { World } from './ECS/World';
@@ -172,7 +253,7 @@ const world = new World();
 const scheduler = new Scheduler(world);
 
 // 3. Complete the link (The Wiring Phase)
-// This initializes the SceneManager inside the world
+// This initializes the SceneManager and TurnManager inside the world
 world.setScheduler(scheduler);
 
 // 4. Initialize the rest
@@ -185,7 +266,7 @@ world.scenes?.switchTo(new MainMenuScene());
 
 ---
 
-## 2. Entities and Components
+## 3. Entities and Components
 
 ### Creating an Entity
 Entities are just numeric IDs.
@@ -740,6 +821,8 @@ world.subscribeOnRemove(Components.REL_OWNED_BY, (entity) => {
 
 Systems encapsulate logic. The `Scheduler` manages their execution, and the `TurnManager` controls the high-level game loop.
 
+In Rogue1, you can manage these manually (**The Library Way**) or let the `Engine` handle them (**The Framework Way**).
+
 ### Different Types of Systems
 Rogue1 provides several specialized system base classes to handle different logic patterns efficiently.
 
@@ -791,10 +874,12 @@ class StaminaRegenSystem extends IntervalSystem {
 }
 ```
 
-### The Scheduler
+### The Scheduler (The Library Way)
 The `Scheduler` is the central coordinator for all systems. It ensures that game logic is deterministic by running systems in the exact order they were added.
 
-#### How to use it
+**Note:** In the **Framework Way**, the `Engine` handles the `Scheduler` automatically, populating it with systems from your `EngineConfiguration`.
+
+#### How to use it (Manual Setup)
 You typically create one `Scheduler` at game start, add your systems to it, and then call its `update()` method in your game loop.
 
 ```typescript
@@ -818,66 +903,98 @@ scheduler.update(1.0);
 - `setEnabled(SystemClass, boolean)`: Pauses or resumes a specific system.
 - `clear()`: Removes all systems and calls their `cleanup()` hooks (crucial for level transitions).
 
-### The TurnManager
-The `TurnManager` is the "brain" of a turn-based game. It coordinates between the Player's input and the World's systems, and tracks the passage of time via a `CLOCK` singleton.
+### The TurnManager (The Library Way)
+The `TurnManager` is the "brain" of a turn-based game loop. It coordinates between the Player's input and the World's systems, and tracks the passage of time via a `CLOCK` singleton.
 
-#### How to use it
-Instead of calling `scheduler.update()` directly, you use the `TurnManager` to advance the game state.
+**Note:** In the **Framework Way**, the `TurnManager` is a managed service available via `@Inject() turns: TurnManager` or `world.turns`.
+
+**Why use a TurnManager?**
+In a roguelike, the world only moves when you move. The `TurnManager` ensures that:
+1.  **Phase Control**: Systems only run when a "turn" is actually processed.
+2.  **State Management**: It knows if the game is currently waiting for Player Input or if it's the World's turn.
+3.  **Pause/Resume**: It can halt the entire simulation for menus or animations.
+
+#### How to use it (Manual Setup)
+You typically use the `TurnManager` to gate your input handling and advance the world.
 
 ```typescript
 import { TurnManager } from './ECS/TurnManager';
 
 const turnManager = new TurnManager(world, scheduler);
 
-// 1. Check if it's the player's turn to act
+// 1. Gate input: Only allow move if it's the player's turn and not paused
 if (turnManager.isPlayerTurn) {
-    handlePlayerInput();
-}
-
-// 2. Once the player performs an action (e.g., moves):
-function onPlayerAction() {
-    turnManager.nextTurn();
+    if (input.keyPressed('RIGHT')) {
+       player.move(1, 0);
+       turnManager.nextTurn(); // Advance the world!
+    }
 }
 ```
 
 When `nextTurn()` is called:
-1. It increments the `turn` count in the `CLOCK` singleton.
-2. It calls `scheduler.update(1.0)`, triggering all registered systems.
-3. It resets the state to wait for the next player action.
-
-### Putting It All Together: The Best Way
-The combination of Systems, the Scheduler, and the TurnManager provides a powerful, clean architecture for roguelikes.
-
-**The Recommended Flow:**
-1.  **State is Data**: All game state (Player HP, Monster positions, Turn count) lives in **Components**.
-2.  **Logic is in Systems**: No logic lives on the entity objects. The `MovementSystem` handles all movement.
-3.  **Scheduler guarantees Order**: You never have to worry about a monster attacking a player *after* the player has already moved away, because you control the sequence in the `Scheduler`.
-4.  **TurnManager handles Timing**: It acts as the gatekeeper, ensuring that the `AISystem` and `MovementSystem` only run when a turn actually passes.
-
-**Example of the complete cycle:**
-```typescript
-// 1. Player presses 'Right'
-const moved = PlayerSystem.tryMove(player, { x: 1, y: 0 });
-
-// 2. If the move was valid, advance the world
-if (moved) {
-    turnManager.nextTurn();
-}
-
-// 3. Inside nextTurn(), the Scheduler runs:
-//    - AISystem: Monster detects player is nearby, sets its Velocity.
-//    - MovementSystem: Moves the monster toward the player.
-//    - StaminaSystem: Ticks down because an action was taken.
-//    - VisibilitySystem: Updates the player's FOV for the new position.
-
-// 4. The RenderSystem (triggered after update) draws the updated world.
-```
-
-This approach is considered "The Best Way" because it ensures **Predictability**, **Performance** (via SoA archetypes), and **Ease of Debugging** (you always know which system modified which data and when).
+1.  **Increment Clock**: The `turn` count in the `CLOCK` singleton goes up.
+2.  **Tick Scheduler**: It calls `scheduler.update(1.0)`, running all your logic (AI, Physics, etc.).
+3.  **Reset Phase**: It returns control to the player (setting `isPlayerTurn = true`).
 
 ---
 
-## 10. Decorators
+## 10. The Strategic Authority: The Director
+
+While the `TurnManager` handles the *Tactical* loop (move by move), the **Director** handles the *Strategic* flow of the entire game.
+
+The `Director` is a special type of system (`PassiveSystem`) that acts as the "Grand Architect". It doesn't process entities in every turn; instead, it listens for high-level events and makes big decisions.
+
+### Responsibilities of a Director:
+-   **Scene Transitions**: Deciding when to go from the Main Menu to the Dungeon.
+-   **Win/Loss Conditions**: Monitoring if the player died or reached the final exit.
+-   **Global State**: Managing auto-saves, high scores, and persistent progress.
+-   **Initialization**: Setting up the initial world state (spawning the player, etc).
+
+### Example: A Game Director
+```typescript
+import { Director } from './ECS/Director';
+import { Subscribe } from './ECS/Decorators';
+
+class MyGameDirector extends Director {
+  @Subscribe("PLAYER_DIED")
+  onPlayerDeath() {
+    this.turns.pause(); // Stop the world
+    this.scenes.switchTo(new GameOverScene());
+  }
+
+  @Subscribe("GOAL_REACHED")
+  onVictory() {
+    this.storage.save("victory_lap");
+    this.scenes.switchTo(new VictoryScene());
+  }
+
+  // Mandatory implementation: tell the framework which scenes to use
+  protected getGameOverScene() { return new GameOverScene(); }
+  protected getNextLevelScene() { return new DungeonScene(); }
+}
+```
+
+### How the Director and TurnManager Work Together
+
+Think of them as two layers of a cake:
+
+1.  **The TurnManager (Tactical)**: Handles the "Micro" loop. `Input -> Player Move -> nextTurn() -> Monsters Move -> Wait`.
+2.  **The Director (Strategic)**: Handles the "Macro" loop. `Dungeon Level -> Player Wins -> Exit Reached Event -> Director switches Scene -> New Level`.
+
+**The Full Game Loop Flow:**
+1.  **Engine** starts and initializes the **Director**.
+2.  **Director** starts the first **Scene** (e.g., `MainMenu`).
+3.  Player clicks "Start" -> **Director** switches to `DungeonScene`.
+4.  `DungeonScene.onEnter` spawns the player and monsters.
+5.  **TurnManager** starts in `isPlayerTurn` mode.
+6.  Player moves -> **TurnManager** calls `nextTurn()`.
+7.  **Scheduler** runs all logic systems.
+8.  Monster attacks player -> Player HP reaches 0 -> `PLAYER_DIED` event is published.
+9.  **Director** hears the event -> Switches to `GameOverScene`.
+
+---
+
+## 11. Decorators
 
 Decorators provide a declarative way to define a system's requirements and behavior. They make the code cleaner by moving configuration out of the constructor and onto the class itself.
 
@@ -902,7 +1019,50 @@ Instead of passing an `Aspect` to the `super()` call, you can use these decorato
 ### Event Bus Decorators
 - **@Subscribe(eventType)**: Subscribes a system method to the World's event bus. The method will be called whenever an event of `eventType` is published.
 
-### Examples
+### Dependency Injection Decorators
+- **@Inject(id?)**: Automatically injects a dependency into a class property. This is a powerful feature that makes systems cleaner and easier to write.
+
+#### Why use @Inject?
+- **Decoupling**: Systems don't need to know *how* to find a manager; they just declare that they need it.
+- **Boilerplate Reduction**: No more `this.world.getMapper(...)` or `this.world.scenes` calls in the constructor.
+- **Type Safety**: Works perfectly with TypeScript to ensure properties are correctly typed.
+
+#### How @Inject works
+The Framework's `Scheduler` automatically scans for `@Inject` decorators when a system is added and fills the properties before the system runs.
+
+| Type | Detection | Example |
+| :--- | :--- | :--- |
+| **Mapper** | If a `ComponentId` is passed to `@Inject(id)`. | `@Inject(Components.POSITION) pos!: Mapper<Position>;` |
+| **Event Bus** | If the property name is `events`. | `@Inject() events!: EventBus;` |
+| **Manager** | If the property name matches a manager on the `World` (e.g., `scenes`, `assets`, `storage`). | `@Inject() scenes!: SceneManager;` |
+
+#### Example: Using @Inject
+```typescript
+import { Inject, All } from './ECS/Decorators';
+import { Components, Position, Velocity } from './ComponentIds';
+
+@All(Components.POSITION, Components.VELOCITY)
+class MovementSystem extends IteratingSystem {
+  // 1. Inject a high-performance Mapper
+  @Inject(Components.POSITION)
+  private posMapper!: Mapper<Position>;
+
+  // 2. Inject the Event Bus
+  @Inject()
+  private events!: EventBus;
+
+  processEntity(entity: EntityId) {
+    // Use the mapper for ultra-fast access
+    const pos = this.posMapper.get(entity);
+    if (pos) {
+       pos.x += 1;
+       this.events.publish({ type: 'ENTITY_MOVED', entity });
+    }
+  }
+}
+```
+
+### Why use Decorators?
 
 **System Ordering and Priority:**
 ```typescript
@@ -958,14 +1118,6 @@ While the Rogue1 ECS core fully supports and encourages the use of decorators, y
 
 The base `IteratingSystem` class is designed to automatically detect these decorators on its subclasses, so no manual `super()` configuration is required when they are present.
 
-### Comparison with Other ECS
-While many JavaScript ECS libraries use imperative setup (passing filters to constructors), Rogue1's decorator approach is similar to:
-- **Bevy (Rust)**: Uses a declarative system definition based on function signatures.
-- **ECSY (JS)**: Uses static `queries` properties, which decorators essentially implement under the hood.
-- **Entitas (C#)**: Uses code generation or attributes to define system interests.
-
-Decorators bring a modern, type-safe, and highly readable syntax to Rogue1 that is often found in more mature ECS frameworks in other ecosystems.
-
 ---
 
 ## 11. The ECS Engine Flow
@@ -985,11 +1137,172 @@ Understanding the flow of data and execution is key to using the ECS effectively
 
 ---
 
-## 12. Scene Management
+## 12. Standard Services
 
+Rogue1 ECS includes a suite of standardized services (Managers) that handle common game engine tasks. These services are available both as part of the `Engine` framework (via `@Inject`) and as standalone managers on the `World` object.
+
+| Service | Responsibility | Framework Injection | Library Access |
+| :--- | :--- | :--- | :--- |
+| **EventBus** | Decoupled communication. | `@Inject() events` | `world.events` |
+| **AssetManager** | Loading external data/audio. | `@Inject() assets` | `world.assets` |
+| **StorageManager**| Persistence (Save/Load). | `@Inject() storage` | `world.storage` |
+| **SceneManager** | Game flow and transitions. | `@Inject() scenes` | `world.scenes` |
+| **TurnManager** | Turn-based loop control. | `@Inject() turns` | `world.turns` |
+
+---
+
+### 12.1 EventBus: Decoupled Communication
+The Rogue1 ECS includes a built-in `EventBus` plugged directly into the `World`. This allows for decoupled communication between systems and other parts of the game engine.
+
+#### Using the Event Bus
+You can access the event bus via `world.events`.
+
+```typescript
+// Publishing an event
+world.events.publish({ type: 'SCREEN_SHAKE', intensity: 5 });
+
+// Manual subscription
+const handler = (ev) => console.log("Shake!", ev.intensity);
+world.events.subscribe('SCREEN_SHAKE', handler);
+```
+
+#### The @Subscribe Decorator
+The most powerful way to use the Event Bus is via the `@Subscribe` decorator in your Systems. When you add a system to the `Scheduler`, it is **automatically registered** to the event bus.
+
+```typescript
+import { BaseSystem } from './ECS/System';
+import { Subscribe } from './ECS/Decorators';
+
+class AudioSystem extends BaseSystem {
+  @Subscribe('MONSTER_DEATH')
+  onMonsterDeath(event: { type: string, enemyId: EntityId }) {
+    this.playSfx('death_squish');
+  }
+}
+```
+
+#### Event Bus Implementation Details
+
+| Feature | Description |
+| :--- | :--- |
+| **Decoupled** | Systems don't need to know about each other; they only need to know about event types. |
+| **Auto-Registration** | The `Scheduler` automatically calls `world.events.register(system)` when a system is added. |
+| **Decorator Support** | Use `@Subscribe('EVENT_TYPE')` on any system method. |
+| **Cancellation** | If an event has a `cancelled` property, handlers can set it to `true` to stop the event from reaching further subscribers. |
+| **Synchronous** | Events are processed immediately when `publish()` is called. |
+
+#### Event Bus Examples
+
+##### 1. Communication between Systems
+```typescript
+class CombatSystem extends BaseSystem {
+  onAttack(attacker: EntityId, target: EntityId) {
+    // ... logic ...
+    this.world.events.publish({ type: 'ENTITY_DAMAGED', entity: target, amount: 10 });
+  }
+}
+
+class UiSystem extends BaseSystem {
+  @Subscribe('ENTITY_DAMAGED')
+  onDamage(ev: { entity: EntityId, amount: number }) {
+    this.showFloatingText(ev.entity, `-${ev.amount}`, "red");
+  }
+}
+```
+
+##### 2. Cancelling Events
+```typescript
+class ProtectionSystem extends BaseSystem {
+  @Subscribe('ENTITY_DAMAGED')
+  onDamage(ev: { entity: EntityId, amount: number, cancelled?: boolean }) {
+    if (this.hasShield(ev.entity)) {
+      ev.cancelled = true; // Stop the damage event!
+      this.playSfx('shield_clink');
+    }
+  }
+}
+```
+
+---
+
+### 12.2 AssetManager: External Data
+The `AssetManager` handles the asynchronous loading and caching of external resources like JSON data (e.g., monster stats, map layouts) and Audio files.
+
+*   **Why use it?** It ensures that your game doesn't start until all required data is loaded, preventing "missing resource" crashes.
+*   **Discovery**: Assets declared in the `EngineConfiguration` are loaded automatically during engine startup.
+
+#### Examples
+
+**Loading via Configuration (Framework Mode)**
+```typescript
+const engine = new Engine({
+  // ...
+  assets: [
+    { key: 'monster_db', url: 'data/monsters.json', type: 'JSON' },
+    { key: 'hit_sfx', url: 'audio/hit.mp3', type: 'AUDIO' }
+  ]
+});
+
+// Wait for loading to finish
+engine.whenReady().then(() => engine.start(new MyScene()));
+```
+
+**Using Assets in a System**
+```typescript
+class SpawnerSystem extends BaseSystem {
+  @Inject() assets!: AssetManager;
+
+  spawnMonster(typeId: string) {
+    const db = this.assets.get<Record<string, MonsterStats>>('monster_db');
+    const stats = db[typeId];
+    // ...
+  }
+}
+```
+
+---
+
+### 12.3 StorageManager: Persistence
+The `StorageManager` provides a high-level API for saving and loading the entire `World` state (including all entities, components, tags, and groups) to the browser's `localStorage`.
+
+*   **Why use it?** To implement save slots, auto-saves, and persistent progress.
+*   **Safety**: It includes automatic quota checks and warns you if your save file is approaching browser limits.
+
+#### Examples
+
+**Saving the Game**
+```typescript
+class GameDirector extends Director {
+  @Subscribe("SAVE_GAME")
+  onSaveRequested() {
+    this.storage.save("slot_1");
+    this.events.publish({ type: 'MESSAGE', text: "Game Saved!" });
+  }
+}
+```
+
+**Loading a Saved State**
+```typescript
+if (world.storage.exists("slot_1")) {
+    world.storage.load("slot_1");
+}
+```
+
+**Metadata and Save Slots**
+You can list available saves and their metadata (timestamp, name) to build a Save/Load menu.
+```typescript
+const saves = world.storage.listSaves();
+saves.forEach(save => {
+    console.log(`Save: ${save.name}, Date: ${new Date(save.timestamp).toLocaleString()}`);
+});
+```
+
+---
+
+### 12.4 SceneManager: Game Flow
 A **Scene** represents a distinct state of your game (e.g., Main Menu, Options, Dungeon Level 1, Game Over). Scenes allow you to organize your logic and data by lifecycle.
 
-### What is a Scene?
+#### What is a Scene?
 In Rogue1, a Scene is a class or object that implements the `Scene` interface. It defines how to set up the `World` and `Scheduler` when that state becomes active.
 
 ```typescript
@@ -1234,84 +1547,81 @@ Mappers are particularly useful when you have a system that doesn't use `viewCol
 
 ---
 
-## 14. Event Bus
-The Rogue1 ECS includes a built-in `EventBus` plugged directly into the `World`. This allows for decoupled communication between systems and other parts of the game engine.
+## 14. Tutorial: Building a Game from Scratch
 
-### Using the Event Bus
-You can access the event bus via `world.events`.
+This tutorial will walk you through building a simple "framework-driven" game using Rogue1.
+
+### Step 1: Define Your Data Schema
+Create a `ComponentRegistry.ts` to hold your IDs and interfaces.
 
 ```typescript
-// Publishing an event
-world.events.publish({ type: 'SCREEN_SHAKE', intensity: 5 });
+export const Components = {
+  POSITION: 0,
+  HEALTH: 1,
+  PLAYER_TAG: 2,
+  REL_TARGETS: 100
+} as const satisfies Record<string, ComponentId>;
 
-// Manual subscription
-const handler = (ev) => console.log("Shake!", ev.intensity);
-world.events.subscribe('SCREEN_SHAKE', handler);
+export interface Position { x: number; y: number; }
+export interface Health { hp: number; max: number; }
 ```
 
-### The @Subscribe Decorator
-The most powerful way to use the Event Bus is via the `@Subscribe` decorator in your Systems. When you add a system to the `Scheduler`, it is **automatically registered** to the event bus.
+### Step 2: Create a System with Dependency Injection
+Write a system that uses the injected mapper and events.
 
 ```typescript
-import { BaseSystem } from './ECS/System';
-import { Subscribe } from './ECS/Decorators';
+@All(Components.POSITION, Components.HEALTH)
+class HealthSystem extends IteratingSystem {
+  @Inject(Components.HEALTH)
+  private health!: Mapper<Health>;
 
-class AudioSystem extends BaseSystem {
-  @Subscribe('MONSTER_DEATH')
-  onMonsterDeath(event: { type: string, enemyId: EntityId }) {
-    this.playSfx('death_squish');
-  }
-}
-```
+  @Inject()
+  private events!: EventBus;
 
-### Event Bus Implementation Details
-
-| Feature | Description |
-| :--- | :--- |
-| **Decoupled** | Systems don't need to know about each other; they only need to know about event types. |
-| **Auto-Registration** | The `Scheduler` automatically calls `world.events.register(system)` when a system is added. |
-| **Decorator Support** | Use `@Subscribe('EVENT_TYPE')` on any system method. |
-| **Cancellation** | If an event has a `cancelled` property, handlers can set it to `true` to stop the event from reaching further subscribers. |
-| **Synchronous** | Events are processed immediately when `publish()` is called. |
-
-### Event Bus Examples
-
-#### 1. Communication between Systems
-```typescript
-class CombatSystem extends BaseSystem {
-  onAttack(attacker: EntityId, target: EntityId) {
-    // ... logic ...
-    this.world.events.publish({ type: 'ENTITY_DAMAGED', entity: target, amount: 10 });
-  }
-}
-
-class UiSystem extends BaseSystem {
-  @Subscribe('ENTITY_DAMAGED')
-  onDamage(ev: { entity: EntityId, amount: number }) {
-    this.showFloatingText(ev.entity, `-${ev.amount}`, "red");
-  }
-}
-```
-
-#### 2. Cancelling Events
-```typescript
-class ProtectionSystem extends BaseSystem {
-  @Subscribe('ENTITY_DAMAGED')
-  onDamage(ev: { entity: EntityId, amount: number, cancelled?: boolean }) {
-    if (this.hasShield(ev.entity)) {
-      ev.cancelled = true; // Stop the damage event!
-      this.playSfx('shield_clink');
+  processEntity(entity: EntityId) {
+    const hp = this.health.get(entity);
+    if (hp && hp.hp <= 0) {
+      this.events.publish({ type: 'ENTITY_DIED', entity });
+      this.world.deleteEntity(entity);
     }
   }
 }
 ```
 
-| Method | Description |
-| :--- | :--- |
-| `world.events.publish(event)` | Dispatches an event to all subscribers. |
-| `world.events.subscribe(type, cb)` | Manually listen for an event. |
-| `world.events.register(obj)` | Registers all `@Subscribe` methods on an object instance. |
-| `@Subscribe(type)` | Method decorator for automatic system subscriptions. |
+### Step 3: Define Your Game Director
+The Director will handle high-level logic like scene switches.
+
+```typescript
+class MyDirector extends Director {
+  @Subscribe('ENTITY_DIED')
+  onEntityDeath(event: { entity: EntityId }) {
+    if (this.world.hasComponent(event.entity, Components.PLAYER_TAG)) {
+       this.changeScene(new GameOverScene());
+    }
+  }
+
+  protected getGameOverScene() { return new GameOverScene(); }
+  protected getNextLevelScene() { return new DungeonScene(); }
+}
+```
+
+### Step 4: Configure and Start the Engine
+Link everything together in your main entry point.
+
+```typescript
+const engine = new Engine({
+  components: Components,
+  systems: [HealthSystem, MovementSystem, AISystem],
+  director: MyDirector
+});
+
+engine.whenReady().then(() => {
+  engine.start(new DungeonScene());
+});
+```
+
+### Step 5: Handling the Game Loop
+In your rendering loop, call `engine.update(dt)`. For turn-based movement, the `TurnManager` handles the calls to `scheduler.update()`.
 
 ---
 
@@ -1326,35 +1636,44 @@ class ProtectionSystem extends BaseSystem {
 
 ## 16. Comparison with Other ECS Architectures
 
-If you are coming from other ECS libraries (like `bitecs`, `gecs`, or `tiny-ecs`), here is how Rogue1 compares and what it tries to do differently:
+If you are coming from other ECS libraries (like `bitecs`, `miniplex`, or `gecs`), here is how Rogue1 compares and what it tries to do differently:
+
+### Library vs. Framework Philosophy
+Most JavaScript ECS solutions are **Libraries**. They provide a `World` and a way to query entities, but leave the "wiring" (asset loading, scene management, storage, game loop) entirely to you.
+Rogue1 is a **Framework**. It provides the `Engine` bootstrapper, integrated `Standard Services`, and the `Director` authority. It doesn't just give you a tool; it gives you a skeleton to build a professional game upon.
+
+| Feature | Typical JS ECS Library | Rogue1 ECS Framework |
+| :--- | :--- | :--- |
+| **Bootstrapping** | Manual (You create the loop) | Automated (Engine Discovery) |
+| **Dependencies** | Manual passing (constructors) | @Inject (Dependency Injection) |
+| **Assets/Scenes** | User-implemented | Standardized Managers |
+| **Communication**| Manual/Custom | Built-in Event Bus |
+| **Ordering** | Order of addition | Topological Sorting (@Before/@After) |
 
 ### Archetype-Based (SoA) vs. Entity-Centric (AoS)
-While many simple ECS implementations use an "Entity-centric" or "Array-of-Structures" (AoS) approach, Rogue1 uses an **Archetype-based SoA** model. This provides significant performance benefits for large-scale simulations by ensuring cache locality and enabling engine-level optimizations. See the [Architecture](#architecture-archetypes-and-soa) section for a deep dive into how this works.
+While simple libraries (like `tiny-ecs`) use an "Entity-centric" approach where components are objects attached to an entity ID, Rogue1 uses an **Archetype-based SoA** model.
+- **Cache Locality**: Similar to `bitecs` or `hecs` (Rust), data is stored in parallel arrays.
+- **Iteration Speed**: Systems only "see" entities that match their exact component signature, eliminating the need to branch or check for nulls during high-speed loops.
+
+### Balancing Performance and Ergonomics
+- **The "High Perf" Extreme (`bitecs`)**: Uses `TypedArrays` (Float32Array) for everything. Extremely fast, but you can't easily store strings, nested objects, or complex state.
+- **The "Ergonomic" Extreme (`miniplex`)**: Uses plain objects and standard arrays. Very friendly and flexible, but can struggle with performance at very high entity counts (10k+).
+- **The Rogue1 Middle Ground**: We use the **Archetype SoA** pattern for structural speed, but allow **arbitrary JavaScript objects** as component data. This provides a massive performance boost over object-centric libraries while keeping the developer experience intuitive.
+
+### Declarative Design & Dependency Injection
+Rogue1's use of **Decorators** (@All, @Inject, @Subscribe) moves logic configuration out of the constructor and into the class definition. This approach is rare in JS but common in industry-leading frameworks:
+- **Bevy (Rust)**: Rogue1's declarative systems are similar to Bevy's function-signature based systems.
+- **Entitas (C#)**: The use of decorators for "Interests" (Aspects) mirrors Entitas's code-generation or attribute-based approach.
+- **ECSY (JS)**: Uses static `queries`, which Rogue1 implements via the more modern decorator syntax.
 
 ### "Batteries Included" for Games
-Many JS ECS libraries are minimalist "engines" that only provide the core loop. Rogue1 is designed to be a complete toolkit for game development:
-- **Built-in Managers**: Features like `Tags`, `Groups`, `Prefabs`, and `Relationships` are built into the core, not added as afterthoughts.
-- **Relationship Integrity**: The `RelationshipManager` automatically cleans up stale entity references when an entity is deleted, solving a common source of "ghost" bugs in ECS.
-- **Turn-Based First**: With the `TurnManager` and `Scheduler`, it provides a structured way to handle complex turn-based logic (Player -> AI -> World) out of the box.
-
-### Balancing Performance and Ease of Use
-Some high-performance ECS libraries (like `bitecs`) require you to use `TypedArrays` (Float32Array, etc.) for all data. While extremely fast, this makes it difficult to store strings, nested objects, or complex state.
-Rogue1 strikes a middle ground:
-- It uses the **Archetype SoA** pattern for structural speed.
-- It allows **arbitrary JavaScript objects** as component data.
-This gives you a significant performance boost over object-centric ECS while keeping the developer experience friendly and intuitive.
+Many libraries are minimalist. Rogue1 includes specialized game logic managers out of the box:
+- **Relationship Integrity**: The `RelationshipManager` (like `flex-ecs` or `hecs`) automatically cleans up stale links.
+- **Turn-Based First**: The `TurnManager` provides a structured way to handle complex turn-based logic (Player -> AI -> World) that is often missing from real-time focused engines.
+- **Persistence**: Built-in `StorageManager` with automatic versioning and quota safety.
 
 ### Single-Threaded by Design
-Rogue1 is intentionally single-threaded. While some ECS frameworks explore multithreading (using Web Workers in JS), we have decided against it for this project:
-- **Turn-Based Nature**: Our primary focus is supporting turn-based games. In these scenarios, game logic is typically sequential, and the need for massive parallelism is significantly lower than in real-time simulations.
-- **Efficiency of Archetypes/SoA**: The Archetype/SoA architecture is already highly optimized for standard roguelike entity counts. The performance is more than sufficient for our needs without the added complexity of threads.
-- **Synchronization Overhead**: The overhead of managing thread synchronization and data consistency often outweighs the performance gains in most web-based game scenarios, especially when dealing with complex object-based components.
-
-### Deterministic State and Snapshots
-By requiring component registration (`bootstrapEcs`), Rogue1 ensures that the internal memory layout (Archetypes) is deterministic. This makes the built-in `saveSnapshot` and `loadSnapshot` features incredibly robust, allowing you to implement save/load systems with just a few lines of code.
-
-### Declarative System Design (Decorators)
-While many ECS libraries require imperative setup (passing filters to constructors), Rogue1 leverages TypeScript decorators to allow for a declarative system design. This is common in more advanced ECS frameworks (like Bevy or Entitas) and makes the code more maintainable and easier to reason about compared to libraries that rely solely on constructor parameters.
+Rogue1 is intentionally single-threaded. While some frameworks (like `nano-ecs`) explore Web Workers, we focus on the **Sequential Determinism** required for turn-based roguelikes. The efficiency of our Archetype/SoA implementation provides more than enough performance for modern web-based roguelikes without the complexity of thread synchronization.
 
 ---
 
@@ -1397,44 +1716,83 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 
 ## Method Cheat Sheet
 
+### Engine & Framework
+| Method | Description |
+| :--- | :--- |
+| `new Engine(config)` | Creates and bootstraps the framework. |
+| `engine.whenReady()` | Returns a promise that resolves when assets are loaded. |
+| `engine.start(initialScene)`| Starts the first scene. |
+| `engine.update(dt)` | Ticks the scheduler. |
+| `director.changeScene(s)` | Standardized scene transition with optional save. |
+
+### World (Data)
 | Method | Description |
 | :--- | :--- |
 | `world.createEntity()` | Returns a new `EntityId`. |
+| `world.deleteEntity(e)` | Deletes an entity and recycles its ID. |
+| `world.isValid(e)` | Checks if an entity is active and not recycled. |
 | `world.buildEntity()` | Fluent API to create a new entity (commit() optional). |
 | `world.edit(entity)` | Starts a batch edit for an entity (commit() optional). |
 | `world.addComponent(e, id, val)` | Adds a component to an entity. |
+| `world.hasComponent(e, id)` | Checks if an entity has a specific component. |
 | `world.getComponent<T>(e, id)` | Retrieves component data with type T. |
-| `world.getMapper<T>(id)` | Returns a high-performance Component Mapper. |
 | `world.setComponent<T>(e, id, v)` | Overwrites component data. |
 | `world.updateComponent<T>(e, i, cb)`| Updates via callback (reassigns). |
 | `world.mutateComponent<T>(e, i, cb)`| Updates via callback (in-place). |
-| `world.subscribeOnAdd(id, cb)` | React to component addition. |
-| `world.subscribeOnRemove(id, cb)` | React to component removal. |
-| `world.subscribeOnMaskChange(cb)` | React to any component change on an entity. |
-| `world.events.publish(event)` | Dispatches an event to the Event Bus. |
-| `@Subscribe(type)` | Decorator for auto-subscribing system methods to events. |
-| `world.view(aspect)` | Returns an iterator for entities matching an aspect. |
-| `world.tags.getEntity(tag)` | Finds an entity by its unique tag. |
-| `world.groups.getEntities(group)` | Returns all entities in a group. |
-| `world.prefabs.spawn(name)` | Creates an entity from a template. |
-| `world.relationships.add(s, r, t)` | Links two entities with a relationship. |
-| `world.relationships.clearRelations(s, r)`| Removes all targets for relationship `r` on `s`. |
-| `world.relationships.clear()`| Resets the internal relationship index. |
-| `world.clear()` | Resets the entire world, deleting all entities. |
-| `world.scenes.switchTo(scene)` | Teardowns current scene and enters the next. |
+| `world.getSingleton<T>(id)` | Retrieves a global singleton. |
+| `world.setSingleton<T>(id, v)` | Sets a global singleton. |
+| `world.saveSnapshot()` | Serializes the entire world state. |
+| `world.loadSnapshot(data)` | Restores the world state. |
+| `world.clear()` | Resets the world, deleting all entities. |
+
+### Component Mappers (High Performance)
+| Method | Description |
+| :--- | :--- |
+| `world.getMapper<T>(id)` | Returns a high-performance Component Mapper. |
+| `mapper.get(entity)` | Fast retrieve. |
+| `mapper.set(entity, value)` | Fast non-structural write. |
+| `mapper.has(entity)` | Fast check. |
+| `mapper.update(entity, cb)` | Fast callback update (reassign). |
+| `mapper.mutate(entity, cb)` | Fast callback mutation (in-place). |
+
+### Systems & Logic
+| Method | Description |
+| :--- | :--- |
+| `scheduler.add(system)` | Registers a system (handles injection/sorting). |
 | `turnManager.nextTurn()` | Advances the game by one turn. |
 | `turnManager.isPlayerTurn` | Boolean: Is it the player's turn to act? |
-| `scheduler.add(system)` | Registers a system for execution. |
-| `world.saveSnapshot()` | Serializes the entire world state. |
-| `Aspect.all(...ids)` | Creates a filter for "all of these". |
-| `@All` / `@And` | Decorator: Entity must have ALL of these. |
-| `@One` / `@AnyOf` | Decorator: Entity must have AT LEAST ONE. |
-| `@Exclude` / `@NoneOf` | Decorator: Entity must have NONE of these. |
-| `@Match(aspect)` | Decorator: Merges an existing Aspect. |
-| `@Group(name)` | Decorator: Limits system to a Group. |
-| `@Tag(name)` | Decorator: Limits system to a specific Tagged entity. |
-| `@Interval(n)` | Decorator: System execution period (turns). |
-| `@Priority(v)` | Decorator: Sets system execution priority. |
-| `@Before('Name')` | Decorator: Ensures system runs before 'Name'. |
-| `@After('Name')` | Decorator: Ensures system runs after 'Name'. |
+| `turnManager.pause() / resume()`| Halts or resumes all systems. |
+| `turnManager.reset()` | Resets the turn clock to zero. |
 | `system.update(dt)` | Executes the system logic. |
+
+### Decorators
+| Method | Description |
+| :--- | :--- |
+| `@Inject(id?)` | Injects a Mapper, EventBus, or Manager. |
+| `@Subscribe(type)` | Auto-subscribes a method to an event. |
+| `@All` / `@And` | Entity must have ALL of these components. |
+| `@One` / `@AnyOf` | Entity must have AT LEAST ONE. |
+| `@Exclude` / `@NoneOf` | Entity must NOT have these. |
+| `@Match(aspect)` | Merges an existing Aspect. |
+| `@Priority(v)` | Sets system execution priority. |
+| `@Before('Name')` | Ensures system runs before 'Name'. |
+| `@After('Name')` | Ensures system runs after 'Name'. |
+
+### Managers (World Properties)
+| Method | Description |
+| :--- | :--- |
+| `world.events.publish(ev)` | Dispatches an event. |
+| `world.events.subscribe(t, cb)`| Manually subscribe to an event. |
+| `world.tags.getEntity(tag)` | Finds an entity by its unique tag. |
+| `world.groups.getEntities(g)`| Returns all entities in a group. |
+| `world.prefabs.spawn(name)` | Creates an entity from a template. |
+| `world.relationships.add(s,r,t)`| Links two entities. |
+| `world.scenes.switchTo(scene)` | Teardowns current scene and enters the next. |
+| `world.turns.nextTurn()` | Advances the tactical game loop. |
+| `world.assets.get<T>(key)` | Retrieves a loaded asset from cache. |
+| `world.assets.loadJson(k, u)` | Loads a JSON asset. |
+| `world.assets.loadAudio(k, u)` | Loads an Audio asset. |
+| `world.storage.save(name)` | Persists world state to local storage. |
+| `world.storage.load(name)` | Restores world state from local storage. |
+| `world.storage.exists(name)` | Checks if a save exists. |
+| `world.storage.listSaves()` | Returns all available save metadata. |

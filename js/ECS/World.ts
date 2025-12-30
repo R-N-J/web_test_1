@@ -12,6 +12,7 @@ import type { ComponentSerializer } from "./ComponentManager";
 import { Mapper } from "./Mapper";
 import { EventBus } from "../core/EventBus"; // Add this import from Core
 import { SceneManager } from "./SceneManager";
+import { TurnManager } from "./TurnManager";
 import { Scheduler } from "./Scheduler"; // Add this import
 import { AssetManager } from "./AssetManager";
 import { StorageManager } from "./StorageManager";
@@ -61,6 +62,7 @@ export class World {
   public readonly tags = new TagManager();
   public readonly groups = new GroupManager();
   public scenes?: SceneManager; // Make this optional until scheduler is set
+  public turns?: TurnManager;  // Make this optional until scheduler is set
 
   private singletonEntity: EntityId;
 
@@ -78,6 +80,7 @@ export class World {
    */
   public setScheduler(scheduler: Scheduler): void {
     this.scenes = new SceneManager(this, scheduler);
+    this.turns = new TurnManager(this, scheduler);
   }
 
   /**
