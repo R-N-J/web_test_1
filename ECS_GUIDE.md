@@ -72,13 +72,16 @@ Rogue1 ECS provides a suite of tools that work together to make coding feel "cle
   - [The TurnManager (The Library Way)](#the-turnmanager-the-library-way)
 - [10. The Strategic Authority: The Director](#10-the-strategic-authority-the-director)
 - [11. Decorators](#11-decorators)
-  - [Injecting Dependencies (@Inject)](#injecting-dependencies-inject)
+  - [Dependency Injection (@Inject & @Singleton)](#dependency-injection-inject--singleton)
+- [The ECS Engine Flow](#the-ecs-engine-flow)
 - [12. Standard Services](#12-standard-services)
   - [12.1 EventBus: Decoupled Communication](#121-eventbus-decoupled-communication)
   - [12.2 AssetManager: External Data](#122-assetmanager-external-data)
   - [12.3 StorageManager: Persistence](#123-storagemanager-persistence)
   - [12.4 SceneManager: Game Flow](#124-scenemanager-game-flow)
 - [13. Advanced Features](#13-advanced-features)
+  - [Singletons & getOrCreateSingleton](#singletons--getorcreatesingleton)
+  - [Batch Editing & Fluent API (create, edit)](#batch-editing--fluent-api-create-edit)
   - [Component Mappers](#component-mappers)
 - [14. Tutorial: Building a Game from Scratch](#14-tutorial-building-a-game-from-scratch)
 - [15. Performance Best Practices](#15-performance-best-practices)
@@ -1019,48 +1022,57 @@ Instead of passing an `Aspect` to the `super()` call, you can use these decorato
 ### Event Bus Decorators
 - **@Subscribe(eventType)**: Subscribes a system method to the World's event bus. The method will be called whenever an event of `eventType` is published.
 
-### Dependency Injection Decorators
+### Dependency Injection (@Inject & @Singleton)
 - **@Inject(id?)**: Automatically injects a dependency into a class property. This is a powerful feature that makes systems cleaner and easier to write.
+- **@Singleton(id)**: Injects the **value** of a global singleton component directly into a property.
 
-#### Why use @Inject?
-- **Decoupling**: Systems don't need to know *how* to find a manager; they just declare that they need it.
-- **Boilerplate Reduction**: No more `this.world.getMapper(...)` or `this.world.scenes` calls in the constructor.
+#### Why use @Inject or @Singleton?
+- **Decoupling**: Systems don't need to know *how* to find a manager or singleton; they just declare that they need it.
+- **Boilerplate Reduction**: No more `this.world.getMapper(...)`, `this.world.scenes`, or `this.world.getSingleton(...)` calls in the constructor.
 - **Type Safety**: Works perfectly with TypeScript to ensure properties are correctly typed.
 
-#### How @Inject works
-The Framework's `Scheduler` automatically scans for `@Inject` decorators when a system is added and fills the properties before the system runs.
+#### How it works
+The Framework's `Scheduler` automatically scans for these decorators when a system is added and fills the properties before the system runs.
 
-| Type | Detection | Example |
-| :--- | :--- | :--- |
-| **Mapper** | If a `ComponentId` is passed to `@Inject(id)`. | `@Inject(Components.POSITION) pos!: Mapper<Position>;` |
-| **Event Bus** | If the property name is `events`. | `@Inject() events!: EventBus;` |
-| **Manager** | If the property name matches a manager on the `World` (e.g., `scenes`, `assets`, `storage`). | `@Inject() scenes!: SceneManager;` |
+| Decorator | Type | Detection | Example |
+| :--- | :--- | :--- | :--- |
+| **@Inject(id)** | **Mapper** | If a `ComponentId` is passed. | `@Inject(Components.POSITION) pos!: Mapper<Position>;` |
+| **@Inject()** | **Event Bus** | If the property name is `events`. | `@Inject() events!: EventBus;` |
+| **@Inject()** | **Manager** | If name matches a `World` manager. | `@Inject() scenes!: SceneManager;` |
+| **@Singleton(id)**| **Data** | If using the `@Singleton` decorator. | `@Singleton(Components.CLOCK) clock!: Clock;` |
 
-#### Example: Using @Inject
+#### Example: Using Dependency Injection
 ```typescript
-import { Inject, All } from './ECS/Decorators';
-import { Components, Position, Velocity } from './ComponentIds';
+import { Inject, Singleton, All } from './ECS/Decorators';
+import { Components, Position, Clock } from './ComponentIds';
 
-@All(Components.POSITION, Components.VELOCITY)
-class MovementSystem extends IteratingSystem {
+@All(Components.POSITION)
+class TimeDisplaySystem extends IteratingSystem {
   // 1. Inject a high-performance Mapper
   @Inject(Components.POSITION)
   private posMapper!: Mapper<Position>;
 
-  // 2. Inject the Event Bus
-  @Inject()
-  private events!: EventBus;
+  // 2. Inject a global singleton's value directly
+  @Singleton(Components.CLOCK)
+  private clock!: Clock;
 
   processEntity(entity: EntityId) {
-    // Use the mapper for ultra-fast access
     const pos = this.posMapper.get(entity);
     if (pos) {
-       pos.x += 1;
-       this.events.publish({ type: 'ENTITY_MOVED', entity });
+       console.log(`Time is ${this.clock.turn}, Entity at ${pos.x},${pos.y}`);
     }
   }
 }
 ```
+
+#### When to use @Singleton?
+Use `@Singleton` for data that is unique and global, such as:
+- **Game Clock**: Tracking turns or total time.
+- **Input State**: Keyboard and mouse data.
+- **Global Settings**: Volume, difficulty, or camera zoom.
+- **Game Progress**: Level number or total score.
+
+It is much cleaner than manually fetching the singleton via `world.getSingleton()` in every system that needs it.
 
 ### Why use Decorators?
 
@@ -1120,7 +1132,7 @@ The base `IteratingSystem` class is designed to automatically detect these decor
 
 ---
 
-## 11. The ECS Engine Flow
+## The ECS Engine Flow
 
 Understanding the flow of data and execution is key to using the ECS effectively.
 
@@ -1477,12 +1489,28 @@ class DungeonScene implements Scene {
 
 ## 13. Advanced Features
 
-### Singletons
-Useful for global data (e.g., Game Settings, Input State).
+### Singletons & getOrCreateSingleton
+Useful for global data (e.g., Game Settings, Input State). Every `World` has a dedicated "Singleton Entity" that holds these components.
 
 ```typescript
+// Set a singleton
 world.setSingleton(Components.CLOCK, { turn: 0 });
+
+// Retrieve a singleton
 const clock = world.getSingleton<Clock>(Components.CLOCK);
+```
+
+#### Pro Pattern: getOrCreateSingleton
+Often, you want to ensure a singleton exists before using it, especially during a system's `onEnable` or a scene's `onEnter`.
+
+```typescript
+// Returns the existing singleton, or creates it with the default value if missing
+const stats = world.getOrCreateSingleton<EngineStats>(InternalComponents.ENGINE_STATS, {
+    entities: 0,
+    archetypes: 0,
+    systems: [],
+    lastUpdateMs: 0
+});
 ```
 
 ### Snapshots (Saving/Loading)
@@ -1495,10 +1523,20 @@ world.loadSnapshot(saveGame);
 ```
 *Note: Make sure to register Serializers if you use complex types like `Set` or `Map` in components.*
 
-### Batch Editing and Fluent API
-When adding/removing many components at once, use `edit()` to avoid multiple archetype transitions. For creating new entities, `buildEntity()` provides a clean, fluent API.
+### Batch Editing & Fluent API (create, edit)
+When adding/removing many components at once, use `edit()` to avoid multiple archetype transitions. For creating new entities, `create()` and `buildEntity()` provide a clean, fluent API.
 
-Both `edit()` and `buildEntity()` use an `EntityEditor` to bundle changes. In the latest version, calling `.commit()` is **optional**—the `World` will automatically commit any active editors at the end of the current update (via `world.flush()`).
+Both `edit()`, `create()`, and `buildEntity()` use an `EntityEditor` to bundle changes. In the latest version, calling `.commit()` is **optional**—the `World` will automatically commit any active editors at the end of the current update (via `world.flush()`).
+
+#### Using world.create() (Fluent Spawning)
+This is the most ergonomic way to spawn and configure new entities:
+```typescript
+const player = world.create()
+  .add(Components.POSITION, { x: 10, y: 10 })
+  .tag("hero")
+  .group("friendly")
+  .commit(); // commit() returns the EntityId
+```
 
 #### Using world.edit()
 Use this for existing entities to bundle multiple changes:
@@ -1510,14 +1548,12 @@ world.edit(entity)
 ```
 
 #### Using world.buildEntity()
-This is the preferred way to spawn and configure new entities in one go:
+`buildEntity()` is a semantic alias for `create()`. Both return an `EntityEditor`.
 ```typescript
-const player = world.buildEntity()
-  .add(Components.POSITION, { x: 10, y: 10 })
-  .add(Components.PLAYER_TAG, {})
-  .tag("hero")
-  .group("friendly")
-  .commit(); // commit() returns the EntityId
+const orc = world.buildEntity()
+  .add(Components.POSITION, { x: 5, y: 5 })
+  .add(Components.HEALTH, { hp: 10 })
+  .commit();
 ```
 
 #### Why call .commit() manually?
@@ -1731,6 +1767,7 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | `world.createEntity()` | Returns a new `EntityId`. |
 | `world.deleteEntity(e)` | Deletes an entity and recycles its ID. |
 | `world.isValid(e)` | Checks if an entity is active and not recycled. |
+| `world.create()` | Fluent API to create a new entity (shorthand). |
 | `world.buildEntity()` | Fluent API to create a new entity (commit() optional). |
 | `world.edit(entity)` | Starts a batch edit for an entity (commit() optional). |
 | `world.addComponent(e, id, val)` | Adds a component to an entity. |
@@ -1740,6 +1777,7 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | `world.updateComponent<T>(e, i, cb)`| Updates via callback (reassigns). |
 | `world.mutateComponent<T>(e, i, cb)`| Updates via callback (in-place). |
 | `world.getSingleton<T>(id)` | Retrieves a global singleton. |
+| `world.getOrCreateSingleton<T>(id, default)`| Retrieves or creates a singleton. |
 | `world.setSingleton<T>(id, v)` | Sets a global singleton. |
 | `world.saveSnapshot()` | Serializes the entire world state. |
 | `world.loadSnapshot(data)` | Restores the world state. |
@@ -1769,6 +1807,7 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | Method | Description |
 | :--- | :--- |
 | `@Inject(id?)` | Injects a Mapper, EventBus, or Manager. |
+| `@Singleton(id)` | Injects the value of a global singleton. |
 | `@Subscribe(type)` | Auto-subscribes a method to an event. |
 | `@All` / `@And` | Entity must have ALL of these components. |
 | `@One` / `@AnyOf` | Entity must have AT LEAST ONE. |
