@@ -97,38 +97,12 @@ export class QueryManager {
     return total;
   }
 
-  public getArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
-    if (this.isCacheDirty) {
-      this.queryCache.clear();
-      // We keep activeAspects so we know what queries to rebuild if needed,
-      // but clearing queryCache forces a re-scan.
-      this.isCacheDirty = false;
-    }
-
-    const key = this.getAspectKey(aspect);
-    // If we've seen this query before, return the cached list
-    if (this.hasQuery(aspect)) {
-      return this.queryCache.get(key)!;
-    }
-
-    // Otherwise, build the cache for the first time
-    const matches: Archetype[] = [];
-    for (const arch of allArchetypes) {
-      if (aspect.matches(arch.mask)) {
-        matches.push(arch);
-      }
-    }
-
-    this.activeAspects.set(key, aspect);
-    this.queryCache.set(key, matches);
-    return matches;
-  }
-
   /**
-   * Checks if a specific Aspect is already being tracked/cached.
+   * Unified API: Returns an array of raw Archetypes matching the aspect.
+   * Use this for high-performance SoA processing.
    */
-  public hasQuery(aspect: Aspect): boolean {
-    return this.queryCache.has(this.getAspectKey(aspect));
+  public getArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
+    return this.getMatchingArchetypes(aspect, allArchetypes);
   }
 
   public registerArchetype(arch: Archetype): void {

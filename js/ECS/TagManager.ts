@@ -24,6 +24,40 @@ export class TagManager {
   }
 
   /**
+   * Unified API: Returns a stream containing the tagged entity if valid.
+   */
+  public *view(tag: string, world: { isValid(id: EntityId): boolean }): IterableIterator<EntityId> {
+    const entity = this.tags.get(tag);
+    if (entity !== undefined && world.isValid(entity)) yield entity;
+  }
+
+  /**
+   * Unified API: Returns an array containing the tagged entity if valid.
+   */
+  public getEntities(tag: string, world: { isValid(id: EntityId): boolean }): EntityId[] {
+    const entity = this.tags.get(tag);
+    return (entity !== undefined && world.isValid(entity)) ? [entity] : [];
+  }
+
+  /**
+   * Unified API: Returns the tagged entity if valid.
+   */
+  public findFirst(tag: string, world: { isValid(id: EntityId): boolean }): EntityId | undefined {
+    const entity = this.tags.get(tag);
+    return (entity !== undefined && world.isValid(entity)) ? entity : undefined;
+  }
+
+  /**
+   * Unified API: Returns 1 if the tag exists and is valid, 0 otherwise.
+   */
+  public count(tag: string, world: { isValid(id: EntityId): boolean }): number {
+    const entity = this.tags.get(tag);
+    return (entity !== undefined && world.isValid(entity)) ? 1 : 0;
+  }
+
+
+
+  /**
    * Checks if an entity is currently assigned any tag.
    */
   public isTagged(entity: EntityId): boolean {

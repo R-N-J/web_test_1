@@ -232,45 +232,78 @@ export class World {
   }
 
   /**
-   * The primary API for Systems to get matching data.
+   * Unified API: Returns raw matching Archetypes.
+   * Best for high-performance systems overriding processArchetype.
    */
   public getArchetypes(aspect: Aspect): Archetype[] {
     return this.queries.getArchetypes(aspect, this.components.getArchetypes());
   }
 
+
+
+
+
+
+  /**
+   * SECTION: Unified Query API
+   * Consistent access patterns for finding entities.
+   */
+
+  // --- Aspect Based (Multi-entity search) ---
   /**
    * Primary streaming iterator for systems.
    */
   public* view(aspect: Aspect): IterableIterator<EntityId> {
     yield* this.queries.view(aspect, this.components.getArchetypes());
   }
-
-  public* viewGroup(group: string): IterableIterator<EntityId> {
-    // Pass 'this' so the manager can filter out recycled IDs automatically
-    const entities = this.groups.getEntities(group, this);
-    for (const e of entities) yield e;
-  }
-
   /**
    * Returns a snapshot array of all matching entities.
    */
   public getEntities(aspect: Aspect): EntityId[] {
     return this.queries.getEntities(aspect, this.components.getArchetypes());
   }
-
   /**
    * Returns the first entity that matches the aspect.
    */
   public findFirst(aspect: Aspect): EntityId | undefined {
     return this.queries.findFirst(aspect, this.components.getArchetypes());
   }
-
   /**
    * Returns the total count of entities matching the aspect.
    */
   public count(aspect: Aspect): number {
     return this.queries.count(aspect, this.components.getArchetypes());
   }
+
+  // --- Group Based (Set-entity search) ---
+  public* viewGroup(group: string): IterableIterator<EntityId> {
+    yield* this.groups.view(group, this);
+  }
+  public getEntitiesByGroup(group: string): EntityId[] {
+    return this.groups.getEntities(group, this);
+  }
+  public findFirstInGroup(group: string): EntityId | undefined {
+    return this.groups.findFirst(group, this);
+  }
+  public countGroup(group: string): number {
+    // We return the raw count for performance, as GroupManager handles valid filtering in views
+    return this.groups.count(group);
+  }
+
+  // --- Tag Based (Unique-entity search) ---
+  public* viewTag(tag: string): IterableIterator<EntityId> {
+    yield* this.tags.view(tag, this);
+  }
+  public getEntitiesByTag(tag: string): EntityId[] {
+    return this.tags.getEntities(tag, this);
+  }
+  public findFirstWithTag(tag: string): EntityId | undefined {
+    return this.tags.findFirst(tag, this);
+  }
+  public countTag(tag: string): number {
+    return this.tags.count(tag, this);
+  }
+
 
   /**
    * Returns the number of entities in a specific group.
@@ -290,21 +323,7 @@ export class World {
     return aspect.matches(mask);
   }
 
-  /**
-   * Returns the number of entities in a specific group.
-   * Much faster than getting all entities and checking the length.
-   */
-  public countGroup(group: string): number {
-    return this.groups.count(group);
-  }
 
-  public* viewTag(tag: string): IterableIterator<EntityId> {
-    const entity = this.tags.getEntity(tag);
-    // Safety: only yield if the entity exists AND is still valid/active
-    if (entity !== undefined && this.entities.isValid(entity)) {
-      yield entity;
-    }
-  }
 
   /**
    * Fast-path iterator that yields raw SoA columns for matching archetypes.

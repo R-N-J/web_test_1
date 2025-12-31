@@ -22,12 +22,6 @@ export class GroupManager {
     return this.groups.get(group)?.has(entity) ?? false;
   }
 
-  /**
-   * Returns the number of entities in a group.
-   */
-  public count(group: string): number {
-    return this.groups.get(group)?.size ?? 0;
-  }
 
   /**
    * Removes an entity from one specific group.
@@ -38,15 +32,43 @@ export class GroupManager {
   }
 
   /**
-   * Returns an array of all entities in a group.
-   * Filters out any entities that are no longer valid in the provided World context.
+   * Unified API: Returns a stream of all valid entities in the group.
    */
-  public getEntities(group: string, world?: { isValid(id: EntityId): boolean }): EntityId[] {
+  public *view(group: string, world: { isValid(id: EntityId): boolean }): IterableIterator<EntityId> {
+    const set = this.groups.get(group);
+    if (!set) return;
+    for (const id of set) {
+      if (world.isValid(id)) yield id;
+    }
+  }
+
+  /**
+   * Unified API: Returns an array of all valid entities in a group.
+   */
+  public getEntities(group: string, world: { isValid(id: EntityId): boolean }): EntityId[] {
     const set = this.groups.get(group);
     if (!set) return [];
+    return Array.from(set).filter(id => world.isValid(id));
+  }
 
-    const results = Array.from(set);
-    return world ? results.filter(id => world.isValid(id)) : results;
+  /**
+   * Unified API: Returns the first valid entity in the group.
+   */
+  public findFirst(group: string, world: { isValid(id: EntityId): boolean }): EntityId | undefined {
+    const set = this.groups.get(group);
+    if (!set) return undefined;
+    for (const id of set) {
+      if (world.isValid(id)) return id;
+    }
+    return undefined;
+  }
+
+  /**
+   * Unified API: Returns the number of entities currently in the group.
+   * Note: This counts total membership; use world.countGroup for valid-only count.
+   */
+  public count(group: string): number {
+    return this.groups.get(group)?.size ?? 0;
   }
 
   public remove(entity: EntityId): void {
