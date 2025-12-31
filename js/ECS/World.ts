@@ -395,15 +395,6 @@ export class World {
     return this.tags.getTag(entity);
   }
 
-  public query(aspect: bigint): EntityId[] {
-    const results: EntityId[] = [];
-    for (const arch of this.components.getArchetypes()) {
-      if ((arch.mask & aspect) === aspect) {
-        results.push(...arch.entities);
-      }
-    }
-    return results;
-  }
 
   /**
    * Safely retrieves a component value for an entity.

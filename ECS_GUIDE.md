@@ -352,9 +352,9 @@ world.deleteEntity(player);
 
 ---
 
-## 3. Querying Entities (Aspects and Views)
+## 4. Querying Entities (Aspects and Views)
 
-Querying is the process of finding entities that match specific criteria. In Rogue1, this is primarily done using **Aspects** to define filters and **Views** to iterate over the results efficiently.
+Querying is the process of finding entities that match specific criteria. In Rogue1, this is primarily done using **Aspects** to define filters and a unified set of **Query Methods** to retrieve or iterate over the results.
 
 ### Why Query?
 In an ECS, you rarely want to iterate over *all* entities. Instead, systems usually focus on entities that have a specific set of components. For example:
@@ -391,9 +391,25 @@ const resistant = Aspect.one(Components.FIRE_RESIST, Components.WATER_RESIST);
 const combined = aliveFighters.and(resistant);
 ```
 
-### Using Views
-A `view` is the most common way to iterate over entities matching an aspect.
+### The Unified Query API
+The `World` provides a consistent set of methods for retrieving entities based on an `Aspect`, `Group`, or `Tag`. This symmetric API ensures that you use the same vocabulary regardless of how you are searching for entities.
 
+| Query Type | Stream (`.view`) | Array (`.getEntities`) | Single (`.findFirst`) | Meta (`.count`) | Raw (`.getArchetypes`) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Aspect** | `world.view(a)` | `world.getEntities(a)` | `world.findFirst(a)` | `world.count(a)` | `world.getArchetypes(a)` |
+| **Group** | `world.viewGroup(g)` | `world.getEntitiesByGroup(g)` | `world.findFirstInGroup(g)` | `world.countGroup(g)` | N/A |
+| **Tag** | `world.viewTag(t)` | `world.getEntitiesByTag(t)` | `world.findFirstWithTag(t)` | `world.countTag(t)` | N/A |
+
+#### Method Usage Guide
+| Method | Return Type | Best Use Case |
+| :--- | :--- | :--- |
+| **`view`** | `IterableIterator<EntityId>` | **High-performance streaming**. Best for standard system updates. |
+| **`getEntities`** | `EntityId[]` | **Snapshots**. Best if you need to sort the results or store them for later. |
+| **`findFirst`** | `EntityId \| undefined` | **Singular targets**. Find the player, the camera, or a specific boss. |
+| **`count`** | `number` | **Meta-queries**. Check if any enemies remain without allocating an array. |
+| **`getArchetypes`**| `Archetype[]` | **High-performance SoA**. Get matching archetypes for raw column access. |
+
+#### Example: Basic Iteration
 ```typescript
 for (const entity of world.view(aliveFighters)) {
   const pos = world.getComponent<Position>(entity, Components.POSITION);
@@ -401,19 +417,25 @@ for (const entity of world.view(aliveFighters)) {
 }
 ```
 
-### High-Performance Queries: `viewColumns`
-If you are iterating over many entities and need to access multiple components, `world.view(aspect)` can have overhead because it involves looking up component data for each entity individually.
+### High-Performance Iteration: `viewColumns`
+If you are iterating over many entities (1000+) and need to access multiple components, `world.view(aspect)` can have overhead because it involves looking up component data for each entity individually.
 
-For performance-critical loops (like physics or rendering), use `viewColumns`. It yields the raw data arrays (columns) from each matching Archetype, allowing you to iterate over them directly. This is much faster because it leverages **SoA (Struct-of-Arrays)** cache locality.
+For performance-critical loops (like physics or rendering), use **`viewColumns`** or **`viewColumnsStrict`**. These methods yield the raw data arrays (columns) from each matching Archetype, allowing you to iterate over them directly. This leverages **SoA (Struct-of-Arrays)** cache locality.
 
+| Method | Behavior |
+| :--- | :--- |
+| `viewColumns` | Yields columns that exist. If an archetype is missing a requested column (possible with `Aspect.one`), that column will be `undefined`. |
+| `viewColumnsStrict` | Throws an error if a requested column is missing. Use this when your `Aspect` (like `Aspect.all`) guarantees the columns must exist. |
+
+#### Example: Using `viewColumnsStrict`
 ```typescript
 const aspect = Aspect.all(Components.POSITION, Components.VELOCITY);
 
-// Iterating via columns (Fastest)
-// Use destructuring to get entities and the requested columns in order
-for (const { entities, columns: [posCol, velCol] } of world.viewColumns(aspect, Components.POSITION, Components.VELOCITY)) {
+// Iterating via columns (Blazing Fast)
+for (const { entities, columns: [posCol, velCol] } of world.viewColumnsStrict(aspect, Components.POSITION, Components.VELOCITY)) {
   const count = entities.length;
   for (let i = 0; i < count; i++) {
+    // Direct array access bypasses World/Mapper overhead
     const pos = posCol[i] as Position;
     const vel = velCol[i] as Velocity;
 
@@ -422,9 +444,6 @@ for (const { entities, columns: [posCol, velCol] } of world.viewColumns(aspect, 
   }
 }
 ```
-
-- **`viewColumns(aspect, ...ids)`**: Returns an iterator. It skips any Archetype that happens to be missing a requested column (though this shouldn't happen if using `Aspect.all`).
-- **`viewColumnsStrict(aspect, ...ids)`**: Similar to `viewColumns` but throws an error if a requested column is missing. Use this when your `Aspect.all()` requirements guarantee the columns exist.
 
 ### Single Entity Matching
 Sometimes you have a specific `EntityId` and want to check if it matches an `Aspect`:
@@ -459,7 +478,7 @@ The `World` query methods use an internal `QueryManager` which provides several 
 
 ---
 
-## 4. Tags and Groups
+## 5. Tags and Groups
 
 Managing specific entities or collections of entities is handled by the `TagManager` and `GroupManager`. These are lightweight systems that sit outside the main component-based Archetype system, providing fast lookups and organization.
 
@@ -472,10 +491,11 @@ Tags are unique strings assigned to a single entity. They are perfect for "Singl
 world.tags.register('PLAYER', playerEntity);
 
 // 2. Retrieve an entity by tag
-const player = world.tags.getEntity('PLAYER'); // EntityId | undefined
+const player = world.findFirstWithTag('PLAYER'); // Symmetric API
+// Or: const player = world.tags.getEntity('PLAYER'); // Manager API
 
 // 3. Check if a tag exists
-if (world.tags.has('BOSS_REGEN_NODE')) {
+if (world.countTag('BOSS_REGEN_NODE') > 0) {
   // Entity exists
 }
 
@@ -501,11 +521,10 @@ if (world.groups.has('ENEMIES', someEntity)) {
 }
 
 // 3. Get group size
-const enemyCount = world.groups.count('ENEMIES');
+const enemyCount = world.countGroup('ENEMIES'); // Symmetric API
 
 // 4. Iterate over a group
-// getEntities returns an array. Passing 'world' filters out deleted entities automatically.
-for (const entity of world.groups.getEntities('ENEMIES', world)) {
+for (const entity of world.viewGroup('ENEMIES')) { // Symmetric API
   // Logic for all enemies
 }
 
@@ -515,7 +534,7 @@ world.groups.removeFromGroup('ENEMIES', orcEntity);
 
 ---
 
-## 5. Relationships
+## 6. Relationships
 
 Relationships allow entities to reference other entities (e.g., "A is owned by B", "C is targeting D"). They are built on top of the Component system but provide a specialized API for managing entity-to-entity links.
 
@@ -602,7 +621,7 @@ This prevents "Ghost ID" bugs where a system tries to process a target entity th
 
 ---
 
-## 6. Tags vs. Groups vs. Relationships
+### Comparison: Tags vs. Groups vs. Relationships
 
 While they might seem similar at first glance, each serves a specific purpose. Choosing the right one is key to performance and code clarity.
 
@@ -1563,7 +1582,9 @@ While the engine will "auto-flush" changes if you forget, calling `.commit()` ma
 3. **Clarity**: It explicitly marks the end of the builder chain.
 
 ### Component Mappers
-For ultra-high-performance access to components, especially in tight loops or frequently updated logic, use `Mapper`. Mappers provide a direct way to access component data for a specific type, bypassing some of the internal lookup overhead of `world.getComponent`.
+For ultra-high-performance access to components, especially in tight loops or frequently updated logic, use `Mapper`. Mappers provide a direct way to access component data for a specific type, bypassing the internal lookup overhead of `world.getComponent`.
+
+All `Mapper` operations now include **enhanced validation**, automatically checking if an entity is still active and valid before performing any action.
 
 ```typescript
 // 1. Get a mapper (cached by the world)
@@ -1575,7 +1596,11 @@ if (posMapper.has(entity)) {
   posMapper.set(entity, { x: pos.x + 1, y: pos.y });
 }
 
-// 3. Support for update/mutate
+// 3. require(): Throws if missing
+// Use this inside systems where the Aspect guarantees presence.
+const pos = posMapper.require(entity);
+
+// 4. Support for update/mutate
 posMapper.mutate(entity, p => p.x += 1);
 ```
 
@@ -1776,6 +1801,25 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | `world.setComponent<T>(e, id, v)` | Overwrites component data. |
 | `world.updateComponent<T>(e, i, cb)`| Updates via callback (reassigns). |
 | `world.mutateComponent<T>(e, i, cb)`| Updates via callback (in-place). |
+| **--- Aspect Queries ---** | |
+| `world.view(aspect)` | **Streaming iterator** (Fastest for standard loops). |
+| `world.getEntities(aspect)` | Returns an **array** of matching entities. |
+| `world.findFirst(aspect)` | Returns the **first** matching entity found. |
+| `world.count(aspect)` | Returns the **total number** of matching entities. |
+| `world.getArchetypes(aspect)` | Returns matching archetypes (raw access). |
+| `world.viewColumns(asp, ...ids)`| Yields SoA columns (Fastest iteration). |
+| `world.viewColumnsStrict(asp, ...)`| Yields SoA columns (Throws if column missing). |
+| **--- Group Queries ---** | |
+| `world.viewGroup(group)` | Streaming iterator for a group. |
+| `world.getEntitiesByGroup(group)` | Array of entities in a group. |
+| `world.findFirstInGroup(group)` | First entity in a group. |
+| `world.countGroup(group)` | Total entities in a group. |
+| **--- Tag Queries ---** | |
+| `world.viewTag(tag)` | Streaming iterator for a tag. |
+| `world.getEntitiesByTag(tag)` | Array of entities with a tag. |
+| `world.findFirstWithTag(tag)` | First entity with a tag. |
+| `world.countTag(tag)` | Total entities with a tag (0 or 1). |
+| **--- Singletons & State ---** | |
 | `world.getSingleton<T>(id)` | Retrieves a global singleton. |
 | `world.getOrCreateSingleton<T>(id, default)`| Retrieves or creates a singleton. |
 | `world.setSingleton<T>(id, v)` | Sets a global singleton. |
@@ -1787,7 +1831,8 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | Method | Description |
 | :--- | :--- |
 | `world.getMapper<T>(id)` | Returns a high-performance Component Mapper. |
-| `mapper.get(entity)` | Fast retrieve. |
+| `mapper.get(entity)` | Fast retrieve (returns undefined if missing). |
+| `mapper.require(entity)` | Fast retrieve (**throws** if missing). |
 | `mapper.set(entity, value)` | Fast non-structural write. |
 | `mapper.has(entity)` | Fast check. |
 | `mapper.update(entity, cb)` | Fast callback update (reassign). |
