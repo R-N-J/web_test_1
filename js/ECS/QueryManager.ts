@@ -1,5 +1,5 @@
 import { Aspect } from "./Aspect";
-import { Archetype } from "./Archetype";
+import { Archetype, EntityId } from "./Archetype";
 
 export class QueryManager {
   // Cache: Aspect.all + Aspect.one + Aspect.exclude -> List of matching Archetypes
@@ -20,6 +20,81 @@ export class QueryManager {
    */
   public invalidateCache(): void {
     this.isCacheDirty = true;
+  }
+
+  /**
+   * Internal helper: Ensures the cache is valid and returns matching archetypes.
+   */
+  private getMatchingArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
+    if (this.isCacheDirty) {
+      this.queryCache.clear();
+      this.isCacheDirty = false;
+    }
+
+    const key = this.getAspectKey(aspect);
+    let matches = this.queryCache.get(key);
+
+    if (!matches) {
+      matches = [];
+      for (const arch of allArchetypes) {
+        if (aspect.matches(arch.mask)) matches.push(arch);
+      }
+      this.activeAspects.set(key, aspect);
+      this.queryCache.set(key, matches);
+    }
+
+    return matches;
+  }
+
+  /**
+   * Unified API: Returns a stream of all matching Entity IDs.
+   * Best for high-performance iteration.
+   */
+  public *view(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): IterableIterator<EntityId> {
+    const matches = this.getMatchingArchetypes(aspect, allArchetypes);
+    for (const arch of matches) {
+      const entities = arch.entities;
+      for (let i = 0; i < entities.length; i++) {
+        yield entities[i];
+      }
+    }
+  }
+
+  /**
+   * Unified API: Returns an array of all matching Entity IDs.
+   * Best when you need to sort or store the results.
+   */
+  public getEntities(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): EntityId[] {
+    const results: EntityId[] = [];
+    const matches = this.getMatchingArchetypes(aspect, allArchetypes);
+    for (const arch of matches) {
+      results.push(...arch.entities);
+    }
+    return results;
+  }
+
+  /**
+   * Unified API: Returns the first matching entity found.
+   * Pro Tip: Use this for finding the 'Player' or 'Camera' if they aren't singletons.
+   */
+  public findFirst(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): EntityId | undefined {
+    const matches = this.getMatchingArchetypes(aspect, allArchetypes);
+    for (const arch of matches) {
+      if (arch.entities.length > 0) return arch.entities[0];
+    }
+    return undefined;
+  }
+
+  /**
+   * Unified API: Efficiently counts matching entities without building an array.
+   */
+  public count(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): number {
+    let total = 0;
+    const matches = this.getMatchingArchetypes(aspect, allArchetypes);
+    for (const arch of matches) {
+      total += arch.entities.length;
+    }
+    return total;
   }
 
   public getArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {

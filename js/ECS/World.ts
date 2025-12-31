@@ -110,8 +110,8 @@ export class World {
    * Retrieves a global singleton. If it doesn't exist, it creates it
    * using the provided default value.
    *
-   * Pro Pattern: Use this in System.onEnable() to ensure global
-   * resources are initialized.
+   * Pro Pattern: Use this in System.onEnable() or constructors to ensure
+   * global resources are initialized without external dependencies.
    */
   public getOrCreateSingleton<T>(id: ComponentId, defaultValue: T): T {
     const existing = this.getSingleton<T>(id);
@@ -239,23 +239,37 @@ export class World {
   }
 
   /**
-   * A streaming view of all entities matching an aspect.
-   * Use this for memory-efficient iteration.
+   * Primary streaming iterator for systems.
    */
   public* view(aspect: Aspect): IterableIterator<EntityId> {
-    const archetypes = this.getArchetypes(aspect);
-    for (const arch of archetypes) {
-      const count = arch.entities.length;
-      for (let i = 0; i < count; i++) {
-        yield arch.entities[i];
-      }
-    }
+    yield* this.queries.view(aspect, this.components.getArchetypes());
   }
 
   public* viewGroup(group: string): IterableIterator<EntityId> {
     // Pass 'this' so the manager can filter out recycled IDs automatically
     const entities = this.groups.getEntities(group, this);
     for (const e of entities) yield e;
+  }
+
+  /**
+   * Returns a snapshot array of all matching entities.
+   */
+  public getEntities(aspect: Aspect): EntityId[] {
+    return this.queries.getEntities(aspect, this.components.getArchetypes());
+  }
+
+  /**
+   * Returns the first entity that matches the aspect.
+   */
+  public findFirst(aspect: Aspect): EntityId | undefined {
+    return this.queries.findFirst(aspect, this.components.getArchetypes());
+  }
+
+  /**
+   * Returns the total count of entities matching the aspect.
+   */
+  public count(aspect: Aspect): number {
+    return this.queries.count(aspect, this.components.getArchetypes());
   }
 
   /**
