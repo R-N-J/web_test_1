@@ -11,7 +11,7 @@ const SUBSCRIBE_METADATA_KEY = "__ecs_subscriptions__";
 const ORDER_METADATA_KEY = "__ecs_order__";
 const PRIORITY_METADATA_KEY = "__ecs_priority__";
 const INJECT_METADATA_KEY = "__ecs_inject__";
-
+const SINGLETON_METADATA_KEY = "__ecs_singleton__";
 
 
 
@@ -318,3 +318,21 @@ export function getSystemInterval(constructor: object): number | undefined {
   return (constructor as unknown as Record<string, unknown>)[INTERVAL_METADATA_KEY] as number | undefined;
 }
 
+/**
+ * Marks a Component ID as a singleton.
+ * Framework will automatically look for this ID on the World's singleton entity.
+ */
+export function Singleton(id: number) {
+  return function(target: object, propertyKey: string): void {
+    const constructor = target.constructor as unknown as Record<string, InjectMetadata[]>;
+    if (!constructor[INJECT_METADATA_KEY]) {
+      constructor[INJECT_METADATA_KEY] = [];
+    }
+
+    constructor[INJECT_METADATA_KEY].push({
+      propertyKey,
+      type: 'MANAGER', // We reuse the manager flow for simple value injection
+      id
+    });
+  };
+}

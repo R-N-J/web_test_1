@@ -11,9 +11,7 @@ export class TurnManager {
 
   constructor(private world: World, private scheduler: Scheduler) {
     // Initialize the singleton if it doesn't exist
-    if (!this.world.hasSingleton(InternalComponents.CLOCK)) {
-      this.world.setSingleton<Clock>(InternalComponents.CLOCK, { turn: 0 });
-    }
+    this.world.getOrCreateSingleton<Clock>(InternalComponents.CLOCK, { turn: 0 });
   }
 
   public get isPlayerTurn(): boolean {

@@ -33,7 +33,7 @@ export class Scheduler {
   }
 
   /**
-   * Performs automated dependency injection based on @Inject decorators.
+   * Performs automated dependency injection based on @Inject and @Singleton decorators.
    */
   private injectDependencies(system: BaseSystem): void {
     const injections = getInjectMetadata(system);
@@ -45,12 +45,28 @@ export class Scheduler {
       } else if (inject.type === 'EVENT_BUS') {
         systemAsRecord[inject.propertyKey] = this.world.events;
       } else if (inject.type === 'MANAGER') {
-        // Automatically link common managers found on the world
+        // NEW: Check if this was marked as a Singleton by the decorator
+        if (inject.id !== undefined) {
+          const value = this.world.getSingleton(inject.id);
+
+          if (value === undefined) {
+            // Hard stop if a required singleton is missing during bootstrap
+            const msg = `[ECS Framework] Wiring Failed: System '${system.constructor.name}' required Singleton ID ${inject.id}, but it was not found in the World. Initialized it in your Scene or App bootstrap.`;
+            console.error(msg);
+            throw new Error(msg);
+          }
+
+          systemAsRecord[inject.propertyKey] = value;
+          continue;
+        }
+
+
+        // --- MANAGER INJECTION ---
         const worldAsRecord = this.world as unknown as Record<string, unknown>;
         if (worldAsRecord[inject.propertyKey]) {
           systemAsRecord[inject.propertyKey] = worldAsRecord[inject.propertyKey];
         } else {
-          const msg = `[ECS] Injection Failed: System '${system.constructor.name}' requested manager '${inject.propertyKey}', but it wasn't found on the World object.`;
+          const msg = `[ECS Framework] Injection Failed: System '${system.constructor.name}' requested manager '${inject.propertyKey}', but it wasn't found on the World object.`;
           console.error(msg);
           throw new Error(msg);
         }

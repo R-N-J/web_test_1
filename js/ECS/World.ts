@@ -105,6 +105,25 @@ export class World {
     return this.getComponent<T>(this.singletonEntity, id);
   }
 
+
+  /**
+   * Retrieves a global singleton. If it doesn't exist, it creates it
+   * using the provided default value.
+   *
+   * Pro Pattern: Use this in System.onEnable() to ensure global
+   * resources are initialized.
+   */
+  public getOrCreateSingleton<T>(id: ComponentId, defaultValue: T): T {
+    const existing = this.getSingleton<T>(id);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    this.setSingleton<T>(id, defaultValue);
+    return defaultValue;
+  }
+
+
   /**
    * Checks if a global singleton component exists.
    */
@@ -470,6 +489,16 @@ export class World {
 
     // 3. Recycle the ID
     this.entities.recycleEntity(entity);
+  }
+
+  /**
+   * Fluent API: Creates a new entity and returns an editor to build it.
+   * Logic: In our framework, editors are auto-committed during flush()
+   * so the user can just chain .add() calls and be done.
+   */
+  public create(): EntityEditor {
+    const entity = this.createEntity();
+    return this.edit(entity);
   }
 
   /**
