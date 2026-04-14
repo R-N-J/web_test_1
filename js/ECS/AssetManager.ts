@@ -41,20 +41,22 @@ export class AssetManager {
    */
   public async loadAudio(key: string, url: string): Promise<HTMLAudioElement> {
     this.pending.add(key);
-    return new Promise((resolve, reject) => {
-      const audio = new Audio();
-      audio.src = url;
-      audio.oncanplaythrough = () => {
-        this.cache.set(key, audio);
-        this.pending.delete(key);
-        resolve(audio);
-      };
-      audio.onerror = (e) => {
-        console.error(`[AssetManager] Failed to load Audio: ${url}`, e);
-        this.errorCount++;
-        this.pending.delete(key);
-        reject(e);
-      };
+    return Promise.try(() => {
+      return new Promise<HTMLAudioElement>((resolve, reject) => {
+        const audio = new Audio();
+        audio.src = url;
+        audio.oncanplaythrough = () => {
+          this.cache.set(key, audio);
+          this.pending.delete(key);
+          resolve(audio);
+        };
+        audio.onerror = (e) => {
+          console.error(`[AssetManager] Failed to load Audio: ${url}`, e);
+          this.errorCount++;
+          this.pending.delete(key);
+          reject(e);
+        };
+      });
     });
   }
 

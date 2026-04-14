@@ -44,24 +44,18 @@ export class Scheduler {
         systemAsRecord[inject.propertyKey] = this.world.getMapper(inject.id);
       } else if (inject.type === 'EVENT_BUS') {
         systemAsRecord[inject.propertyKey] = this.world.events;
-      } else if (inject.type === 'MANAGER') {
-        // NEW: Check if this was marked as a Singleton by the decorator
-        if (inject.id !== undefined) {
-          const value = this.world.getSingleton(inject.id);
+      } else if (inject.type === 'SINGLETON' && inject.id !== undefined) {
+        const value = this.world.getSingleton(inject.id);
 
-          if (value === undefined) {
-            // Hard stop if a required singleton is missing during bootstrap
-            const msg = `[ECS Framework] Wiring Failed: System '${system.constructor.name}' required Singleton ID ${inject.id}, but it was not found in the World. Initialized it in your Scene or App bootstrap.`;
-            console.error(msg);
-            throw new Error(msg);
-          }
-
-          systemAsRecord[inject.propertyKey] = value;
-          continue;
+        if (value === undefined) {
+          // Hard stop if a required singleton is missing during bootstrap
+          const msg = `[ECS Framework] Wiring Failed: System '${system.constructor.name}' required Singleton ID ${inject.id}, but it was not found in the World. Initialized it in your Scene or App bootstrap.`;
+          console.error(msg);
+          throw new Error(msg);
         }
 
-
-        // --- MANAGER INJECTION ---
+        systemAsRecord[inject.propertyKey] = value;
+      } else if (inject.type === 'MANAGER') {
         const worldAsRecord = this.world as unknown as Record<string, unknown>;
         if (worldAsRecord[inject.propertyKey]) {
           systemAsRecord[inject.propertyKey] = worldAsRecord[inject.propertyKey];

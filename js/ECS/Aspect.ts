@@ -3,9 +3,9 @@
  */
 export class Aspect {
   constructor(
-    public readonly all: bigint = 0n,
-    public readonly one: bigint = 0n,
-    public readonly exclude: bigint = 0n
+    public readonly allMask: bigint = 0n,
+    public readonly oneMask: bigint = 0n,
+    public readonly excludeMask: bigint = 0n
   ) {}
 
   /**
@@ -39,17 +39,38 @@ export class Aspect {
   }
 
   /**
+   * Fluent: Adds ALL requirement to this aspect.
+   */
+  public all(...ids: number[]): Aspect {
+    return new Aspect(this.allMask | Aspect.buildMask(ids), this.oneMask, this.excludeMask);
+  }
+
+  /**
+   * Fluent: Adds AT LEAST ONE requirement to this aspect.
+   */
+  public one(...ids: number[]): Aspect {
+    return new Aspect(this.allMask, this.oneMask | Aspect.buildMask(ids), this.excludeMask);
+  }
+
+  /**
+   * Fluent: Adds EXCLUDE requirement to this aspect.
+   */
+  public exclude(...ids: number[]): Aspect {
+    return new Aspect(this.allMask, this.oneMask, this.excludeMask | Aspect.buildMask(ids));
+  }
+
+  /**
    * Checks if an archetype's mask satisfies this aspect.
    */
   public matches(mask: bigint): boolean {
     // 1. Must have ALL of these
-    if ((mask & this.all) !== this.all) return false;
+    if ((mask & this.allMask) !== this.allMask) return false;
 
     // 2. Must NOT have any of these
-    if ((mask & this.exclude) !== 0n) return false;
+    if ((mask & this.excludeMask) !== 0n) return false;
 
     // 3. Must have AT LEAST ONE of these (if specified)
-    if (this.one !== 0n && (mask & this.one) === 0n) return false;
+    if (this.oneMask !== 0n && (mask & this.oneMask) === 0n) return false;
 
     return true;
   }
@@ -61,9 +82,9 @@ export class Aspect {
    */
   public and(other: Aspect): Aspect {
     return new Aspect(
-      this.all | other.all,
-      this.one | other.one,
-      this.exclude | other.exclude
+      this.allMask | other.allMask,
+      this.oneMask | other.oneMask,
+      this.excludeMask | other.excludeMask
     );
   }
 
@@ -71,9 +92,7 @@ export class Aspect {
    * Returns a new Aspect that adds additional exclusion requirements.
    */
   public butNot(...ids: number[]): Aspect {
-    let newExclude = this.exclude;
-    for (const id of ids) newExclude |= (1n << BigInt(id));
-    return new Aspect(this.all, this.one, newExclude);
+    return new Aspect(this.allMask, this.oneMask, this.excludeMask | Aspect.buildMask(ids));
   }
 
   /**

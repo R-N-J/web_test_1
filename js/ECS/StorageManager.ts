@@ -41,7 +41,7 @@ export class StorageManager {
 
       const meta: SaveMetadata = {
         name: saveName,
-        timestamp: Date.now(),
+        timestamp: Temporal.Now.instant().epochMilliseconds,
         engineVersion: snapshot.version
       };
       localStorage.setItem(this.PREFIX + saveName + "_meta", JSON.stringify(meta));

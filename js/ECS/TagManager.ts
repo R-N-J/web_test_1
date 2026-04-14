@@ -70,6 +70,13 @@ export class TagManager {
   }
 
   /**
+   * Alias for getEntity() to support world.tags.get(tag) access.
+   */
+  public get(tag: string): EntityId | undefined {
+    return this.getEntity(tag);
+  }
+
+  /**
    * Returns true if the specific tag is currently assigned.
    */
   public has(tag: string): boolean {

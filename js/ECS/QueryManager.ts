@@ -11,7 +11,7 @@ export class QueryManager {
    * Generates a unique stable key for an Aspect.
    */
   private getAspectKey(aspect: Aspect): string {
-    return `${aspect.all}:${aspect.one}:${aspect.exclude}`;
+    return `${aspect.allMask}:${aspect.oneMask}:${aspect.excludeMask}`;
   }
 
   /**

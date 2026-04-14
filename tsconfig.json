@@ -1,8 +1,11 @@
 {
   "compilerOptions": {
-    "module": "esnext", // Keep this
-    "moduleResolution": "bundler", // <--- CHANGE THIS (was "NodeNext")
-    "target": "ESNext", // Or es5 "es2015", depending on browser support needed ES2022
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "noUncheckedSideEffectImports": true,
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
@@ -10,9 +13,7 @@
     "outDir": "./dist",
     "rootDir": ".",
     "sourceMap": true,
-    "allowJs": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "allowJs": true
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "dist", "webpack*.js"]

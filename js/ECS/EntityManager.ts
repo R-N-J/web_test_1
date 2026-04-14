@@ -70,7 +70,7 @@ export class EntityManager {
 
   public isValid(entity: EntityId): boolean {
     const index = this.unpackIndex(entity);
-    return this.versions[index] === this.unpackVersion(entity) && this.entityToLocation.has(entity);
+    return index >= 0 && index < this.nextEntityId && this.versions[index] === this.unpackVersion(entity);
   }
 
   public setLocation(entity: EntityId, arch: Archetype, row: number): void {

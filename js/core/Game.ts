@@ -185,7 +185,7 @@ export class Game {
 
 
   private saveGame(): void {
-    const now = Date.now();
+    const now = Temporal.Now.instant().epochMilliseconds;
     if (now - this.lastSaveTime < this.SAVE_DEBOUNCE_MS) {
       return;
     }

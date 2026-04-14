@@ -306,15 +306,6 @@ export class World {
 
 
   /**
-   * Returns the number of entities in a specific group.
-   // ... existing code ...
-   public *viewTag(tag: string): IterableIterator<EntityId> {
-   const entity = this.tags.getEntity(tag);
-   // Logic Improvement: verify the entity is still valid before yielding
-   if (entity !== undefined && this.entities.isValid(entity)) yield entity;
-   }
-
-   /**
    * Checks if an entity matches a specific Aspect.
    */
   public matches(entity: EntityId, aspect: Aspect): boolean {
@@ -451,6 +442,17 @@ export class World {
    */
   public getArchetypeCount(): number {
     return this.components.getArchetypeCount();
+  }
+
+  /**
+   * Returns the total number of active entities in the world.
+   */
+  public getEntityCount(): number {
+    let total = 0;
+    for (const arch of this.components.getArchetypes()) {
+      total += arch.entities.length;
+    }
+    return total;
   }
 
   /**

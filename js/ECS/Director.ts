@@ -12,13 +12,13 @@ import { TurnManager } from "./TurnManager";
  */
 export abstract class Director extends PassiveSystem {
   @Inject()
-  protected scenes!: SceneManager;
+  protected scenes: SceneManager = undefined as any;
 
   @Inject()
-  protected storage!: StorageManager;
+  protected storage: StorageManager = undefined as any;
 
   @Inject()
-  protected turns!: TurnManager;
+  protected turns: TurnManager = undefined as any;
 
   constructor(world: World) {
     super(world);

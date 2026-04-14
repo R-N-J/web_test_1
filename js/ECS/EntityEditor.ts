@@ -78,6 +78,13 @@ export class EntityEditor {
     return this;
   }
 
+  /**
+   * Alias for add() to support fluent building.
+   */
+  public with(id: ComponentId, value: unknown): this {
+    return this.add(id, value);
+  }
+
 
   /**
    * Removes all components from the entity.

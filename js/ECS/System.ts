@@ -247,7 +247,7 @@ export abstract class IteratingSystem extends BaseSystem {
   }
 
 
-  abstract processEntity(entity: number, dt: number): void;
+  protected abstract processEntity(entity: number, dt: number): void;
 }
 
 /**

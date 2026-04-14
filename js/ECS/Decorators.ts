@@ -1,6 +1,31 @@
 import { Aspect } from "./Aspect";
 
 /**
+ * Polyfill for Symbol.metadata if it's missing (needed for Stage 3 decorators and hybrid support).
+ */
+if (typeof Symbol !== "undefined" && !Symbol.metadata) {
+  (Symbol as any).metadata = Symbol("Symbol.metadata");
+}
+
+/**
+ * Internal helper to retrieve the metadata object in a way that supports both
+ * modern Stage 3 decorators and legacy Stage 2 decorators (used by toolchains like jiti/sucrase).
+ */
+function getMetadata(value: any, context: any): Record<string, any> {
+  // Stage 3
+  if (typeof context === "object" && context !== null && "metadata" in context) {
+    return (context.metadata || {}) as Record<string, any>;
+  }
+  // Stage 2
+  const constructor = typeof value === "function" ? value : value.constructor;
+  const metaKey = Symbol.metadata;
+  if (!constructor[metaKey]) {
+    constructor[metaKey] = {};
+  }
+  return constructor[metaKey];
+}
+
+/**
  * Metadata keys to store data on the class constructor.
  */
 const ASPECT_METADATA_KEY = "__ecs_aspect__";
@@ -12,6 +37,7 @@ const ORDER_METADATA_KEY = "__ecs_order__";
 const PRIORITY_METADATA_KEY = "__ecs_priority__";
 const INJECT_METADATA_KEY = "__ecs_inject__";
 const SINGLETON_METADATA_KEY = "__ecs_singleton__";
+const SINGLETON_CLASS_METADATA_KEY = "__ecs_singleton_class__";
 
 
 
@@ -22,32 +48,36 @@ export interface OrderMetadata {
 }
 export interface InjectMetadata { // Renamed from WireMetadata
   propertyKey: string;
-  type: 'MAPPER' | 'MANAGER' | 'EVENT_BUS';
-  id?: number; // ComponentId for Mappers
+  type: 'MAPPER' | 'MANAGER' | 'EVENT_BUS' | 'SINGLETON';
+  id?: number; // ComponentId for Mappers or Singletons
 }
 /**
  * Automatically injects a dependency into this property.
  * @param id Optional ComponentId if injecting a Mapper.
  */
 export function Inject(id?: number) { // Renamed from Wire
-  return function(target: object, propertyKey: string): void {
-    const constructor = target.constructor as unknown as Record<string, InjectMetadata[]>;
-    if (!constructor[INJECT_METADATA_KEY]) {
-      constructor[INJECT_METADATA_KEY] = [];
+  return function(_value: any, context: any): void {
+    const metadata = getMetadata(_value, context) as Record<string, InjectMetadata[]>;
+
+    if (!Object.prototype.hasOwnProperty.call(metadata, INJECT_METADATA_KEY)) {
+      const parentMeta = metadata[INJECT_METADATA_KEY];
+      metadata[INJECT_METADATA_KEY] = parentMeta ? [...parentMeta] : [];
     }
 
     // Determine what we are injecting based on the property name or ID presence
+    const propertyKey = typeof context === "object" ? String(context.name) : String(context);
     let type: InjectMetadata['type'] = 'MANAGER';
     if (id !== undefined) type = 'MAPPER';
     if (propertyKey === 'events') type = 'EVENT_BUS';
 
-    constructor[INJECT_METADATA_KEY].push({ propertyKey, type, id });
+    metadata[INJECT_METADATA_KEY].push({ propertyKey, type, id });
   };
 }
 
 export function getInjectMetadata(instance: object): InjectMetadata[] { // Renamed from getWireMetadata
-  const constructor = instance.constructor as unknown as Record<string, InjectMetadata[]>;
-  return constructor[INJECT_METADATA_KEY] || [];
+  const constructor = instance.constructor as { [Symbol.metadata]?: Record<string, InjectMetadata[]> | null };
+  const metadata = constructor[Symbol.metadata];
+  return metadata?.[INJECT_METADATA_KEY] || [];
 }
 
 
@@ -56,8 +86,8 @@ export function getInjectMetadata(instance: object): InjectMetadata[] { // Renam
  * Replaced 'any' with 'unknown' and a specific object return type.
  */
 export function After(...systemNames: string[]) {
-  return function(constructor: { new (...args: unknown[]): object }): void {
-    const meta = getOrderMetadata(constructor);
+  return function(_value: any, context: any): void {
+    const meta = getOrderMetadata(getMetadata(_value, context));
     meta.after.push(...systemNames);
   };
 }
@@ -66,33 +96,33 @@ export function After(...systemNames: string[]) {
  * Ensures this system runs BEFORE the specified system names.
  */
 export function Before(...systemNames: string[]) {
-  return function(constructor: { new (...args: unknown[]): object }): void {
-    const meta = getOrderMetadata(constructor);
+  return function(_value: any, context: any): void {
+    const meta = getOrderMetadata(getMetadata(_value, context));
     meta.before.push(...systemNames);
   };
 }
 
 /**
- * Internal: Retrieves or creates the order metadata on a constructor.
- // ... existing code ...
-
-/**
- * Internal: Retrieves or creates the order metadata on a constructor.
+ * Internal: Retrieves or creates the order metadata.
  */
-function getOrderMetadata(constructor: object): OrderMetadata {
-  const c = constructor as unknown as Record<string, OrderMetadata>;
-  if (!c[ORDER_METADATA_KEY]) {
-    c[ORDER_METADATA_KEY] = { after: [], before: [] };
+function getOrderMetadata(metadata: DecoratorMetadata): OrderMetadata {
+  const m = metadata as Record<string, OrderMetadata>;
+  if (!Object.prototype.hasOwnProperty.call(m, ORDER_METADATA_KEY)) {
+    const parentMeta = m[ORDER_METADATA_KEY];
+    m[ORDER_METADATA_KEY] = parentMeta
+      ? { after: [...parentMeta.after], before: [...parentMeta.before] }
+      : { after: [], before: [] };
   }
-  return c[ORDER_METADATA_KEY];
+  return m[ORDER_METADATA_KEY];
 }
 
 /**
  * Retrieves the defined order for a system instance.
  */
 export function getSystemOrder(instance: object): OrderMetadata {
-  const constructor = instance.constructor as unknown as Record<string, OrderMetadata>;
-  return constructor[ORDER_METADATA_KEY] || { after: [], before: [] };
+  const constructor = instance.constructor as { [Symbol.metadata]?: Record<string, OrderMetadata> | null };
+  const metadata = constructor[Symbol.metadata];
+  return metadata?.[ORDER_METADATA_KEY] || { after: [], before: [] };
 }
 
 
@@ -101,15 +131,16 @@ export function getSystemOrder(instance: object): OrderMetadata {
  * Default is 1000.
  */
 export function Priority(value: number) {
-  return function(constructor: { new (...args: unknown[]): object }): void {
-    const c = constructor as unknown as Record<string, number>;
-    c[PRIORITY_METADATA_KEY] = value;
+  return function(_value: any, context: any): void {
+    const metadata = getMetadata(_value, context) as Record<string, number>;
+    metadata[PRIORITY_METADATA_KEY] = value;
   };
 }
 
 export function getSystemPriority(instance: object): number {
-  const constructor = instance.constructor as unknown as Record<string, number>;
-  return constructor[PRIORITY_METADATA_KEY] ?? 1000;
+  const constructor = instance.constructor as { [Symbol.metadata]?: Record<string, number> | null };
+  const metadata = constructor[Symbol.metadata];
+  return metadata?.[PRIORITY_METADATA_KEY] ?? 1000;
 }
 
 
@@ -123,23 +154,23 @@ export interface SubscriptionMetadata {
 /**
  * Interface for a constructor that has been decorated with @Subscribe.
  */
-interface DecoratedConstructor {
-  [SUBSCRIBE_METADATA_KEY]?: SubscriptionMetadata[];
-}
+// Removed unused DecoratedConstructor interface
 
 /**
  * Marks a method as an event listener.
  * Uses 'object' and index signatures to avoid 'any'.
  */
 export function Subscribe(eventType: string) {
-  return function(target: object, propertyKey: string): void {
-    const constructor = target.constructor as unknown as DecoratedConstructor;
+  return function(_value: any, context: any): void {
+    const metadata = getMetadata(_value, context) as Record<string, SubscriptionMetadata[]>;
 
-    if (!constructor[SUBSCRIBE_METADATA_KEY]) {
-      constructor[SUBSCRIBE_METADATA_KEY] = [];
+    if (!Object.prototype.hasOwnProperty.call(metadata, SUBSCRIBE_METADATA_KEY)) {
+      const parentMeta = metadata[SUBSCRIBE_METADATA_KEY];
+      metadata[SUBSCRIBE_METADATA_KEY] = parentMeta ? [...parentMeta] : [];
     }
 
-    constructor[SUBSCRIBE_METADATA_KEY].push({ eventType, methodName: propertyKey });
+    const methodName = typeof context === "object" ? String(context.name) : String(context);
+    metadata[SUBSCRIBE_METADATA_KEY].push({ eventType, methodName });
   };
 }
 
@@ -147,35 +178,42 @@ export function Subscribe(eventType: string) {
  * Internal: Retrieves all @Subscribe metadata for an instance.
  */
 export function getSubscriptions(instance: object): SubscriptionMetadata[] {
-  const constructor = instance.constructor as unknown as DecoratedConstructor;
-  return constructor[SUBSCRIBE_METADATA_KEY] || [];
+  const constructor = instance.constructor as { [Symbol.metadata]?: Record<string, SubscriptionMetadata[]> | null };
+  const metadata = constructor[Symbol.metadata];
+  return metadata?.[SUBSCRIBE_METADATA_KEY] || [];
 }
 
 /**
  * Internal interface to satisfy the compiler while building the bitmasks
  */
 interface AspectData {
-  all: bigint;
-  one: bigint;
-  exclude: bigint;
+  allMask: bigint;
+  oneMask: bigint;
+  excludeMask: bigint;
 }
 
-export type Constructor = { new (...args: unknown[]): unknown };
-
-function getOrCreateAspectData(target: Constructor | Record<string, unknown>): AspectData {
-  const t = target as unknown as Record<string, unknown>;
-  if (!t[ASPECT_METADATA_KEY]) {
-    t[ASPECT_METADATA_KEY] = { all: 0n, one: 0n, exclude: 0n };
+function getOrCreateAspectData(metadata: DecoratorMetadata): AspectData {
+  const m = metadata as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(m, ASPECT_METADATA_KEY)) {
+    const parentData = m[ASPECT_METADATA_KEY] as AspectData | undefined;
+    m[ASPECT_METADATA_KEY] = parentData
+      ? { ...parentData }
+      : { allMask: 0n, oneMask: 0n, excludeMask: 0n };
   }
-  return t[ASPECT_METADATA_KEY] as AspectData;
+  return m[ASPECT_METADATA_KEY] as AspectData;
 }
-
 /**
- * Builds a mask from an array of IDs.
+ * Builds a bitmask from an array of component IDs.
+ * Validates that IDs are non-negative integers.
  */
-function buildMask(ids: number[]): bigint {
+function buildMask(ids: (number | bigint)[]): bigint {
   let mask = 0n;
-  for (const id of ids) mask |= (1n << BigInt(id));
+  for (const id of ids) {
+    if (typeof id === 'number' && (!Number.isInteger(id) || id < 0)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. IDs must be non-negative integers.`);
+    }
+    mask |= (1n << BigInt(id));
+  }
   return mask;
 }
 
@@ -183,9 +221,9 @@ function buildMask(ids: number[]): bigint {
  * The entity must possess ALL of these components.
  */
 export function All(...componentIds: number[]) {
-  return function(constructor: Constructor): void {
-    const data = getOrCreateAspectData(constructor);
-    data.all |= buildMask(componentIds);
+  return function(_value: any, context: any): void {
+    const data = getOrCreateAspectData(getMetadata(_value, context));
+    data.allMask |= buildMask(componentIds);
   };
 }
 
@@ -196,29 +234,23 @@ export function And(...componentIds: number[]) {
   return All(...componentIds);
 }
 
-
-
-
 /**
  * The entity must possess AT LEAST ONE of these components.
  */
 export function One(...componentIds: number[]) {
-  return function(constructor: Constructor): void {
-    const data = getOrCreateAspectData(constructor);
-    data.one |= buildMask(componentIds);
+  return function(_value: any, context: any): void {
+    const data = getOrCreateAspectData(getMetadata(_value, context));
+    data.oneMask |= buildMask(componentIds);
   };
 }
 
 /**
- * The entity must possess AT LEAST ONE of these components.
- // ... existing code ...
- /**
  * The entity may NOT possess any of these components.
  */
 export function Exclude(...componentIds: number[]) {
-  return function(constructor: Constructor): void {
-    const data = getOrCreateAspectData(constructor);
-    data.exclude |= buildMask(componentIds);
+  return function(_value: any, context: any): void {
+    const data = getOrCreateAspectData(getMetadata(_value, context));
+    data.excludeMask |= buildMask(componentIds);
   };
 }
 
@@ -241,11 +273,11 @@ export function AnyOf(...componentIds: number[]) {
  * Useful for reusing shared queries across multiple systems.
  */
 export function Match(aspect: Aspect) {
-  return function(constructor: Constructor): void {
-    const data = getOrCreateAspectData(constructor);
-    data.all |= aspect.all;
-    data.one |= aspect.one;
-    data.exclude |= aspect.exclude;
+  return function(_value: any, context: any): void {
+    const data = getOrCreateAspectData(getMetadata(_value, context));
+    data.allMask |= aspect.allMask;
+    data.oneMask |= aspect.oneMask;
+    data.excludeMask |= aspect.excludeMask;
   };
 }
 
@@ -262,8 +294,8 @@ export function ButNot(...componentIds: number[]) {
  * Associates the system with a specific entity group.
  */
 export function Group(name: string) {
-  return function(constructor: Constructor): void {
-    (constructor as unknown as Record<string, unknown>)[GROUP_METADATA_KEY] = name;
+  return function(_value: any, context: any): void {
+    getMetadata(_value, context)[GROUP_METADATA_KEY] = name;
   };
 }
 
@@ -272,8 +304,8 @@ export function Group(name: string) {
  * Use this if a system should only ever process one specific entity.
  */
 export function Tag(name: string) {
-  return function(constructor: Constructor): void {
-    (constructor as unknown as Record<string, unknown>)[TAG_METADATA_KEY] = name;
+  return function(_value: any, context: any): void {
+    getMetadata(_value, context)[TAG_METADATA_KEY] = name;
   };
 }
 
@@ -282,8 +314,8 @@ export function Tag(name: string) {
  * In your game, this represents the number of turns.
  */
 export function Interval(period: number) {
-  return function(constructor: Constructor): void {
-    (constructor as unknown as Record<string, unknown>)[INTERVAL_METADATA_KEY] = period;
+  return function(_value: any, context: any): void {
+    getMetadata(_value, context)[INTERVAL_METADATA_KEY] = period;
   };
 }
 
@@ -292,47 +324,87 @@ export function Interval(period: number) {
 /**
  * Retrieves the Aspect defined by decorators for a given class.
  */
-export function getSystemAspect(constructor: object): Aspect {
-  const meta = (constructor as Record<string, unknown>)[ASPECT_METADATA_KEY] as AspectData | undefined;
-  return meta ? new Aspect(meta.all, meta.one, meta.exclude) : new Aspect();
+export function getSystemAspect(constructor: unknown): Aspect {
+  const metadata = (constructor as { [Symbol.metadata]?: Record<string, AspectData> | null })[Symbol.metadata];
+  const meta = metadata?.[ASPECT_METADATA_KEY];
+  return meta ? new Aspect(meta.allMask, meta.oneMask, meta.excludeMask) : new Aspect();
 }
 
 /**
  * Retrieves the Group name defined by decorators for a given class.
  */
-export function getSystemGroup(constructor: object): string | undefined {
-  return (constructor as unknown as Record<string, unknown>)[GROUP_METADATA_KEY] as string | undefined;
+export function getSystemGroup(constructor: unknown): string | undefined {
+  const metadata = (constructor as { [Symbol.metadata]?: Record<string, unknown> | null })[Symbol.metadata];
+  return metadata?.[GROUP_METADATA_KEY] as string | undefined;
 }
 
 /**
  * Retrieves the Tag name defined by decorators for a given class.
  */
-export function getSystemTag(constructor: object): string | undefined {
-  return (constructor as unknown as Record<string, unknown>)[TAG_METADATA_KEY] as string | undefined;
+export function getSystemTag(constructor: unknown): string | undefined {
+  const metadata = (constructor as { [Symbol.metadata]?: Record<string, unknown> | null })[Symbol.metadata];
+  return metadata?.[TAG_METADATA_KEY] as string | undefined;
 }
 
 /**
  * Retrieves the update interval defined by decorators for a given class.
  */
-export function getSystemInterval(constructor: object): number | undefined {
-  return (constructor as unknown as Record<string, unknown>)[INTERVAL_METADATA_KEY] as number | undefined;
+export function getSystemInterval(constructor: unknown): number | undefined {
+  const metadata = (constructor as { [Symbol.metadata]?: Record<string, unknown> | null })[Symbol.metadata];
+  return metadata?.[INTERVAL_METADATA_KEY] as number | undefined;
 }
 
 /**
- * Marks a Component ID as a singleton.
+ * Retrieves all singleton components requested by a system.
+ */
+export function getSystemSingletons(constructor: unknown): Record<string, number> {
+  const metadata = (constructor as { [Symbol.metadata]?: Record<string, Record<string, number>> | null })[Symbol.metadata];
+  return metadata?.[SINGLETON_METADATA_KEY] || {};
+}
+
+/**
+ * Checks if a class is marked as a Singleton Component and returns its ID.
+ */
+export function getSingletonComponentId(constructor: unknown): number | undefined {
+  const metadata = (constructor as { [Symbol.metadata]?: Record<string, number> | null })[Symbol.metadata];
+  return metadata?.[SINGLETON_CLASS_METADATA_KEY];
+}
+
+/**
+ * Marks a class as a Singleton Component.
+ * This can be used for automated registration or documentation.
+ */
+export function SingletonComponent(id: number) {
+  return function(_value: any, context: any): void {
+    const metadata = getMetadata(_value, context) as Record<string, number>;
+    metadata[SINGLETON_CLASS_METADATA_KEY] = id;
+  };
+}
+
+/**
+ * Marks a Component ID as a singleton field in a System.
  * Framework will automatically look for this ID on the World's singleton entity.
  */
 export function Singleton(id: number) {
-  return function(target: object, propertyKey: string): void {
-    const constructor = target.constructor as unknown as Record<string, InjectMetadata[]>;
-    if (!constructor[INJECT_METADATA_KEY]) {
-      constructor[INJECT_METADATA_KEY] = [];
+  return function(_value: any, context: any): void {
+    const metadata = getMetadata(_value, context) as Record<string, any>;
+
+    if (!Object.prototype.hasOwnProperty.call(metadata, INJECT_METADATA_KEY)) {
+      const parentMeta = metadata[INJECT_METADATA_KEY];
+      metadata[INJECT_METADATA_KEY] = parentMeta ? [...parentMeta] : [];
     }
 
-    constructor[INJECT_METADATA_KEY].push({
+    const propertyKey = typeof context === "object" ? String(context.name) : String(context);
+    metadata[INJECT_METADATA_KEY].push({
       propertyKey,
-      type: 'MANAGER', // We reuse the manager flow for simple value injection
+      type: 'SINGLETON',
       id
     });
+
+    // Also store in the specific singleton metadata for easier querying if needed
+    if (!Object.prototype.hasOwnProperty.call(metadata, SINGLETON_METADATA_KEY)) {
+      metadata[SINGLETON_METADATA_KEY] = {};
+    }
+    metadata[SINGLETON_METADATA_KEY][propertyKey] = id;
   };
 }

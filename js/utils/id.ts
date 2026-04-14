@@ -16,7 +16,7 @@ export function generateUUId(prefix: string): string {
   // Fallback: timestamp + increment + random
   // (Less robust than UUID, but fine as a backstop)
   createIdFallbackCounter += 1;
-  const time = Date.now().toString(36);
+  const time = Temporal.Now.instant().epochMilliseconds.toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
   return `${prefix}_${time}_${createIdFallbackCounter}_${rand}`;
 }
@@ -32,7 +32,7 @@ let counter = 0;
  */
 export function createId(prefix: string): string {
   counter += 1;
-  const time = Date.now().toString(36);
+  const time = Temporal.Now.instant().epochMilliseconds.toString(36);
   const rand = Math.random().toString(36).slice(2, 8);
   return `${prefix}_${time}_${counter}_${rand}`;
 }
