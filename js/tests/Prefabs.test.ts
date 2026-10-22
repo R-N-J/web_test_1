@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { World } from "../ECS/World";
 import { PrefabManager, PrefabDefinition } from "../ECS/PrefabManager";
 
@@ -32,15 +33,15 @@ export function testPrefabManager() {
   };
 
   prefabManager.register("Hero", heroPrefab);
-  console.assert(prefabManager.has("Hero"), "Prefab Manager should have 'Hero' prefab");
+  assert.strictEqual(prefabManager.has("Hero"), true, "Prefab Manager should have 'Hero' prefab");
 
   // 2. Test: Spawning
   const hero1 = prefabManager.spawn("Hero");
-  console.assert(world.isValid(hero1), "Spawned entity should be valid");
-  console.assert(world.hasComponent(hero1, PLAYER), "Spawned entity should have PLAYER component");
+  assert.strictEqual(world.isValid(hero1), true, "Spawned entity should be valid");
+  assert.strictEqual(world.hasComponent(hero1, PLAYER), true, "Spawned entity should have PLAYER component");
 
   const health = world.getComponent<{ current: number }>(hero1, HEALTH);
-  console.assert(health?.current === 100, "Spawned entity should have correct component value");
+  assert.strictEqual(health?.current, 100, "Spawned entity should have correct component value");
 
   // 3. Test: Spawning with Overrides
   const overrides = new Map<number, unknown>();
@@ -51,13 +52,13 @@ export function testPrefabManager() {
   const pos2 = world.getComponent<{ x: number }>(hero2, POSITION);
   const player2 = world.getComponent<{ name: string }>(hero2, PLAYER);
 
-  console.assert(pos2?.x === 50, "Spawned entity should have overridden position");
-  console.assert(player2?.name === "Special Hero", "Spawned entity should have overridden name");
-  console.assert(world.getComponent<{ current: number }>(hero2, HEALTH)?.current === 100, "Spawned entity should keep default health");
+  assert.strictEqual(pos2?.x, 50, "Spawned entity should have overridden position");
+  assert.strictEqual(player2?.name, "Special Hero", "Spawned entity should have overridden name");
+  assert.strictEqual(world.getComponent<{ current: number }>(hero2, HEALTH)?.current, 100, "Spawned entity should keep default health");
 
   // 4. Test: Spawning with Tag
   const hero3 = prefabManager.spawnWithTag("Hero", "main_player");
-  console.assert(world.tags.get("main_player") === hero3, "Spawned entity should be correctly tagged");
+  assert.strictEqual(world.tags.get("main_player"), hero3, "Spawned entity should be correctly tagged");
 
   // 5. Test: Prefab with Relationships
   // We need a target first
@@ -78,8 +79,8 @@ export function testPrefabManager() {
   const knight = prefabManager.spawn("Knight");
 
   const relations = world.relationships.getTargetsArray(knight, STATS);
-  console.assert(relations.length === 1, "Knight should have 1 relationship");
-  console.assert(relations[0] === weapon, "Knight should be related to the sword");
+  assert.strictEqual(relations.length, 1, "Knight should have 1 relationship");
+  assert.strictEqual(relations[0], weapon, "Knight should be related to the sword");
 
   console.log("PrefabManager tests completed!");
 }

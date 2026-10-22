@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { World } from "../ECS/World";
 import { Scheduler } from "../ECS/Scheduler";
 import { IteratingSystem, BaseSystem } from "../ECS/System";
@@ -64,22 +65,22 @@ export function testSystems() {
   const moveSystem = new MovementSystem(world);
   // @ts-ignore - accessing protected property for test
   const aspect = moveSystem.aspect;
-  console.assert(aspect instanceof Aspect, "System should have an Aspect");
-  console.assert(aspect.allMask === ((1n << BigInt(POSITION)) | (1n << BigInt(VELOCITY))), "Aspect should have correct masks from @All");
+  assert.ok(aspect instanceof Aspect, "System should have an Aspect");
+  assert.strictEqual(aspect.allMask, (1n << BigInt(POSITION)) | (1n << BigInt(VELOCITY)), "Aspect should have correct masks from @All");
 
   // 2. Test: Dependency Injection via @Inject
   const loggerSystem = new LoggerSystem(world);
   scheduler.add(moveSystem);
   scheduler.add(loggerSystem);
 
-  console.assert(loggerSystem.positionMapper !== undefined, "LoggerSystem should have positionMapper injected");
-  console.assert(loggerSystem.positionMapper === world.getMapper(POSITION), "Injected mapper should be the correct one");
+  assert.notStrictEqual(loggerSystem.positionMapper, undefined, "LoggerSystem should have positionMapper injected");
+  assert.strictEqual(loggerSystem.positionMapper, world.getMapper(POSITION), "Injected mapper should be the correct one");
 
   // 3. Test: Topological Sorting via @After
   // @ts-ignore - accessing private property for test
   const systems = scheduler.systems;
-  console.assert(systems[0] instanceof MovementSystem, "MovementSystem should be first (priority 10)");
-  console.assert(systems[1] instanceof LoggerSystem, "LoggerSystem should be second (runs after MovementSystem)");
+  assert.ok(systems[0] instanceof MovementSystem, "MovementSystem should be first (priority 10)");
+  assert.ok(systems[1] instanceof LoggerSystem, "LoggerSystem should be second (runs after MovementSystem)");
 
   // 4. Test: Execution
   world.buildEntity()
@@ -89,12 +90,12 @@ export function testSystems() {
 
   scheduler.update(1.0);
 
-  console.assert(moveSystem.updateCalled, "MovementSystem.update should have been called");
-  console.assert(loggerSystem.logCount === 1, "LoggerSystem.update should have been called once");
+  assert.strictEqual(moveSystem.updateCalled, true, "MovementSystem.update should have been called");
+  assert.strictEqual(loggerSystem.logCount, 1, "LoggerSystem.update should have been called once");
 
   const entity = world.getEntities(Aspect.all(POSITION))[0];
   const pos = world.getComponent<{ x: number }>(entity, POSITION);
-  console.assert(pos?.x === 1, "Entity position should be updated by MovementSystem");
+  assert.strictEqual(pos?.x, 1, "Entity position should be updated by MovementSystem");
 
   console.log("Systems & Decorators tests completed!");
 }

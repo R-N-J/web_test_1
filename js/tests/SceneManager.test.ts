@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { World } from "../ECS/World";
 import { Scheduler } from "../ECS/Scheduler";
 import { SceneManager } from "../ECS/SceneManager";
@@ -39,18 +40,18 @@ export function testSceneManager() {
 
   // 1. Test: Initial Switch
   sceneManager.switchTo(scene1);
-  console.assert(sceneManager.getCurrentSceneName() === "Level 1", "Current scene should be Level 1");
-  console.assert(scene1.entered === true, "Scene 1 should have been entered");
+  assert.strictEqual(sceneManager.getCurrentSceneName(), "Level 1", "Current scene should be Level 1");
+  assert.strictEqual(scene1.entered, true, "Scene 1 should have been entered");
 
   // 2. Test: Switching Scenes
   world.buildEntity().commit(); // Create something to be cleared
-  console.assert(world.getEntityCount() === 1, "World should have 1 entity");
+  assert.strictEqual(world.getEntityCount(), 1, "World should have 1 entity");
 
   sceneManager.switchTo(scene2);
-  console.assert(sceneManager.getCurrentSceneName() === "Level 2", "Current scene should be Level 2");
-  console.assert(scene1.exited === true, "Scene 1 should have been exited");
-  console.assert(scene2.entered === true, "Scene 2 should have been entered");
-  console.assert(world.getEntityCount() === 0, "World should have been cleared on scene switch");
+  assert.strictEqual(sceneManager.getCurrentSceneName(), "Level 2", "Current scene should be Level 2");
+  assert.strictEqual(scene1.exited, true, "Scene 1 should have been exited");
+  assert.strictEqual(scene2.entered, true, "Scene 2 should have been entered");
+  assert.strictEqual(world.getEntityCount(), 0, "World should have been cleared on scene switch");
 
   console.log("SceneManager tests completed!");
 }
