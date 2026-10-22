@@ -472,6 +472,7 @@ export class World {
 
   /**
    * Deletes an entity, cleans up its data, and recycles its ID.
+   * If the entity is invalid or has already been deleted, this operation is a safe no-op.
    */
   public deleteEntity(entity: EntityId): void {
     if (this.isDeferred) {
@@ -481,6 +482,9 @@ export class World {
     // Safety: prevent accidental deletion of the global singleton entity
     if (entity === this.singletonEntity) {
       console.error("Critical Error: Attempted to delete the Singleton Entity.");
+      return;
+    }
+    if (!this.isValid(entity)) {
       return;
     }
 

@@ -41,6 +41,10 @@ export class EntityManager {
   }
 
   public recycleEntity(entity: EntityId): void {
+    if (!this.isValid(entity)) {
+      return;
+    }
+
     const index = this.unpackIndex(entity);
     let newVersion = (this.unpackVersion(entity) + 1) & 0xFF; // because of 8-bit, Wraps at 255
 

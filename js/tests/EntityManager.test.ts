@@ -33,6 +33,28 @@ export function testEntityManager() {
   assert.strictEqual(index1, index3, "e3 should reuse e1's index");
   assert.notStrictEqual(e1, e3, "e3 should be different from e1 due to versioning");
 
+  // Test: ENT-010 Duplicate recycling and invalid ID safety
+  const e4 = em.createEntity();
+  assert.strictEqual(em.isValid(e4), true, "e4 should be valid");
+  em.recycleEntity(e4);
+  assert.strictEqual(em.isValid(e4), false, "e4 should be invalid after first recycle");
+
+  // Recycle e4 a second time (duplicate recycling)
+  em.recycleEntity(e4);
+  assert.strictEqual(em.isValid(e4), false, "e4 should remain invalid after duplicate recycle");
+
+  // Attempt to recycle non-existent / invalid IDs
+  em.recycleEntity(-1);
+  em.recycleEntity(999999);
+
+  // Allocate new entities after duplicate recycling
+  const e5 = em.createEntity();
+  const e6 = em.createEntity();
+  assert.notStrictEqual(e5, e6, "e5 and e6 must be distinct entities; duplicate recycling must not duplicate pool entries");
+  assert.strictEqual(em.isValid(e5), true, "e5 should be valid");
+  assert.strictEqual(em.isValid(e6), true, "e6 should be valid");
+  assert.strictEqual(em.isValid(e4), false, "e4 must remain invalid");
+
   console.log("EntityManager tests completed!");
 }
 
