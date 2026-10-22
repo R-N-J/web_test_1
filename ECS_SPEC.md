@@ -445,155 +445,136 @@ The following decisions must be confirmed during implementation review:
 
 Until these decisions are resolved, tests and documentation must not imply a stronger guarantee than the implementation provides.
 
-19. Coding Standards and Implementation Guidelines
+## 19. Coding standards and implementation guidelines
+
+These standards apply to ECS framework code, tests, build and tooling configuration, and documentation changes. Their purpose is to preserve correctness, maintainability, predictable behavior, and consistency with the existing repository.
 
-These standards apply to all ECS framework code, including new features, bug fixes, refactoring, tests, and documentation updates.
+**Status:** These are development requirements. They do not claim that the current implementation already complies. Compliance must be evaluated from the code, configuration, and verification results.
+
+### 19.1 Authority and resolving conflicts
+
+Use the following order when deciding intended behavior:
+
+1. Explicit requirements in this specification, including formally accepted amendments.
+2. Verified public API contracts and automated tests that are consistent with those requirements.
+3. Established repository conventions and configuration.
+4. `ECS_GUIDE.md`, but only where its descriptions have been verified.
+5. General coding preferences, outside examples, and AI-generated suggestions.
+
+The specification defines intended behavior; tests and code provide evidence of actual behavior. Neither an existing test nor existing code automatically overrides a requirement if it appears inconsistent with the intended contract.
+
+If the implementation, tests, guide, or repository conventions conflict, identify the specific conflict and explain its impact. Do not silently change public behavior, weaken a requirement to accommodate a defect, or introduce a new architectural direction. Propose the smallest reasonable resolution. If the conflict affects intended behavior or a public API and cannot be resolved from documented decisions, leave it as an explicit open decision for the project owner.
+
+### 19.2 TypeScript and type safety
+
+- **STD-001:** Preserve the repository's strict TypeScript checking. The current `tsconfig.json` sets `strict: true`; do not weaken it to bypass implementation problems.
+- **STD-002:** Avoid `any` when a specific type or `unknown` with explicit narrowing is appropriate.
+- **STD-003:** Avoid unnecessary type assertions (`as`) and non-null assertions (`!`). When one is required, keep it narrow and make the assumption clear.
+- **STD-004:** Do not use `@ts-ignore` to silence errors. If an exception is genuinely necessary, use a narrowly scoped `@ts-expect-error` with an explanation; add a test when practical.
+- **STD-005:** Give public APIs meaningful parameter and return types. Explicit annotations are especially valuable where they clarify an exported contract or prevent accidental API changes.
+- **STD-006:** Use generics to preserve component types across registries, mappers, queries, and related APIs where practical.
+- **STD-007:** Validate at runtime what TypeScript cannot guarantee, including untrusted serialized input and invalid entity or component identifiers.
+
+### 19.3 Architecture and separation of responsibilities
 
-The goals are correctness, maintainability, predictable behavior, and consistency. Code must be understandable and testable before it is optimized.
+- **STD-008:** Preserve the separation between entities, data-oriented components, and systems that implement behavior.
+- **STD-009:** Components should primarily contain data. Game rules belong in game systems, not in ECS storage infrastructure.
+- **STD-010:** Keep each class and module focused on a clear responsibility.
+- **STD-011:** Keep entity lifecycle management, component storage, archetype management, query evaluation, and scheduling separated unless an intentional, documented design decision justifies coupling.
+- **STD-012:** Avoid circular dependencies between core modules.
+- **STD-013:** Do not introduce new patterns, managers, abstractions, or dependencies without a concrete requirement or demonstrated benefit.
+- **STD-014:** Prefer existing APIs and established conventions over overlapping ways to perform the same operation.
+- **STD-015:** Keep game-specific behavior out of the generic framework.
 
-19.1 TypeScript and Type Safety
+### 19.4 Correctness and state management
 
-STD-001: Use TypeScript's strict type checking. Do not weaken compiler settings to work around implementation problems.
+- **STD-016:** Preserve the invariants in this specification across successful operations and failure paths.
+- **STD-017:** Do not silently swallow errors that indicate invalid usage or potentially corrupted state. Recovery and propagation behavior must be deliberate.
+- **STD-018:** Validate public API inputs at suitable boundaries without adding redundant checks to every internal helper.
+- **STD-019:** Make side effects clear, especially changes to entity lifecycle, component membership, storage, scheduling, and world state.
+- **STD-020:** Keep indexes, caches, masks, queries, and storage synchronized when their underlying state changes.
+- **STD-021:** Do not expose mutable internal collections unless the exposure is intentional and documented.
+- **STD-022:** Cleanup and reset operations must leave the framework valid, including when invoked repeatedly or when an error occurs.
+- **STD-023:** Avoid global mutable state. State belonging to a world must remain associated with that world instance.
+- **STD-024:** Preserve the documented distinction between replacing component values and mutating component data in place. Do not impose immutability as a blanket rule; follow the component reference and notification contract.
 
-STD-002: Avoid any. Prefer unknown with explicit type narrowing when the type is not known.
+### 19.5 Naming, formatting, and organization
 
-STD-003: Avoid unnecessary type assertions (as) and non-null assertions (!). When they are necessary, the reason must be clear.
+- **STD-025:** Follow the repository's existing naming and formatting conventions. Do not introduce a competing style in new or edited files.
+- **STD-026:** Use descriptive names for classes, types, methods, variables, and component identifiers. Prefer PascalCase for classes and types and camelCase for methods and variables; follow established repository conventions for constants and files.
+- **STD-027:** Keep methods focused. Extract helpers when that makes behavior clearer, easier to test, or less duplicated—not simply to meet a line-count target.
+- **STD-028:** Avoid duplicated implementations of sensitive logic such as entity validation, archetype transitions, and structural-change processing when sharing the implementation would improve consistency without creating harmful coupling.
+- **STD-029:** Keep public APIs as small as practical. Do not expose internal details without a clear use case.
+- **STD-030:** Preserve repository formatting conventions encoded in `.editorconfig` (UTF-8, LF line endings, two-space indentation, final newline, and no trailing whitespace) unless the configuration is intentionally changed.
 
-STD-004: Do not use @ts-ignore to silence compiler errors. If an exception is unavoidable, use a narrowly scoped @ts-expect-error with an explanation and a test where appropriate.
+### 19.6 Documentation
 
-STD-005: Public APIs must expose meaningful parameter and return types. Do not rely on inferred types when doing so makes an API unclear.
+- **STD-031:** Document public APIs when their purpose, parameters, return values, side effects, or failure behavior are not self-evident.
+- **STD-032:** Comments should explain why a decision or constraint exists rather than restating what the code visibly does.
+- **STD-033:** Record non-obvious invariants and architectural decisions near the code they govern.
+- **STD-034:** Update `ECS_GUIDE.md` when verified public API behavior or recommended usage changes.
+- **STD-035:** Update `ECS_SPEC.md` only when an intended requirement or design decision changes. Do not weaken a requirement merely to make it match a defect.
+- **STD-036:** Do not describe behavior as supported or guaranteed until it has been verified by appropriate tests or other sufficient evidence. Mark unverified behavior and open decisions explicitly.
 
-STD-006: Use generics to preserve component types across registries, mappers, queries, and other APIs wherever practical.
+### 19.7 Testing and verification
 
-STD-007: Use runtime validation for conditions TypeScript cannot guarantee, including invalid entity IDs, component IDs, and serialized input.
+- **STD-037:** Every bug fix should include a regression test when practical.
+- **STD-038:** New features must include tests for normal behavior, important boundaries, and invalid inputs.
+- **STD-039:** Tests should verify observable contracts and invariants, not merely duplicate the implementation's current logic.
+- **STD-040:** Tests must be deterministic and independently runnable, except when a test explicitly exercises timing, ordering, or interactions between tests.
+- **STD-041:** Tests must clean up resources and state so they do not unintentionally affect other tests.
+- **STD-042:** Do not delete or weaken a failing test merely to obtain a green suite. First determine whether the test or implementation conflicts with the specification and document the reasoning.
+- **STD-043:** Do not claim that code compiles, lint passes, a build succeeds, or tests pass unless the corresponding command was actually run and its results inspected.
+- **STD-044:** When verification cannot be run, state what was not run and why. Distinguish static review from executed tests.
+- **STD-045:** Use the repository's existing verification commands where available. At present, `package.json` defines `test`, `lint`, and `build` scripts; use the appropriate scripts rather than inventing parallel workflows without a reason.
 
-19.2 Architecture and Separation of Responsibilities
+### 19.8 Performance and resource use
 
-STD-008: Preserve the ECS separation of entities, components, and systems.
+- **STD-046:** Prefer a clear, correct implementation over speculative optimization.
+- **STD-047:** Avoid unnecessary allocations in demonstrated hot paths, but base performance changes on profiling or representative benchmarks where practical.
+- **STD-048:** Changes to archetype storage, query caching, entity allocation, and structural-change processing must preserve their correctness guarantees.
+- **STD-049:** Benchmarks must describe their workload and what is measured. A performance claim must be supported by evidence rather than inferred from an API's name or design.
 
-STD-009: Components should primarily contain data. Game rules and behavior belong in systems.
+### 19.9 Changes and refactoring
 
-STD-010: Each class and module should have a clear, focused responsibility.
+- **STD-050:** Make the smallest coherent change that satisfies the requirement.
+- **STD-051:** Keep unrelated refactoring separate from bug fixes and feature work.
+- **STD-052:** Do not rewrite a subsystem solely to conform to a preferred pattern when a smaller change preserves the required behavior.
+- **STD-053:** Before changing a public API, identify affected callers, tests, documentation, and compatibility implications.
+- **STD-054:** After code changes, run the relevant tests and checks; run the full test suite and broader checks when practical. Review the final diff for unrelated changes and untested assumptions.
+- **STD-055:** When completing a task, summarize the changed files, design decisions, verification actually performed, and known limitations.
 
-STD-011: Keep entity lifecycle management, component storage, archetype management, query evaluation, and system scheduling separate unless a documented architectural reason requires otherwise.
+### 19.10 AI-assisted development
 
-STD-012: Avoid circular dependencies between core modules.
+When an AI coding assistant works in this repository:
 
-STD-013: Do not introduce new architectural patterns, managers, abstractions, or dependencies unless they solve a concrete problem.
+1. Read the relevant parts of `ECS_SPEC.md`, `ECS_GUIDE.md`, source code, tests, and configuration before proposing changes.
+2. Identify the applicable requirements and current evidence before editing.
+3. Do not assume a feature works because it is documented, appears in an example, or resembles a feature in another ECS.
+4. Do not modify unrelated files or include unrequested improvements.
+5. For an investigation or review-only request, do not edit files unless implementation is explicitly authorized.
+6. Add or update tests before or alongside implementation changes, choosing the smallest test that demonstrates the required behavior.
+7. Report the actual commands executed and their results; identify skipped checks explicitly.
+8. Flag ambiguity or conflict rather than silently choosing behavior that affects public contracts or architecture.
+9. Do not claim completion while known failures, unresolved regressions, or important unverified requirements remain undisclosed.
+10. Keep proposed changes reviewable. Explain trade-offs when a change materially affects architecture, performance, compatibility, or public behavior.
 
-STD-014: Reuse existing APIs and conventions when appropriate instead of creating overlapping ways to perform the same operation.
+### 19.11 Automated enforcement and current baseline
 
-STD-015: Framework code must not depend on roguelike-specific rules. Game-specific behavior belongs in the game layer.
+Standards should be automated where a reliable tool can enforce them, but the existence of a tool or configuration file is not proof that every standard is satisfied.
 
-19.3 Correctness and State Management
+The current repository configuration establishes the following baseline:
 
-STD-016: Maintain all invariants defined in this specification, even when an operation fails.
+- **Type checking:** `tsconfig.json` enables `strict: true`.
+- **Linting:** `package.json` exposes an `npm run lint` script using ESLint. The current `eslint.config.mts` uses ESLint recommended rules and the recommended TypeScript ESLint configuration, plus JSON, Markdown, and CSS checks.
+- **Formatting:** `.editorconfig` specifies UTF-8, LF line endings, two-space indentation, a final newline, and trimmed trailing whitespace. A dedicated formatter configuration was not identified during this review.
+- **Tests:** `package.json` exposes `npm test`, which runs `jiti js/tests/index.ts`.
+- **Build:** `package.json` exposes `npm run build`.
 
-STD-017: Do not silently swallow exceptions or ignore invalid states. Errors must be handled deliberately and consistently.
+These are configuration observations, not results of running the commands. This documentation update does not assert that linting, type checking, tests, or the build currently pass. Compiler checking is not listed as a dedicated `package.json` script; a separate repeatable type-check command may be considered after confirming the intended compiler invocation and resolving any existing errors.
 
-STD-018: Validate public API inputs at appropriate boundaries.
+Do not add strict rules such as maximum method length, mandatory immutability, or blanket bans on type assertions without a demonstrated need and an agreed configuration. Standards should guide sound engineering, not generate mechanical edits that reduce clarity or conflict with the existing architecture.
 
-STD-019: Avoid hidden side effects. Methods that modify entity membership, component storage, scheduling, or world state must make those effects clear.
-
-STD-020: Keep internal indexes, caches, masks, and storage structures synchronized when underlying state changes.
-
-STD-021: Do not expose mutable internal collections unless that exposure is intentional and documented.
-
-STD-022: Cleanup operations must leave the framework in a valid state, including when invoked repeatedly.
-
-STD-023: Avoid global mutable state. State belonging to a world must remain associated with the correct world instance.
-
-19.4 Naming and Code Organization
-
-STD-024: Follow the naming and formatting conventions already established in the repository. Do not introduce a competing style.
-
-STD-025: Use descriptive names for classes, methods, variables, and component identifiers. Avoid cryptic abbreviations.
-
-STD-026: Use consistent naming conventions: PascalCase for classes and types, camelCase for variables and methods, and the repository's established convention for constants and file names.
-
-STD-027: Keep methods focused. Extract helpers when doing so makes behavior easier to understand or test, not merely to reduce line count.
-
-STD-028: Avoid duplicated logic for entity validation, archetype transitions, and structural-change processing when a shared implementation can safely enforce consistent behavior.
-
-STD-029: Keep public APIs as small as practical. Do not expose internal implementation details without a clear need.
-
-19.5 Documentation
-
-STD-030: Document public APIs whose purpose, parameters, return values, side effects, or failure behavior are not self-evident.
-
-STD-031: Document non-obvious invariants and architectural decisions near the code they govern.
-
-STD-032: Comments should explain why a decision or constraint exists, not merely repeat what the code does.
-
-STD-033: Update ECS_GUIDE.md when verified public API behavior changes.
-
-STD-034: Update ECS_SPEC.md only when an intentional requirement or design decision changes. Do not weaken requirements merely to accommodate a defect.
-
-STD-035: Do not document behavior as supported until it has been verified through appropriate tests or other sufficient evidence.
-
-19.6 Testing Requirements
-
-STD-036: Every bug fix must include a regression test when practical.
-
-STD-037: New features must include tests for normal behavior, important boundary conditions, and invalid inputs.
-
-STD-038: Tests must verify observable behavior, not merely reproduce the current implementation.
-
-STD-039: Tests must be deterministic and must not depend on execution order, wall-clock timing, or shared mutable state unless the test explicitly covers those conditions.
-
-STD-040: Tests must clean up resources and state so they can run independently.
-
-STD-041: Do not change or remove a failing test merely to make the test suite pass. First determine whether the test or implementation violates the specification.
-
-STD-042: Do not claim that code compiles or tests pass unless the corresponding commands were actually executed and their results inspected.
-
-19.7 Performance and Resource Use
-
-STD-043: Prefer clear, correct implementations over speculative optimizations.
-
-STD-044: Avoid unnecessary allocations in demonstrably hot ECS paths, but optimize based on profiling or benchmarks rather than assumptions.
-
-STD-045: Changes to archetype storage, query caching, entity allocation, or structural-change processing must preserve all relevant correctness guarantees.
-
-STD-046: Performance benchmarks must use representative workloads and document what is being measured.
-
-19.8 Changes and Refactoring
-
-STD-047: Make the smallest coherent change that satisfies the requirement.
-
-STD-048: Do not mix unrelated refactoring with bug fixes or feature work.
-
-STD-049: Do not rewrite working subsystems simply to make them conform to an AI-generated preferred pattern.
-
-STD-050: Before changing a public API, identify affected callers, tests, and documentation.
-
-STD-051: After modifying code, run the relevant tests and type checker. Run the full test suite when practical.
-
-STD-052: Summarize changed files, design decisions, tests executed, and known limitations when completing a task.
-
-19.9 AI-Assisted Development Rules
-
-When an AI coding assistant works on this repository:
-
-Read the relevant parts of ECS_SPEC.md, ECS_GUIDE.md, and the existing implementation before proposing changes.
-
-Treat this specification as the authority for intended behavior.
-
-Analyze existing behavior and identify the relevant requirements before editing code.
-
-Do not assume a feature works because it is documented or because an example exists.
-
-Do not modify unrelated files or introduce unrelated improvements.
-
-When asked to investigate or review, do not edit files unless explicitly authorized.
-
-When asked to implement a change, add or update tests before or alongside the implementation.
-
-Report the actual commands executed and their results. Clearly identify tests that were not run.
-
-Identify any ambiguity or conflict in the specification rather than silently choosing a behavior that affects public APIs or architecture.
-
-Do not claim completion while known failing tests, unresolved regressions, or unverified requirements remain undisclosed.
 ---
 
 ## Definition of done
