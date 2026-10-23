@@ -42,7 +42,7 @@ export interface WorldSnapshot {
   groups: Record<string, EntityId[]>;
 }
 
-const ECS_SNAPSHOT_VERSION = 1;
+export const ECS_SNAPSHOT_VERSION = 2;
 
 
 
@@ -194,6 +194,10 @@ export class World {
   }
 
   public addComponent(entity: EntityId, componentId: ComponentId, value: unknown): void {
+    if (!this.isValid(entity)) {
+      return;
+    }
+
     if (this.isDeferred) {
       this.deferredQueue.push({ type: 'ADD', entity, component: componentId, value });
       return;
@@ -216,10 +220,15 @@ export class World {
   }
 
   public removeComponent(entity: EntityId, componentId: ComponentId): void {
+    if (!this.isValid(entity)) {
+      return;
+    }
+
     if (this.isDeferred) {
       this.deferredQueue.push({ type: 'REMOVE', entity, component: componentId });
       return;
     }
+
     const loc = this.entities.getLocation(entity);
     if (!loc) return;
 
@@ -475,16 +484,17 @@ export class World {
    * If the entity is invalid or has already been deleted, this operation is a safe no-op.
    */
   public deleteEntity(entity: EntityId): void {
-    if (this.isDeferred) {
-      this.deferredQueue.push({ type: 'DELETE', entity });
-      return;
-    }
     // Safety: prevent accidental deletion of the global singleton entity
     if (entity === this.singletonEntity) {
       console.error("Critical Error: Attempted to delete the Singleton Entity.");
       return;
     }
     if (!this.isValid(entity)) {
+      return;
+    }
+
+    if (this.isDeferred) {
+      this.deferredQueue.push({ type: 'DELETE', entity });
       return;
     }
 
@@ -632,21 +642,27 @@ export class World {
       editor.commit(); // This now removes itself from the Set via finalizeEditor
     }
 
-    // 2. Process the structural queue (ADD, REMOVE, DELETE)
-    while (this.deferredQueue.length > 0) {
-      const ops = this.deferredQueue;
-      this.deferredQueue = []; // Clear for next batch
+    const wasDeferred = this.isDeferred;
+    this.isDeferred = false;
+    try {
+      // 2. Process the structural queue (ADD, REMOVE, DELETE)
+      while (this.deferredQueue.length > 0) {
+        const ops = this.deferredQueue;
+        this.deferredQueue = []; // Clear for next batch
 
-      for (const op of ops) {
-        if (!this.isValid(op.entity) && op.type !== 'DELETE') continue;
+        for (const op of ops) {
+          if (!this.isValid(op.entity)) continue;
 
-        switch (op.type) {
-          case 'ADD': this.addComponent(op.entity, op.component, op.value); break;
-          case 'REMOVE': this.removeComponent(op.entity, op.component); break;
-          case 'DELETE': this.deleteEntity(op.entity); break;
-          case 'BATCH': this.applyBatchChanges(op.entity, op.mask, op.additions, op.removals); break;
+          switch (op.type) {
+            case 'ADD': this.addComponent(op.entity, op.component, op.value); break;
+            case 'REMOVE': this.removeComponent(op.entity, op.component); break;
+            case 'DELETE': this.deleteEntity(op.entity); break;
+            case 'BATCH': this.applyBatchChanges(op.entity, op.mask, op.additions, op.removals); break;
+          }
         }
       }
+    } finally {
+      this.isDeferred = wasDeferred;
     }
   }
 

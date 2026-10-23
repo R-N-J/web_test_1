@@ -339,6 +339,197 @@ export function testWorld() {
   idemWorld.setDeferred(false); // Flushes queue
   assert.strictEqual(idemAddEventsC1.length, 1, "Deferred batch must only apply once after repeated commits upon flush");
 
+  // --- Tests: Snapshot Persistence & Version Compatibility (SAV-001 - SAV-006) ---
+  const snapWorld = new World();
+  snapWorld.registerComponent(C1);
+  snapWorld.registerComponent(C2);
+
+  const se1 = snapWorld.buildEntity().add(C1, { val: 10 }).add(C2, { val: 20 }).commit();
+  snapWorld.tags.register("player", se1);
+  snapWorld.groups.add("party", se1);
+
+  const snapshot = snapWorld.saveSnapshot();
+  assert.strictEqual(snapshot.version, 2, "Snapshot version should be 2");
+  assert.strictEqual(snapshot.archetypes.length >= 1, true, "Snapshot should contain saved archetypes");
+
+  // Restore snapshot into a new world
+  const restoreWorld = new World();
+  restoreWorld.registerComponent(C1);
+  restoreWorld.registerComponent(C2);
+  restoreWorld.loadSnapshot(snapshot);
+
+  assert.strictEqual(restoreWorld.isValid(se1), true, "Restored entity ID should be valid");
+  assert.deepStrictEqual(restoreWorld.getComponent(se1, C1), { val: 10 }, "Restored C1 data should match");
+  assert.deepStrictEqual(restoreWorld.getComponent(se1, C2), { val: 20 }, "Restored C2 data should match");
+  assert.strictEqual(restoreWorld.tags.get("player"), se1, "Restored tag should map to entity");
+  assert.strictEqual(restoreWorld.groups.has("party", se1), true, "Restored group should contain entity");
+
+  // Rejection of legacy snapshot version (e.g. version 1)
+  const legacySnapshot = { ...snapshot, version: 1 };
+  assert.throws(
+    () => restoreWorld.loadSnapshot(legacySnapshot),
+    /Unsupported ECS snapshot version: 1\. Expected: 2/,
+    "Loading incompatible snapshot version 1 must throw an explicit error"
+  );
+
+  // --- Tests: Free-Pool Entity Invalidation via World & Snapshot (ENT-001, ENT-007 - ENT-011) ---
+  const worldFree = new World();
+  worldFree.registerComponent(C1);
+
+  const we1 = worldFree.createEntity();
+  worldFree.addComponent(we1, C1, { val: 123 });
+  worldFree.deleteEntity(we1);
+
+  const freeEntities = worldFree.saveSnapshot().freeEntities;
+  assert.strictEqual(freeEntities.length, 1, "World should have 1 free entity in snapshot");
+  const waitingWorldFreeId = freeEntities[0];
+
+  assert.strictEqual(worldFree.isValid(waitingWorldFreeId), false, "Free ID in World must be invalid before reallocation");
+  worldFree.addComponent(waitingWorldFreeId, C1, { val: 999 });
+  assert.strictEqual(worldFree.hasComponent(waitingWorldFreeId, C1), false, "Adding component to free ID must not succeed");
+  worldFree.deleteEntity(waitingWorldFreeId); // Safe no-op
+
+  // Save snapshot with free entities and restore
+  const freeSnap = worldFree.saveSnapshot();
+  const restoreWorldFree = new World();
+  restoreWorldFree.registerComponent(C1);
+  restoreWorldFree.loadSnapshot(freeSnap);
+
+  assert.strictEqual(
+    restoreWorldFree.isValid(waitingWorldFreeId),
+    false,
+    "Free ID must remain invalid after snapshot restoration"
+  );
+
+  const we2 = restoreWorldFree.createEntity();
+  assert.strictEqual(we2, waitingWorldFreeId, "createEntity() in restored world must return recycled free ID");
+  assert.strictEqual(restoreWorldFree.isValid(we2), true, "Reallocated entity must be valid in restored world");
+
+  // --- Tests: Deferred Operations on Invalid / Recycled Entity IDs (STR-004 - STR-007, ENT-001) ---
+  // Issue B.1: addComponent on invalid/free-pool ID during deferred mode
+  const defValWorld = new World();
+  defValWorld.registerComponent(C1);
+  defValWorld.registerComponent(C2);
+
+  const dvEntity1 = defValWorld.createEntity();
+  defValWorld.deleteEntity(dvEntity1); // Deleted and placed in freeEntities
+
+  defValWorld.setDeferred(true);
+  // Attempt to add component using free-pool ID (currently invalid)
+  defValWorld.addComponent(dvEntity1, C1, { val: "should-not-be-added" });
+
+  // Reallocate that same slot before flushing
+  const reallocatedDv1 = defValWorld.createEntity();
+  assert.notStrictEqual(reallocatedDv1, dvEntity1, "Reallocated entity must have new generation ID");
+  assert.strictEqual(Math.floor(reallocatedDv1 / 65536), Math.floor(dvEntity1 / 65536), "Reallocated entity shares same slot index");
+
+  // Flush deferred queue
+  defValWorld.setDeferred(false);
+
+  // Verify the invalid operation did NOT modify the newly created entity
+  assert.strictEqual(
+    defValWorld.hasComponent(reallocatedDv1, C1),
+    false,
+    "Deferred addComponent on stale/free-list ID must not apply to newly reallocated entity"
+  );
+
+  // Issue B.2: removeComponent on invalid/free-pool ID during deferred mode
+  const dvEntity2 = defValWorld.createEntity();
+  defValWorld.addComponent(dvEntity2, C1, { val: "initial" });
+  defValWorld.deleteEntity(dvEntity2);
+
+  defValWorld.setDeferred(true);
+  // Attempt to remove component using free-pool ID (currently invalid)
+  defValWorld.removeComponent(dvEntity2, C1);
+
+  // Reallocate same slot and give it C1
+  const reallocatedDv2 = defValWorld.createEntity();
+  defValWorld.addComponent(reallocatedDv2, C1, { val: "new-entity-value" });
+
+  // Flush deferred queue
+  defValWorld.setDeferred(false);
+
+  // Verify the invalid operation did NOT remove component from newly created entity
+  assert.strictEqual(
+    defValWorld.hasComponent(reallocatedDv2, C1),
+    true,
+    "Deferred removeComponent on stale/free-list ID must not remove component from newly reallocated entity"
+  );
+  assert.deepStrictEqual(
+    defValWorld.getComponent(reallocatedDv2, C1),
+    { val: "new-entity-value" },
+    "Reallocated entity component value must remain intact"
+  );
+
+  // Issue B.3: deleteEntity on invalid/free-pool ID during deferred mode
+  const dvEntity3 = defValWorld.createEntity();
+  defValWorld.deleteEntity(dvEntity3);
+
+  defValWorld.setDeferred(true);
+  // Attempt to delete invalid entity in deferred mode
+  defValWorld.deleteEntity(dvEntity3);
+
+  // Reallocate same slot
+  const reallocatedDv3 = defValWorld.createEntity();
+
+  // Flush
+  defValWorld.setDeferred(false);
+
+  // Verify newly created entity was NOT deleted
+  assert.strictEqual(
+    defValWorld.isValid(reallocatedDv3),
+    true,
+    "Deferred deleteEntity on stale/free-list ID must not delete newly reallocated entity"
+  );
+
+  // Issue B.4: Valid deferred operations on live entities continue to work properly
+  const liveDefEntity = defValWorld.createEntity();
+  defValWorld.setDeferred(true);
+  defValWorld.addComponent(liveDefEntity, C1, { val: "live-def" });
+  assert.strictEqual(defValWorld.hasComponent(liveDefEntity, C1), false, "Not added before flush");
+  defValWorld.flush(); // direct flush
+  assert.strictEqual(defValWorld.hasComponent(liveDefEntity, C1), true, "Added after flush");
+  assert.deepStrictEqual(defValWorld.getComponent(liveDefEntity, C1), { val: "live-def" });
+
+  // --- Task 7D: Prevent deferred deletion of invalid entity IDs (ENT-010, STR-004 - STR-009) ---
+  const delDefWorld = new World();
+  const dEntity = delDefWorld.createEntity();
+  delDefWorld.deleteEntity(dEntity);
+
+  const freeIds = delDefWorld.saveSnapshot().freeEntities;
+  assert.strictEqual(freeIds.length, 1, "There should be 1 ID waiting in the free pool");
+  const waitingNextGenId = freeIds[0];
+  assert.strictEqual(delDefWorld.isValid(waitingNextGenId), false, "Free pool ID must be invalid prior to allocation");
+
+  delDefWorld.setDeferred(true);
+  // Call deleteEntity with invalid free-pool ID while deferred
+  delDefWorld.deleteEntity(waitingNextGenId);
+
+  // Allocate another entity before flushing; should reuse the waiting free ID
+  const reusedEntity = delDefWorld.createEntity();
+  assert.strictEqual(reusedEntity, waitingNextGenId, "createEntity should reuse the waiting free-pool ID");
+  assert.strictEqual(delDefWorld.isValid(reusedEntity), true, "Reused entity must be valid immediately upon creation");
+
+  // Flush the deferred queue
+  delDefWorld.setDeferred(false);
+
+  // Verify that the newly allocated entity remains valid and was not deleted by the queued operation
+  assert.strictEqual(
+    delDefWorld.isValid(reusedEntity),
+    true,
+    "Newly allocated entity must remain valid after flushing deferred delete of its prior free-pool ID"
+  );
+
+  // Also verify deleting an already-invalid entity remains a safe no-op in immediate and deferred modes
+  delDefWorld.deleteEntity(dEntity); // Immediate with stale ID
+  assert.strictEqual(delDefWorld.isValid(reusedEntity), true, "Immediate delete of stale ID is safe no-op");
+
+  delDefWorld.setDeferred(true);
+  delDefWorld.deleteEntity(999999); // Deferred with non-existent ID
+  delDefWorld.deleteEntity(dEntity); // Deferred with stale ID
+  delDefWorld.setDeferred(false);
+  assert.strictEqual(delDefWorld.isValid(reusedEntity), true, "Deferred delete of invalid IDs is safe no-op");
+
   console.log("World tests completed!");
 }
 

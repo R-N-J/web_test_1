@@ -65,7 +65,12 @@ The core ECS should support these features without needing to know their game-sp
 - **ENT-010:** Deleting an entity more than once must not corrupt entity allocation or storage. The exact public API behavior—no-op or error—must be documented and tested.
 - **ENT-011:** Entity allocation and versioning must use a representation whose supported range and overflow behavior are explicitly defined.
 
-Entity IDs may use index and generation/version information. The implementation must prove that its encoding and decoding are safe for the declared range, including JavaScript bitwise-operation limitations.
+Entity IDs are represented as positive safe integers using safe arithmetic encoding: `id = index * 65536 + generation`.
+- Valid generation range: 1 through 65,535 (16 bits).
+- Supported index range: 0 through 2^37 - 1 (137,438,953,471), keeping all possible IDs within `Number.MAX_SAFE_INTEGER` (2^53 - 1).
+- Decoding is performed via arithmetic division (`index = Math.floor(id / 65536)`) and modulo (`generation = id % 65536`), avoiding 32-bit signed bitwise shift limitations.
+- Slot exhaustion & retirement: When an entity at generation 65,535 is deleted/recycled, its slot is permanently retired and never reused. No stale reference can ever be resurrected.
+- ID validation: `isValid(entity)` strictly validates that the identifier is a positive safe integer within allocated index bounds and matching the live generation.
 
 ### 3.3 Entity lifecycle invariants
 
@@ -432,7 +437,7 @@ Do not combine a large architectural rewrite with unrelated bug fixes. Do not ma
 
 The following decisions must be confirmed during implementation review:
 
-- The supported entity ID range and exact index/version encoding.
+- The supported entity ID range and exact index/version encoding (Resolved: 16-bit generation [1..65,535], 37-bit index [0..2^37 - 1], arithmetic encoding `id = index * 65536 + generation`, permanent slot retirement at generation 65,535).
 - Whether adding an existing component replaces its value or throws.
 - Whether deleting an invalid entity is a no-op or an error.
 - The precise visibility of deferred creations and edits before commit.

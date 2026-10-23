@@ -142,6 +142,9 @@ export class ComponentManager {
 
 
   public transmute(entity: EntityId, newMask: bigint, newComponentId?: ComponentId, newValue?: unknown): void {
+    if (!this.entityManager.isValid(entity)) {
+      return;
+    }
     const oldLocation = this.entityManager.getLocation(entity);
     const oldMask = oldLocation?.arch.mask ?? 0n;
     const dataToMigrate = new Map<ComponentId, unknown>();
