@@ -190,32 +190,56 @@ export class Scheduler {
     // Enter deferred mode to protect system iteration
     this.world.setDeferred(true);
 
-    for (const system of this.systems) {
-      if (system.enabled) {
-        const sysStart = performance.now();
-
-        system.runUpdate(dt);
-
-        systemStats.push({
-          name: system.constructor.name,
-          duration: performance.now() - sysStart
-        });
+    let systemError: unknown;
+    try {
+      for (const system of this.systems) {
+        if (system.enabled) {
+          const sysStart = performance.now();
+          try {
+            system.runUpdate(dt);
+          } finally {
+            systemStats.push({
+              name: system.constructor.name,
+              duration: performance.now() - sysStart
+            });
+          }
+        }
       }
+    } catch (err) {
+      systemError = err;
     }
 
-    // Exit deferred mode and apply all structural changes at once
-    this.world.setDeferred(false);
+    let flushError: unknown;
+    try {
+      // Exit deferred mode and apply all structural changes at once
+      this.world.setDeferred(false);
+    } catch (err) {
+      flushError = err;
+    }
 
     // Update global engine stats singleton
-    this.world.mutateComponent<EngineStats>(
-      this.world.getSingletonEntity(),
-      InternalComponents.ENGINE_STATS,
-      (stats) => {
-        stats.systems = systemStats;
-        stats.lastUpdateMs = performance.now() - startTime;
-        // Optimization: only update entity counts occasionally or if needed
-        stats.archetypes = this.world.getArchetypeCount();
+    try {
+      if (this.world.hasSingleton(InternalComponents.ENGINE_STATS)) {
+        this.world.mutateComponent<EngineStats>(
+          this.world.getSingletonEntity(),
+          InternalComponents.ENGINE_STATS,
+          (stats) => {
+            stats.systems = systemStats;
+            stats.lastUpdateMs = performance.now() - startTime;
+            // Optimization: only update entity counts occasionally or if needed
+            stats.archetypes = this.world.getArchetypeCount();
+          }
+        );
       }
-    );
+    } catch {
+      // Stats recording error should not mask earlier errors
+    }
+
+    if (systemError !== undefined) {
+      throw systemError;
+    }
+    if (flushError !== undefined) {
+      throw flushError;
+    }
   }
 }

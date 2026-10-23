@@ -43,6 +43,33 @@ export function testTurnManager() {
   assert.strictEqual(turnManager.turnNumber, 0, "Turn number should be reset to 0");
   assert.strictEqual(turnManager.isPlayerTurn, true, "Should be player turn after reset");
 
+  // 5. Test: Exception safety during turn execution (SYS-008, SYS-010)
+  class BrokenTurnSystem {
+    public enabled = true;
+    public runUpdate(): void {
+      throw new Error("Turn tick crash");
+    }
+    public cleanup(): void {}
+    public toggle(): void {}
+  }
+
+  // @ts-expect-error - mock system
+  scheduler.add(new BrokenTurnSystem());
+
+  assert.throws(
+    () => {
+      turnManager.nextTurn();
+    },
+    {
+      name: "Error",
+      message: "Turn tick crash"
+    },
+    "turnManager.nextTurn() should propagate system exceptions"
+  );
+
+  assert.strictEqual(turnManager.isPlayerTurn, true, "isPlayerTurn must be restored to true even if turn execution throws");
+  assert.strictEqual(world.isDeferred, false, "world.isDeferred must be restored to false after turn error");
+
   console.log("TurnManager tests completed!");
 }
 

@@ -67,7 +67,7 @@ export class World {
   private singletonEntity: EntityId;
 
   private deferredQueue: DeferredOp[] = [];
-  private isDeferred = false;
+  private _isDeferred = false;
 
   constructor() {
     this.singletonEntity = this.createEntity();
@@ -183,11 +183,18 @@ export class World {
   }
 
   /**
+   * Returns whether deferred mode is currently active.
+   */
+  public get isDeferred(): boolean {
+    return this._isDeferred;
+  }
+
+  /**
    * Enables or disables deferred mode.
    * When true, structural changes are queued instead of applied immediately.
    */
   public setDeferred(state: boolean): void {
-    this.isDeferred = state;
+    this._isDeferred = state;
     if (!state && this.deferredQueue.length > 0) {
       this.flush();
     }
@@ -198,7 +205,7 @@ export class World {
       return;
     }
 
-    if (this.isDeferred) {
+    if (this._isDeferred) {
       this.deferredQueue.push({ type: 'ADD', entity, component: componentId, value });
       return;
     }
@@ -224,7 +231,7 @@ export class World {
       return;
     }
 
-    if (this.isDeferred) {
+    if (this._isDeferred) {
       this.deferredQueue.push({ type: 'REMOVE', entity, component: componentId });
       return;
     }
@@ -493,7 +500,7 @@ export class World {
       return;
     }
 
-    if (this.isDeferred) {
+    if (this._isDeferred) {
       this.deferredQueue.push({ type: 'DELETE', entity });
       return;
     }
@@ -622,7 +629,7 @@ export class World {
     if (!this.isValid(entity)) {
       return;
     }
-    if (this.isDeferred) {
+    if (this._isDeferred) {
       this.deferredQueue.push({ type: 'BATCH', entity, mask: newMask, additions: new Map(additions), removals: new Set(removals) });
       return;
     }
@@ -637,32 +644,28 @@ export class World {
    * Executes all queued structural changes AND any uncommitted editors..
    */
   public flush(): void {
-    // 1. Auto-commit any editors created during systems execution
-    for (const editor of this.activeEditors) {
-      editor.commit(); // This now removes itself from the Set via finalizeEditor
-    }
-
-    const wasDeferred = this.isDeferred;
-    this.isDeferred = false;
+    const wasDeferred = this._isDeferred;
+    this._isDeferred = false;
     try {
+      // 1. Auto-commit any editors created during systems execution
+      for (const editor of Array.from(this.activeEditors)) {
+        editor.commit(); // This now removes itself from the Set via finalizeEditor
+      }
+
       // 2. Process the structural queue (ADD, REMOVE, DELETE)
       while (this.deferredQueue.length > 0) {
-        const ops = this.deferredQueue;
-        this.deferredQueue = []; // Clear for next batch
+        const op = this.deferredQueue.shift()!;
+        if (!this.isValid(op.entity)) continue;
 
-        for (const op of ops) {
-          if (!this.isValid(op.entity)) continue;
-
-          switch (op.type) {
-            case 'ADD': this.addComponent(op.entity, op.component, op.value); break;
-            case 'REMOVE': this.removeComponent(op.entity, op.component); break;
-            case 'DELETE': this.deleteEntity(op.entity); break;
-            case 'BATCH': this.applyBatchChanges(op.entity, op.mask, op.additions, op.removals); break;
-          }
+        switch (op.type) {
+          case 'ADD': this.addComponent(op.entity, op.component, op.value); break;
+          case 'REMOVE': this.removeComponent(op.entity, op.component); break;
+          case 'DELETE': this.deleteEntity(op.entity); break;
+          case 'BATCH': this.applyBatchChanges(op.entity, op.mask, op.additions, op.removals); break;
         }
       }
     } finally {
-      this.isDeferred = wasDeferred;
+      this._isDeferred = wasDeferred;
     }
   }
 
