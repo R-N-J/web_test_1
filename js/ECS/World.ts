@@ -1,5 +1,6 @@
 import { Aspect } from "./Aspect";
-import { Archetype, EntityId, ComponentId } from "./Archetype";
+import { Archetype, EntityId, ComponentId, MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
+import { USER_COMPONENT_ID_START } from "./InternalComponents";
 import { TagManager } from "./TagManager";
 import { GroupManager } from "./GroupManager";
 import { EntityEditor } from "./EntityEditor";
@@ -145,10 +146,13 @@ export class World {
 
 
   /**
-   * Registers a component ID with the ECS. This should be done once at startup
-   * (or before loading a snapshot) to keep archetype construction deterministic.
+   * Registers a user-defined component ID with the ECS.
+   * User component IDs must be in the range 100..65535 (0..99 are reserved for internal engine components).
    */
   public registerComponent(id: ComponentId): void {
+    if (!isValidComponentId(id) || id < USER_COMPONENT_ID_START) {
+      throw new Error(`[ECS] Invalid User Component ID: ${id}. User Component IDs must be in range ${USER_COMPONENT_ID_START}..${MAX_COMPONENT_ID} (0..${USER_COMPONENT_ID_START - 1} are reserved for engine components).`);
+    }
     this.components.addRegisteredComponent(id);
   }
 
@@ -175,10 +179,16 @@ export class World {
   }
 
   public unsubscribeOnAdd(id: ComponentId, observer: ComponentObserver): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     this.components.unsubscribeOnAdd(id, observer);
   }
 
   public unsubscribeOnRemove(id: ComponentId, observer: ComponentObserver): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     this.components.unsubscribeOnRemove(id, observer);
   }
 
@@ -201,6 +211,13 @@ export class World {
   }
 
   public addComponent(entity: EntityId, componentId: ComponentId, value: unknown): void {
+    if (!isValidComponentId(componentId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${componentId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
+    if (componentId < USER_COMPONENT_ID_START && !this.components.isRegistered(componentId)) {
+      throw new Error(`[ECS] Cannot add unregistered reserved component ID: ${componentId}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+    }
+
     if (!this.isValid(entity)) {
       return;
     }
@@ -227,6 +244,10 @@ export class World {
   }
 
   public removeComponent(entity: EntityId, componentId: ComponentId): void {
+    if (!isValidComponentId(componentId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${componentId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
+
     if (!this.isValid(entity)) {
       return;
     }
@@ -237,7 +258,9 @@ export class World {
     }
 
     const loc = this.entities.getLocation(entity);
-    if (!loc) return;
+    if (!loc || !loc.arch.hasComponent(componentId)) {
+      return; // Absent component: safe no-op
+    }
 
     const oldMask = loc.arch.mask;
     const newMask = oldMask & ~(1n << BigInt(componentId));
@@ -407,6 +430,9 @@ export class World {
    * Safely retrieves a component value for an entity.
    */
   public getComponent<T>(entity: EntityId, id: ComponentId): T | undefined {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     return this.entities.getComponentValue<T>(entity, id);
   }
 
@@ -414,6 +440,9 @@ export class World {
    * Non-structural write (no archetype move). Returns false if entity/component doesn't exist.
    */
   public setComponent<T>(entity: EntityId, id: ComponentId, value: T): boolean {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     return this.entities.setComponentValue(entity, id, value);
   }
 
@@ -421,6 +450,9 @@ export class World {
    * Non-structural update (no archetype move). Returns false if entity/component doesn't exist.
    */
   public updateComponent<T>(entity: EntityId, id: ComponentId, updater: (current: T) => T): boolean {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     return this.entities.updateComponentValue(entity, id, updater);
   }
 
@@ -428,6 +460,9 @@ export class World {
    * Non-structural mutation (no archetype move). Returns false if entity/component doesn't exist.
    */
   public mutateComponent<T>(entity: EntityId, id: ComponentId, mutator: (value: T) => void): boolean {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     return this.entities.mutateComponent(entity, id, mutator);
   }
 
@@ -436,6 +471,9 @@ export class World {
    * Checks if an entity possesses a specific component.
    */
   public hasComponent(entity: EntityId, id: ComponentId): boolean {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     return this.entities.hasComponent(entity, id);
   }
 
@@ -476,6 +514,13 @@ export class World {
    */
   public getRegisteredComponents(): ComponentId[] {
     return this.components.getRegisteredComponents();
+  }
+
+  /**
+   * Checks if a component ID is registered in the engine.
+   */
+  public isComponentRegistered(id: ComponentId): boolean {
+    return this.components.isRegistered(id);
   }
 
 
@@ -628,6 +673,19 @@ export class World {
   ): void {
     if (!this.isValid(entity)) {
       return;
+    }
+    for (const id of additions.keys()) {
+      if (!isValidComponentId(id)) {
+        throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+      }
+      if (id < USER_COMPONENT_ID_START && !this.components.isRegistered(id)) {
+        throw new Error(`[ECS] Cannot add unregistered reserved component ID: ${id}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+      }
+    }
+    for (const id of removals) {
+      if (!isValidComponentId(id)) {
+        throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+      }
     }
     if (this._isDeferred) {
       this.deferredQueue.push({ type: 'BATCH', entity, mask: newMask, additions: new Map(additions), removals: new Set(removals) });
@@ -792,6 +850,12 @@ export class World {
       arch.entities = archData.entities;
 
       for (const compId of componentIds) {
+        if (!isValidComponentId(compId)) {
+          throw new Error(`[ECS] Invalid Component ID: ${compId} in snapshot. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+        }
+        if (compId < USER_COMPONENT_ID_START && !this.components.isRegistered(compId)) {
+          throw new Error(`[ECS] Cannot load snapshot with unregistered reserved component ID: ${compId}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+        }
         const rawColumn = archData.columns[compId];
         const decoded = rawColumn.map(v => this.components.deserializeValue(compId, v));
         arch.columns.set(compId, decoded);

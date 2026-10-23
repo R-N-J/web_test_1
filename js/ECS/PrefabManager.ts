@@ -1,5 +1,6 @@
 import { World } from "./World";
-import { ComponentId, EntityId } from "./Archetype";
+import { ComponentId, EntityId, MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
+import { USER_COMPONENT_ID_START } from "./InternalComponents";
 
 export interface PrefabDefinition {
   name: string;
@@ -19,6 +20,24 @@ export class PrefabManager {
   constructor(private world: World) {}
 
   public register(name: string, definition: PrefabDefinition): void {
+    for (const comp of definition.components) {
+      if (!isValidComponentId(comp.id)) {
+        throw new Error(`[ECS] Invalid Component ID: ${comp.id} in prefab '${name}'. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+      }
+      if (comp.id < USER_COMPONENT_ID_START && !this.world.isComponentRegistered(comp.id)) {
+        throw new Error(`[ECS] Cannot use unregistered reserved component ID: ${comp.id} in prefab '${name}'. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+      }
+    }
+    if (definition.relationships) {
+      for (const rel of definition.relationships) {
+        if (!isValidComponentId(rel.id)) {
+          throw new Error(`[ECS] Invalid Component ID: ${rel.id} in prefab '${name}'. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+        }
+        if (rel.id < USER_COMPONENT_ID_START && !this.world.isComponentRegistered(rel.id)) {
+          throw new Error(`[ECS] Cannot use unregistered reserved component ID: ${rel.id} in prefab '${name}'. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+        }
+      }
+    }
     this.templates.set(name, definition);
   }
 
@@ -55,6 +74,14 @@ export class PrefabManager {
    * @param overrides Optional component values to override the template.
    */
   public spawn(name: string, overrides: Map<ComponentId, unknown> = new Map()): EntityId {
+    for (const id of overrides.keys()) {
+      if (!isValidComponentId(id)) {
+        throw new Error(`[ECS] Invalid Component ID: ${id} in overrides for prefab '${name}'. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+      }
+      if (id < USER_COMPONENT_ID_START && !this.world.isComponentRegistered(id)) {
+        throw new Error(`[ECS] Cannot use unregistered reserved component ID: ${id} in overrides for prefab '${name}'. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+      }
+    }
     const template = this.templates.get(name);
     if (!template) {
       const msg = `[ECS] CRITICAL: Prefab Template '${name}' not found. Ensure it is registered with the PrefabManager during bootstrap.`;
@@ -67,8 +94,10 @@ export class PrefabManager {
 
     // 1. Add components from the template
     for (const comp of template.components) {
-      // Logic Improvement: ensure all component IDs are registered with the engine
-      this.world.registerComponent(comp.id);
+      // Ensure user component IDs are registered with the engine
+      if (comp.id >= USER_COMPONENT_ID_START) {
+        this.world.registerComponent(comp.id);
+      }
 
       // Use override value if provided, otherwise template value
       const val = overrides.has(comp.id) ? overrides.get(comp.id) : comp.value;

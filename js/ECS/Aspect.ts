@@ -1,3 +1,5 @@
+import { MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
+
 /**
  * Defines a filter for Archetypes.
  */
@@ -43,8 +45,8 @@ export class Aspect {
   private static buildMask(ids: number[]): bigint {
     let mask = 0n;
     for (const id of ids) {
-      if (typeof id === "number" && (!Number.isInteger(id) || id < 0)) {
-        throw new Error(`[ECS] Invalid Component ID: ${id}. IDs must be non-negative integers.`);
+      if (!isValidComponentId(id)) {
+        throw new Error(`[ECS] Invalid Component ID: ${id}. IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
       }
       mask |= (1n << BigInt(id));
     }

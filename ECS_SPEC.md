@@ -93,7 +93,17 @@ At all times:
 - **CMP-004:** The framework must validate component IDs before using them to access masks, columns, or archetypes.
 - **CMP-005:** TypeScript generics provide compile-time assistance but must not be treated as runtime validation of component data.
 
-The framework must document the supported component ID range and the requirements for registering components. Compile-time checks should be supplemented by runtime validation where uniqueness or validity cannot be guaranteed by TypeScript.
+Component ID specifications and validation rules:
+- Supported component ID range: Non-negative safe integers in the 16-bit range (`0 <= id <= 65535`, where `MAX_COMPONENT_ID = 65535`). Internal engine components reserve `0..99` (`ENGINE_COMPONENT_ID_START = 0`), and user components use `100..65535` (`USER_COMPONENT_ID_START = 100`).
+- Registration partition: User component registration (`registerAllComponents`) rejects component IDs in the reserved engine range (`0..99`). Internal engine component registration validates and registers IDs in the reserved range.
+- Rationale: Aspect filtering and Archetype bitmasks use BigInt bit shifts (`1n << BigInt(id)`). Capping component IDs at `65535` guarantees strictly bounded BigInt mask allocations (<= 8 KB per mask) and prevents runtime `RangeError` or memory exhaustion from large integers (such as `Number.MAX_SAFE_INTEGER`), while providing ample capacity for up to 65,536 distinct component types.
+- Runtime validation: Invalid component IDs (negative, fractional, non-integer, unsafe integers, numbers > `MAX_COMPONENT_ID`, NaN, Infinity, non-numbers) are rejected with an actionable error at all API boundaries (`registerComponent`, `registerAllComponents`, `addComponent`, `removeComponent`, `getComponent`, `setComponent`, `updateComponent`, `mutateComponent`, `hasComponent`, Aspect construction, Mapper instantiation, EntityEditor methods, RelationshipManager methods, and World observer/serializer APIs) before any bitwise shifts, mask construction, array indexing, or storage mutations occur.
+- Uniqueness and collisions: Component IDs must be unique within a world configuration; duplicate registrations or ID collisions during registration throw clear errors.
+- Absent component semantics: A valid component ID that is registered or valid but not present on an entity follows documented missing-component behavior:
+  - `getComponent<T>()` and `edit.get<T>()` return `undefined`.
+  - `hasComponent()` and `edit.has()` return `false`.
+  - `setComponent()`, `updateComponent()`, and `mutateComponent()` return `false` without modifying storage.
+  - `removeComponent()` and `edit.remove()` are safe no-ops that do not modify archetype storage, alter component masks, or produce false removal notifications.
 
 ### 4.2 Adding, retrieving, replacing, and removing components
 

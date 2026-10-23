@@ -1,4 +1,5 @@
 import { Aspect } from "./Aspect";
+import { MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
 
 /**
  * Polyfill for Symbol.metadata if it's missing (needed for Stage 3 decorators and hybrid support).
@@ -60,6 +61,9 @@ export interface InjectMetadata { // Renamed from WireMetadata
  * @param id Optional ComponentId if injecting a Mapper.
  */
 export function Inject(id?: number) { // Renamed from Wire
+  if (id !== undefined && !isValidComponentId(id)) {
+    throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+  }
   return function(_value: unknown, context: unknown): void {
     const metadata = getMetadata(_value, context);
 
@@ -212,13 +216,14 @@ function getOrCreateAspectData(metadata: Record<string, unknown>): AspectData {
 }
 /**
  * Builds a bitmask from an array of component IDs.
- * Validates that IDs are non-negative integers.
+ * Validates that IDs are non-negative safe integers <= MAX_COMPONENT_ID.
  */
 function buildMask(ids: (number | bigint)[]): bigint {
   let mask = 0n;
   for (const id of ids) {
-    if (typeof id === 'number' && (!Number.isInteger(id) || id < 0)) {
-      throw new Error(`[ECS] Invalid Component ID: ${id}. IDs must be non-negative integers.`);
+    const numId = typeof id === "bigint" ? Number(id) : id;
+    if (!isValidComponentId(numId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
     mask |= (1n << BigInt(id));
   }
@@ -229,9 +234,10 @@ function buildMask(ids: (number | bigint)[]): bigint {
  * The entity must possess ALL of these components.
  */
 export function All(...componentIds: number[]) {
+  const mask = buildMask(componentIds);
   return function(_value: unknown, context: unknown): void {
     const data = getOrCreateAspectData(getMetadata(_value, context));
-    data.allMask |= buildMask(componentIds);
+    data.allMask |= mask;
   };
 }
 
@@ -246,9 +252,10 @@ export function And(...componentIds: number[]) {
  * The entity must possess AT LEAST ONE of these components.
  */
 export function One(...componentIds: number[]) {
+  const mask = buildMask(componentIds);
   return function(_value: unknown, context: unknown): void {
     const data = getOrCreateAspectData(getMetadata(_value, context));
-    data.oneMasks.push(buildMask(componentIds));
+    data.oneMasks.push(mask);
   };
 }
 
@@ -256,9 +263,10 @@ export function One(...componentIds: number[]) {
  * The entity may NOT possess any of these components.
  */
 export function Exclude(...componentIds: number[]) {
+  const mask = buildMask(componentIds);
   return function(_value: unknown, context: unknown): void {
     const data = getOrCreateAspectData(getMetadata(_value, context));
-    data.excludeMask |= buildMask(componentIds);
+    data.excludeMask |= mask;
   };
 }
 
@@ -383,6 +391,9 @@ export function getSingletonComponentId(constructor: unknown): number | undefine
  * This can be used for automated registration or documentation.
  */
 export function SingletonComponent(id: number) {
+  if (!isValidComponentId(id)) {
+    throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+  }
   return function(_value: unknown, context: unknown): void {
     const metadata = getMetadata(_value, context) as Record<string, number>;
     metadata[SINGLETON_CLASS_METADATA_KEY] = id;
@@ -394,6 +405,9 @@ export function SingletonComponent(id: number) {
  * Framework will automatically look for this ID on the World's singleton entity.
  */
 export function Singleton(id: number) {
+  if (!isValidComponentId(id)) {
+    throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+  }
   return function(_value: unknown, context: unknown): void {
     const metadata = getMetadata(_value, context);
 

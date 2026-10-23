@@ -11,19 +11,19 @@ import { One, All, Match, getSystemAspect } from "../ECS/Decorators";
 export function testAspects() {
   console.log("Running Aspect tests...");
 
-  const COMP_A = 1;
-  const COMP_B = 2;
-  const COMP_C = 3;
-  const COMP_D = 4;
-  const COMP_E = 5;
-  const COMP_F = 6;
+  const COMP_A = 101;
+  const COMP_B = 102;
+  const COMP_C = 103;
+  const COMP_D = 104;
+  const COMP_E = 105;
+  const COMP_F = 106;
 
-  const bA = 1n << 1n;
-  const bB = 1n << 2n;
-  const bC = 1n << 3n;
-  const bD = 1n << 4n;
-  const bE = 1n << 5n;
-  const bF = 1n << 6n;
+  const bA = 1n << BigInt(COMP_A);
+  const bB = 1n << BigInt(COMP_B);
+  const bC = 1n << BigInt(COMP_C);
+  const bD = 1n << BigInt(COMP_D);
+  const bE = 1n << BigInt(COMP_E);
+  const bF = 1n << BigInt(COMP_F);
 
   // Test: All
   const aspectAll = Aspect.all(COMP_A, COMP_B);
@@ -47,7 +47,7 @@ export function testAspects() {
   assert.strictEqual(aspectExclude.matches(maskABC), false, "Should not match if C is present");
 
   // Test: Complex Combination
-  const complex = Aspect.all(COMP_A).one(COMP_B, COMP_C).butNot(4);
+  const complex = Aspect.all(COMP_A).one(COMP_B, COMP_C).butNot(COMP_D);
   assert.strictEqual(complex.matches(maskAB), true, "Should match A and B");
   assert.strictEqual(complex.matches(maskA | bD), false, "Should exclude 4");
   assert.strictEqual(complex.matches(maskA), false, "Should require one of B or C");

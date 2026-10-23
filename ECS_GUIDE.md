@@ -1757,9 +1757,10 @@ Every time you call `addComponent`, `removeComponent`, or `deleteEntity`, the en
 - **What to watch out for**: Avoid toggling components frequently (e.g., adding/removing a `VISIBLE` tag every frame). Use a boolean inside a component instead, or use **Batch Editing** via `world.edit(entity)`.
 
 ### 2. Manual Component ID Management
-The system relies on unique numeric IDs for components (e.g., `0`, `1`, `100`).
+The system relies on unique numeric IDs for components in the 16-bit unsigned range `0..65535` (`MAX_COMPONENT_ID = 65535`).
+- **Internal vs. User IDs**: IDs `0..99` are reserved for internal engine components; user-defined components must use IDs `100..65535`.
 - **The Negative**: If you accidentally assign the same ID to two different components, the ECS will treat them as the same, leading to "impossible" bugs.
-- **What to watch out for**: Always define IDs in a central place like `ComponentRegistry.ts` and use the `as const satisfies Record<string, ComponentId>` pattern to catch duplicates at compile time.
+- **What to watch out for**: Always define IDs in a central place like `ComponentRegistry.ts` and use the `as const satisfies Record<string, ComponentId>` pattern to catch duplicates at compile time. IDs outside `0..65535` are rejected with runtime errors.
 
 ### 3. Archetype fragmentation
 If your entities have highly varied combinations of components, you will end up with many Archetypes, each containing only a few entities.
