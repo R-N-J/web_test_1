@@ -370,12 +370,12 @@ An `Aspect` defines the requirements for an entity to be included in a query. It
 #### Factory Methods
 | Method | Description |
 | :--- | :--- |
-| `Aspect.all(...ids)` | Matches entities that have **ALL** of the specified components. |
-| `Aspect.one(...ids)` | Matches entities that have **AT LEAST ONE** of the specified components. |
-| `Aspect.exclude(...ids)`| Matches entities that have **NONE** of the specified components. |
+| `Aspect.all(...ids)` | Matches entities that have **ALL** of the specified components. An empty list imposes no presence constraints (matches all entities). |
+| `Aspect.one(...ids)` | Matches entities that have **AT LEAST ONE** of the specified components. An empty list is unsatisfiable (matches 0 entities). |
+| `Aspect.exclude(...ids)`| Matches entities that have **NONE** of the specified components. An empty list imposes no exclusions (matches all entities). |
 
 #### Composing Complex Queries
-You can chain methods to create complex requirements:
+You can chain methods or use `.and(otherAspect)` to compose requirements using true logical conjunction (AND):
 
 ```typescript
 import { Aspect } from './ECS/Aspect';
@@ -387,9 +387,17 @@ const aliveFighters = Aspect.all(Components.POSITION, Components.HEALTH)
 // Entities that have either FIRE_RESIST or WATER_RESIST
 const resistant = Aspect.one(Components.FIRE_RESIST, Components.WATER_RESIST);
 
-// Combining requirements from another Aspect
+// Combining requirements from another Aspect: requires ALIVE and FIGHTER and (FIRE_RESIST or WATER_RESIST)
 const combined = aliveFighters.and(resistant);
+
+// Conjunction of multiple one() requirements: requires at least one from (A or B) AND at least one from (C or D)
+const multiOne = Aspect.one(Components.FIRE_RESIST, Components.WATER_RESIST)
+                       .and(Aspect.one(Components.SWORD, Components.BOW));
 ```
+
+#### Legacy Compatibility
+- **Direct Constructor**: `new Aspect(allMask, oneMask, excludeMask)` remains compatible with legacy code passing numeric/bigint masks.
+- **Combined `oneMask` Getter**: Returns a bitwise OR union of all disjunctive masks in `oneMasks`. Note that while this provides backwards compatibility, a single bitmask cannot represent the full semantics of multi-group queries (e.g. `(A or B) and (C or D)`). Use `aspect.oneMasks` for the full array of disjunctive clauses.
 
 ### The Unified Query API
 The `World` provides a consistent set of methods for retrieving entities based on an `Aspect`, `Group`, or `Tag`. This symmetric API ensures that you use the same vocabulary regardless of how you are searching for entities.

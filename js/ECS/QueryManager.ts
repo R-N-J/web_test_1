@@ -11,7 +11,7 @@ export class QueryManager {
    * Generates a unique stable key for an Aspect.
    */
   private getAspectKey(aspect: Aspect): string {
-    return `${aspect.allMask}:${aspect.oneMask}:${aspect.excludeMask}`;
+    return `${aspect.allMask}:[${aspect.oneMasks.join(',')}]:${aspect.excludeMask}`;
   }
 
   /**
@@ -20,6 +20,8 @@ export class QueryManager {
    */
   public invalidateCache(): void {
     this.isCacheDirty = true;
+    this.queryCache.clear();
+    this.activeAspects.clear();
   }
 
   /**
@@ -28,6 +30,7 @@ export class QueryManager {
   private getMatchingArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
     if (this.isCacheDirty) {
       this.queryCache.clear();
+      this.activeAspects.clear();
       this.isCacheDirty = false;
     }
 
@@ -106,9 +109,18 @@ export class QueryManager {
   }
 
   public registerArchetype(arch: Archetype): void {
+    if (this.isCacheDirty) {
+      this.queryCache.clear();
+      this.activeAspects.clear();
+      this.isCacheDirty = false;
+      return;
+    }
     for (const [key, aspect] of this.activeAspects) {
       if (aspect.matches(arch.mask)) {
-        this.queryCache.get(key)!.push(arch);
+        const cached = this.queryCache.get(key);
+        if (cached) {
+          cached.push(arch);
+        }
       }
     }
   }
@@ -123,5 +135,6 @@ export class QueryManager {
   public clear(): void {
     this.queryCache.clear();
     this.activeAspects.clear();
+    this.isCacheDirty = false;
   }
 }
