@@ -209,6 +209,9 @@ export class ComponentManager {
     additions: Map<ComponentId, unknown>,
     removals: Set<ComponentId>
   ): void {
+    if (!this.entityManager.isValid(entity)) {
+      return;
+    }
     const oldLocation = this.entityManager.getLocation(entity);
 
     // If the same archetype, this is NON-structural (no mask change).

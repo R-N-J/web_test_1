@@ -257,6 +257,88 @@ export function testWorld() {
   defWorld.setDeferred(false); // Disables deferred mode and flushes queue
   assert.strictEqual(defAdded.length, 1, "Deferred batch add should trigger observer upon flush");
 
+  // --- Tests: EntityEditor.commit() Idempotency & Lifecycle (BAT-004, BAT-005) ---
+  const idemWorld = new World();
+  idemWorld.registerComponent(C1);
+  idemWorld.registerComponent(C2);
+
+  const idemAddEventsC1: number[] = [];
+  const idemMaskEvents: number[] = [];
+  idemWorld.subscribeOnAdd(C1, (e) => idemAddEventsC1.push(e));
+  idemWorld.subscribeOnMaskChange((e) => idemMaskEvents.push(e));
+
+  // 1. Committing an editor once applies its intended changes
+  const editorNew = idemWorld.buildEntity().add(C1, { val: 1 });
+  const newId1 = editorNew.commit();
+  assert.strictEqual(idemWorld.isValid(newId1), true, "New entity should be valid");
+  assert.strictEqual(idemWorld.hasComponent(newId1, C1), true, "New entity should have C1");
+  assert.strictEqual(idemAddEventsC1.length, 1, "Add observer should be called once on first commit");
+  assert.strictEqual(idemMaskEvents.length, 1, "Mask observer should be called once on first commit");
+
+  // 2. Committing the same editor twice does not apply changes a second time (BAT-005)
+  const newId2 = editorNew.commit();
+  assert.strictEqual(newId2, newId1, "Repeated commit must return same EntityId");
+  assert.strictEqual(idemAddEventsC1.length, 1, "Add observer must not fire again on second commit");
+  assert.strictEqual(idemMaskEvents.length, 1, "Mask observer must not fire again on second commit");
+
+  // 3. Repeated commits do not reapply changes if entity was modified externally
+  idemWorld.removeComponent(newId1, C1);
+  assert.strictEqual(idemWorld.hasComponent(newId1, C1), false, "Entity no longer has C1");
+  editorNew.commit(); // Calling commit again on already-committed editor
+  assert.strictEqual(idemWorld.hasComponent(newId1, C1), false, "Repeated commit must not re-add C1 after external removal");
+
+  // 4. Committing an existing entity editor twice behaves consistently (BAT-004, BAT-005)
+  const existingEntity = idemWorld.createEntity();
+  const editEventsC2: number[] = [];
+  idemWorld.subscribeOnAdd(C2, (e) => editEventsC2.push(e));
+
+  const editorExisting = idemWorld.edit(existingEntity).add(C2, { val: 20 });
+  const editId1 = editorExisting.commit();
+  assert.strictEqual(editId1, existingEntity, "First commit returns existing entity ID");
+  assert.strictEqual(idemWorld.hasComponent(existingEntity, C2), true, "Existing entity has C2");
+  assert.strictEqual(editEventsC2.length, 1, "C2 add observer fired once");
+
+  const editId2 = editorExisting.commit();
+  assert.strictEqual(editId2, existingEntity, "Second commit returns existing entity ID");
+  assert.strictEqual(editEventsC2.length, 1, "C2 add observer does not fire a second time");
+
+  // 5. Explicit commit followed by automatic flush does not reapply changes
+  idemAddEventsC1.length = 0;
+  const editorFlush = idemWorld.buildEntity().add(C1, { val: 99 });
+  const flushId = editorFlush.commit();
+  assert.strictEqual(flushId, editorFlush.entityId, "Explicit commit returns entity ID");
+  assert.strictEqual(idemAddEventsC1.length, 1, "C1 add observer fired on explicit commit");
+  idemWorld.flush(); // Auto-flush of active editors
+  assert.strictEqual(idemAddEventsC1.length, 1, "Auto-flush must not reapply already committed editor");
+
+  // 6. Uncommitted editor auto-flush followed by explicit commit
+  idemAddEventsC1.length = 0;
+  const editorAuto = idemWorld.buildEntity().add(C1, { val: 88 });
+  idemWorld.flush(); // Auto-commits editorAuto
+  assert.strictEqual(idemAddEventsC1.length, 1, "C1 add observer fired on auto-flush");
+  const autoId = editorAuto.commit(); // Subsequent explicit commit
+  assert.strictEqual(autoId, editorAuto.entityId, "Explicit commit after flush returns entity ID");
+  assert.strictEqual(idemAddEventsC1.length, 1, "Explicit commit after auto-flush must not fire observer again");
+
+  // 7. Commit on deleted entity is safe and does not revive entity
+  const delEntity = idemWorld.createEntity();
+  const delEditor = idemWorld.edit(delEntity).add(C1, { val: 55 });
+  idemWorld.deleteEntity(delEntity);
+  const delCommitId = delEditor.commit();
+  assert.strictEqual(delCommitId, delEntity, "Commit on deleted entity returns entity ID");
+  assert.strictEqual(idemWorld.isValid(delEntity), false, "Deleted entity must remain invalid after commit");
+  assert.strictEqual(idemWorld.hasComponent(delEntity, C1), false, "Deleted entity must not have C1");
+
+  // 8. Deferred batch repeated commits
+  idemAddEventsC1.length = 0;
+  idemWorld.setDeferred(true);
+  const defEditor = idemWorld.buildEntity().add(C1, { val: 123 });
+  defEditor.commit();
+  defEditor.commit(); // Repeated commit in deferred mode
+  assert.strictEqual(idemAddEventsC1.length, 0, "No observers fired before flush in deferred mode");
+  idemWorld.setDeferred(false); // Flushes queue
+  assert.strictEqual(idemAddEventsC1.length, 1, "Deferred batch must only apply once after repeated commits upon flush");
+
   console.log("World tests completed!");
 }
 

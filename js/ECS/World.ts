@@ -609,6 +609,9 @@ export class World {
     additions: Map<ComponentId, unknown>,
     removals: Set<ComponentId>
   ): void {
+    if (!this.isValid(entity)) {
+      return;
+    }
     if (this.isDeferred) {
       this.deferredQueue.push({ type: 'BATCH', entity, mask: newMask, additions: new Map(additions), removals: new Set(removals) });
       return;
@@ -685,6 +688,9 @@ export class World {
     this.mapperCache.clear();
     // 6. Clear Event Bus handlers
     this.events.clear();
+    // 7. Clear Active Editors and Deferred Queue
+    this.activeEditors.clear();
+    this.deferredQueue = [];
     // Note: PrefabManager doesn't usually need clearing as
     // blueprints persist across level changes.
     // Note: Usually we don't clear assets here as they persist across levels,
