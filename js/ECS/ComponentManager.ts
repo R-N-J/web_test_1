@@ -142,6 +142,9 @@ export class ComponentManager {
 
 
   public transmute(entity: EntityId, newMask: bigint, newComponentId?: ComponentId, newValue?: unknown): void {
+    if (!this.entityManager.isValid(entity)) {
+      return;
+    }
     const oldLocation = this.entityManager.getLocation(entity);
     const oldMask = oldLocation?.arch.mask ?? 0n;
     const dataToMigrate = new Map<ComponentId, unknown>();
@@ -209,6 +212,9 @@ export class ComponentManager {
     additions: Map<ComponentId, unknown>,
     removals: Set<ComponentId>
   ): void {
+    if (!this.entityManager.isValid(entity)) {
+      return;
+    }
     const oldLocation = this.entityManager.getLocation(entity);
 
     // If the same archetype, this is NON-structural (no mask change).
@@ -222,6 +228,9 @@ export class ComponentManager {
 
     const oldMask = oldLocation?.arch.mask ?? 0n;
     const dataToMigrate = new Map<ComponentId, unknown>();
+
+    const addedBits = newMask & ~oldMask;
+    const removedBits = oldMask & ~newMask;
 
     if (oldLocation) {
       const { arch, row } = oldLocation;
@@ -251,6 +260,8 @@ export class ComponentManager {
 
     const newRow = targetArch.addEntity(entity, dataToMigrate);
     this.entityManager.setLocation(entity, targetArch, newRow);
+
+    this.notifyObservers(entity, addedBits, removedBits);
     // NEW: structural event
     this.emitMaskChange(entity, oldMask, newMask);
   }

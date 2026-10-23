@@ -11,6 +11,7 @@ export class EntityEditor {
   private newMask: bigint;
   private additions = new Map<ComponentId, unknown>();
   private removals = new Set<ComponentId>();
+  private committed = false;
 
   constructor(private world: World, private entity: EntityId, initialMask: bigint) {
     this.newMask = initialMask;
@@ -121,12 +122,28 @@ export class EntityEditor {
   }
 
   /**
+   * Returns whether this editor has already been committed.
+   */
+  public get isCommitted(): boolean {
+    return this.committed;
+  }
+
+  /**
    * Finalizes the changes.
    * In our engine, this can be called manually for immediate effect,
    * but will also be called automatically by World.flush() if omitted.
+   * Calling commit() more than once is an idempotent no-op (BAT-005).
    */
   public commit(): EntityId {
+    if (this.committed) {
+      return this.entity;
+    }
+    if (!this.world.isValid(this.entity)) {
+      this.world.finalizeEditor(this);
+      return this.entity;
+    }
     this.world.applyBatchChanges(this.entity, this.newMask, this.additions, this.removals);
+    this.committed = true;
     this.world.finalizeEditor(this); // Remove from tracking
     return this.entity;
   }

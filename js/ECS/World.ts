@@ -42,7 +42,7 @@ export interface WorldSnapshot {
   groups: Record<string, EntityId[]>;
 }
 
-const ECS_SNAPSHOT_VERSION = 1;
+export const ECS_SNAPSHOT_VERSION = 2;
 
 
 
@@ -67,7 +67,7 @@ export class World {
   private singletonEntity: EntityId;
 
   private deferredQueue: DeferredOp[] = [];
-  private isDeferred = false;
+  private _isDeferred = false;
 
   constructor() {
     this.singletonEntity = this.createEntity();
@@ -183,18 +183,29 @@ export class World {
   }
 
   /**
+   * Returns whether deferred mode is currently active.
+   */
+  public get isDeferred(): boolean {
+    return this._isDeferred;
+  }
+
+  /**
    * Enables or disables deferred mode.
    * When true, structural changes are queued instead of applied immediately.
    */
   public setDeferred(state: boolean): void {
-    this.isDeferred = state;
+    this._isDeferred = state;
     if (!state && this.deferredQueue.length > 0) {
       this.flush();
     }
   }
 
   public addComponent(entity: EntityId, componentId: ComponentId, value: unknown): void {
-    if (this.isDeferred) {
+    if (!this.isValid(entity)) {
+      return;
+    }
+
+    if (this._isDeferred) {
       this.deferredQueue.push({ type: 'ADD', entity, component: componentId, value });
       return;
     }
@@ -216,10 +227,15 @@ export class World {
   }
 
   public removeComponent(entity: EntityId, componentId: ComponentId): void {
-    if (this.isDeferred) {
+    if (!this.isValid(entity)) {
+      return;
+    }
+
+    if (this._isDeferred) {
       this.deferredQueue.push({ type: 'REMOVE', entity, component: componentId });
       return;
     }
+
     const loc = this.entities.getLocation(entity);
     if (!loc) return;
 
@@ -472,15 +488,20 @@ export class World {
 
   /**
    * Deletes an entity, cleans up its data, and recycles its ID.
+   * If the entity is invalid or has already been deleted, this operation is a safe no-op.
    */
   public deleteEntity(entity: EntityId): void {
-    if (this.isDeferred) {
-      this.deferredQueue.push({ type: 'DELETE', entity });
-      return;
-    }
     // Safety: prevent accidental deletion of the global singleton entity
     if (entity === this.singletonEntity) {
       console.error("Critical Error: Attempted to delete the Singleton Entity.");
+      return;
+    }
+    if (!this.isValid(entity)) {
+      return;
+    }
+
+    if (this._isDeferred) {
+      this.deferredQueue.push({ type: 'DELETE', entity });
       return;
     }
 
@@ -605,7 +626,10 @@ export class World {
     additions: Map<ComponentId, unknown>,
     removals: Set<ComponentId>
   ): void {
-    if (this.isDeferred) {
+    if (!this.isValid(entity)) {
+      return;
+    }
+    if (this._isDeferred) {
       this.deferredQueue.push({ type: 'BATCH', entity, mask: newMask, additions: new Map(additions), removals: new Set(removals) });
       return;
     }
@@ -620,18 +644,18 @@ export class World {
    * Executes all queued structural changes AND any uncommitted editors..
    */
   public flush(): void {
-    // 1. Auto-commit any editors created during systems execution
-    for (const editor of this.activeEditors) {
-      editor.commit(); // This now removes itself from the Set via finalizeEditor
-    }
+    const wasDeferred = this._isDeferred;
+    this._isDeferred = false;
+    try {
+      // 1. Auto-commit any editors created during systems execution
+      for (const editor of Array.from(this.activeEditors)) {
+        editor.commit(); // This now removes itself from the Set via finalizeEditor
+      }
 
-    // 2. Process the structural queue (ADD, REMOVE, DELETE)
-    while (this.deferredQueue.length > 0) {
-      const ops = this.deferredQueue;
-      this.deferredQueue = []; // Clear for next batch
-
-      for (const op of ops) {
-        if (!this.isValid(op.entity) && op.type !== 'DELETE') continue;
+      // 2. Process the structural queue (ADD, REMOVE, DELETE)
+      while (this.deferredQueue.length > 0) {
+        const op = this.deferredQueue.shift()!;
+        if (!this.isValid(op.entity)) continue;
 
         switch (op.type) {
           case 'ADD': this.addComponent(op.entity, op.component, op.value); break;
@@ -640,6 +664,8 @@ export class World {
           case 'BATCH': this.applyBatchChanges(op.entity, op.mask, op.additions, op.removals); break;
         }
       }
+    } finally {
+      this._isDeferred = wasDeferred;
     }
   }
 
@@ -681,6 +707,9 @@ export class World {
     this.mapperCache.clear();
     // 6. Clear Event Bus handlers
     this.events.clear();
+    // 7. Clear Active Editors and Deferred Queue
+    this.activeEditors.clear();
+    this.deferredQueue = [];
     // Note: PrefabManager doesn't usually need clearing as
     // blueprints persist across level changes.
     // Note: Usually we don't clear assets here as they persist across levels,

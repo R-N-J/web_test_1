@@ -65,7 +65,12 @@ The core ECS should support these features without needing to know their game-sp
 - **ENT-010:** Deleting an entity more than once must not corrupt entity allocation or storage. The exact public API behavior—no-op or error—must be documented and tested.
 - **ENT-011:** Entity allocation and versioning must use a representation whose supported range and overflow behavior are explicitly defined.
 
-Entity IDs may use index and generation/version information. The implementation must prove that its encoding and decoding are safe for the declared range, including JavaScript bitwise-operation limitations.
+Entity IDs are represented as positive safe integers using safe arithmetic encoding: `id = index * 65536 + generation`.
+- Valid generation range: 1 through 65,535 (16 bits).
+- Supported index range: 0 through 2^37 - 1 (137,438,953,471), keeping all possible IDs within `Number.MAX_SAFE_INTEGER` (2^53 - 1).
+- Decoding is performed via arithmetic division (`index = Math.floor(id / 65536)`) and modulo (`generation = id % 65536`), avoiding 32-bit signed bitwise shift limitations.
+- Slot exhaustion & retirement: When an entity at generation 65,535 is deleted/recycled, its slot is permanently retired and never reused. No stale reference can ever be resurrected.
+- ID validation: `isValid(entity)` strictly validates that the identifier is a positive safe integer within allocated index bounds and matching the live generation.
 
 ### 3.3 Entity lifecycle invariants
 
@@ -197,12 +202,12 @@ Structural changes include entity creation, deletion, and adding or removing com
 
 - **STR-004:** When structural operations are deferred, they are queued and applied at a documented flush boundary.
 - **STR-005:** A deferred operation must not corrupt the active archetype iteration.
-- **STR-006:** The queue must preserve a documented execution order. The initial expected policy is FIFO.
+- **STR-006:** The queue must preserve a documented execution order. Operations are processed sequentially in FIFO order (`shift()`).
 - **STR-007:** After a successful flush, all successfully applied operations are reflected in storage, queries, and relevant notifications.
-- **STR-008:** Exceptions during system execution or flushing must not leave the world permanently stuck in deferred mode.
+- **STR-008:** Exceptions during system execution or flushing must not leave the world permanently stuck in deferred mode. If an operation throws during `World.flush()`, that operation has already been removed from the queue and its underlying storage mutation remains in effect (mutations are non-transactional); any subsequent operations that were not yet processed remain queued and can be processed on subsequent `flush()` calls without replaying completed operations.
 - **STR-009:** Repeated flushes with no pending operations must be safe.
 
-The implementation must explicitly define whether an entity created through a deferred builder is queryable before commit, whether its ID is available before commit, and what happens when queued operations target an entity that has been deleted before the queue is applied.
+The implementation explicitly defines that operations targeting an invalid or already deleted entity are safe no-ops and are not queued, preventing stale or recycled IDs from executing against reallocated entities.
 
 ### 7.3 EntityEditor and batch changes
 
@@ -212,9 +217,9 @@ The implementation must explicitly define whether an entity created through a de
 - **BAT-002:** A batch must not leave partially inconsistent archetype storage.
 - **BAT-003:** Notifications must accurately represent the changes actually applied.
 - **BAT-004:** Explicit `commit()` and automatic flushing must follow documented and consistent lifecycle rules.
-- **BAT-005:** Calling `commit()` more than once must not duplicate the batch's effects.
+- **BAT-005:** Calling `commit()` more than once must not duplicate the batch's effects. If a commit throws during an observer notification, the editor remains uncommitted; subsequent `flush()` retries take the non-structural update path to finalize values without duplicating component add/remove observer events.
 
-The implementation must decide and test what happens if a batch fails partway through. Full rollback is desirable but is not assumed until implemented and tested.
+ECS storage mutations are non-transactional: mutations take effect in archetype storage prior to observer callback invocation. An observer failure aborts remaining notifications and propagates to the caller without rolling back committed storage changes.
 
 ## 8. Component observers and change notifications
 
@@ -226,7 +231,7 @@ Observers allow framework features and game systems to react to entity or compon
 - **OBS-004:** Notifications must not be emitted for changes that were not applied.
 - **OBS-005:** Notifications must identify the correct entity and component.
 - **OBS-006:** Deleting an entity must not leave stale observer or entity membership state.
-- **OBS-007:** Observer exceptions must have documented propagation behavior and must not silently corrupt core storage.
+- **OBS-007:** Observer exceptions abort subsequent observer callbacks and mask change notifications for that event and propagate immediately to the caller without corrupting or rolling back core storage mutations.
 
 Component notifications and archetype/mask-change notifications are distinct concepts. The framework must document which notification types exist and which operations trigger each one.
 
@@ -246,8 +251,8 @@ Component notifications and archetype/mask-change notifications are distinct con
 ### 9.2 Update and exception behavior
 
 - **SYS-007:** A scheduler update runs the eligible systems in their established order.
-- **SYS-008:** The scheduler reliably restores its internal state when a system throws, including deferred-operation mode.
-- **SYS-009:** The framework documents whether remaining systems execute after a system throws.
+- **SYS-008:** The scheduler reliably restores its internal state when a system throws, including deferred-operation mode and turn state. Any structural changes queued prior to the failure are flushed upon exiting deferred mode in `finally`.
+- **SYS-009:** When a system throws during an update pass, subsequent systems in that pass do not execute to prevent cascading errors; the exception propagates to the caller, and the scheduler and world remain ready for subsequent updates once the error condition is resolved.
 - **SYS-010:** Enabling, disabling, pausing, resuming, and resetting systems or turns must have consistent semantics.
 - **SYS-011:** Interval-based systems execute according to the documented tick or time basis, including boundary conditions.
 
@@ -432,11 +437,11 @@ Do not combine a large architectural rewrite with unrelated bug fixes. Do not ma
 
 The following decisions must be confirmed during implementation review:
 
-- The supported entity ID range and exact index/version encoding.
+- The supported entity ID range and exact index/version encoding (Resolved: 16-bit generation [1..65,535], 37-bit index [0..2^37 - 1], arithmetic encoding `id = index * 65536 + generation`, permanent slot retirement at generation 65,535).
 - Whether adding an existing component replaces its value or throws.
 - Whether deleting an invalid entity is a no-op or an error.
 - The precise visibility of deferred creations and edits before commit.
-- The behavior of partially failed batches and flushes.
+- The behavior of partially failed batches and flushes (Resolved: non-transactional; storage mutations precede observer emissions and are retained without rollback; observer exceptions abort subsequent callbacks for that change and propagate; throwing operations are shifted from the queue to prevent replay, while unprocessed operations remain queued for subsequent flushes).
 - The notification policy for component replacement and in-place mutation.
 - The guarantees, if any, about query ordering.
 - Which state survives `world.clear()` and scene transitions.

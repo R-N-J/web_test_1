@@ -9,10 +9,14 @@ export interface EntityLocation {
   row: number;
 }
 
+export const GENERATION_SHIFT = 65536;
+export const MAX_GENERATION = 65535;
+
 export class EntityManager {
   private entityToLocation = new Map<EntityId, EntityLocation>();
   private nextEntityId = 0;
   private freeEntities = new Bag<EntityId>();
+  private freeEntitiesSet = new Set<EntityId>();
   private versions = new Uint32Array(1024); // Store versions for each index
 
 
@@ -30,10 +34,16 @@ export class EntityManager {
   public createEntity(): EntityId {
     if (this.freeEntities.length > 0) {
       // The version is already incremented in recycleEntity, just return it
-      return this.freeEntities.removeAt(this.freeEntities.length - 1) as EntityId;
+      const id = this.freeEntities.removeAt(this.freeEntities.length - 1) as EntityId;
+      this.freeEntitiesSet.delete(id);
+      return id;
     }
 
     const index = this.nextEntityId++;
+    const maxSafeIndex = Math.floor(Number.MAX_SAFE_INTEGER / GENERATION_SHIFT);
+    if (index > maxSafeIndex) {
+      throw new Error(`Entity allocation limit exceeded: index ${index} exceeds maximum safe index ${maxSafeIndex}`);
+    }
     this.ensureVersionCapacity(index); // Ensure we have room for this index
     const version = 1;
     this.versions[index] = version;
@@ -41,36 +51,61 @@ export class EntityManager {
   }
 
   public recycleEntity(entity: EntityId): void {
+    if (!this.isValid(entity)) {
+      return;
+    }
+
     const index = this.unpackIndex(entity);
-    let newVersion = (this.unpackVersion(entity) + 1) & 0xFF; // because of 8-bit, Wraps at 255
+    const currentGen = this.unpackVersion(entity);
+    const nextGen = currentGen + 1;
 
-    // If we hit 0, bump it to 1 to avoid 'null-like' IDs.  Just in case if it was used as a "null" or "uninitialized" marker
-    if (newVersion === 0) newVersion = 1;
+    if (nextGen <= MAX_GENERATION) {
+      this.versions[index] = nextGen;
+      const newId = this.pack(index, nextGen);
+      this.freeEntities.add(newId);
+      this.freeEntitiesSet.add(newId);
+    } else {
+      // Permanently retire slot when reaching generation limit (ENT-011)
+      this.versions[index] = 0;
+    }
 
-    const newId = this.pack(index, newVersion);
-    this.versions[index] = newVersion;
-
-    this.freeEntities.add(newId);
     this.entityToLocation.delete(entity);
   }
 
-  // Helpers to pack/unpack bits (24 bits for index, 8 bits for the version)
-  // that is 16.7M entities with 255 versions each
+  // Arithmetic encoding: id = index * 65536 + generation
+  // Supported index range: 0 .. 2^37 - 1, generation range: 1 .. 65,535
   private pack(index: number, version: number): EntityId {
-    return (index << 8) | version;
+    return index * GENERATION_SHIFT + version;
   }
 
   private unpackIndex(id: EntityId): number {
-    return id >> 8;
+    return Math.floor(id / GENERATION_SHIFT);
   }
 
   private unpackVersion(id: EntityId): number {
-    return id & 0xFF;
+    return id % GENERATION_SHIFT;
   }
 
   public isValid(entity: EntityId): boolean {
-    const index = this.unpackIndex(entity);
-    return index >= 0 && index < this.nextEntityId && this.versions[index] === this.unpackVersion(entity);
+    if (typeof entity !== "number" || !Number.isSafeInteger(entity) || entity <= 0) {
+      return false;
+    }
+
+    const generation = entity % GENERATION_SHIFT;
+    if (generation < 1 || generation > MAX_GENERATION) {
+      return false;
+    }
+
+    const index = Math.floor(entity / GENERATION_SHIFT);
+    if (index < 0 || index >= this.nextEntityId) {
+      return false;
+    }
+
+    if (this.versions[index] !== generation) {
+      return false;
+    }
+
+    return !this.freeEntitiesSet.has(entity);
   }
 
   public setLocation(entity: EntityId, arch: Archetype, row: number): void {
@@ -173,6 +208,7 @@ export class EntityManager {
     this.nextEntityId = 0;
     // Reuse Bag storage if you want; if not available, recreate it (your current approach).
     this.freeEntities = new Bag<EntityId>();
+    this.freeEntitiesSet.clear();
 
     // Reset versions so any old EntityId becomes invalid after a clear.
     // This keeps behavior predictable across world resets / snapshot loads.
@@ -188,6 +224,7 @@ export class EntityManager {
     this.entityToLocation.clear();
     this.nextEntityId = 0;
     this.freeEntities = new Bag<EntityId>();
+    this.freeEntitiesSet.clear();
     this.versions = new Uint32Array(1024);
   }
 
@@ -211,8 +248,10 @@ export class EntityManager {
    */
   public loadFreeEntities(free: EntityId[]): void {
     this.freeEntities = new Bag<EntityId>();
+    this.freeEntitiesSet.clear();
     for (const id of free) {
       this.freeEntities.add(id);
+      this.freeEntitiesSet.add(id);
     }
   }
 

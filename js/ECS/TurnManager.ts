@@ -30,20 +30,22 @@ export class TurnManager {
 
     this._isPlayerTurn = false;
 
-    // Increment turn count via the non-structural update API
-    this.world.updateComponent<Clock>(this.world.getSingletonEntity(), InternalComponents.CLOCK, (clock) => {
-      clock.turn++;
-      return clock;
-    });
+    try {
+      // Increment turn count via the non-structural update API
+      this.world.updateComponent<Clock>(this.world.getSingletonEntity(), InternalComponents.CLOCK, (clock) => {
+        clock.turn++;
+        return clock;
+      });
 
-    // 1. Logic Phase: Run any one-shot logic per turn
-    // (e.g. updating cooldowns or poison ticks via specific systems)
+      // 1. Logic Phase: Run any one-shot logic per turn
+      // (e.g. updating cooldowns or poison ticks via specific systems)
 
-    // 2. Execution Phase: Tick the scheduler
-    this.tick();
-
-    // 3. Return control to player
-    this._isPlayerTurn = true;
+      // 2. Execution Phase: Tick the scheduler
+      this.tick();
+    } finally {
+      // 3. Return control to player
+      this._isPlayerTurn = true;
+    }
   }
 
   /**
