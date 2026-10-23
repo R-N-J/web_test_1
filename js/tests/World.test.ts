@@ -530,6 +530,298 @@ export function testWorld() {
   delDefWorld.setDeferred(false);
   assert.strictEqual(delDefWorld.isValid(reusedEntity), true, "Deferred delete of invalid IDs is safe no-op");
 
+  // --- Task 10: Audit Query Correctness and Cache Invalidation ---
+
+  // 1. Query API Agreement (QRY-001 - QRY-004)
+  // For the same unchanged world and Aspect: view(), getEntities(), count(), findFirst(), getArchetypes()
+  {
+    const qWorld = new World();
+    const CA = 10;
+    const CB = 11;
+    const CC = 12;
+    const CD = 13;
+    qWorld.registerComponent(CA);
+    qWorld.registerComponent(CB);
+    qWorld.registerComponent(CC);
+    qWorld.registerComponent(CD);
+
+    // Create diverse entity population across different archetypes
+    qWorld.createEntity(); // empty entity (no components)
+    qWorld.buildEntity().with(CA, { val: "A" }).commit();
+    qWorld.buildEntity().with(CB, { val: "B" }).commit();
+    qWorld.buildEntity().with(CA, { val: "AB_A" }).with(CB, { val: "AB_B" }).commit();
+    qWorld.buildEntity().with(CA, { val: "AC_A" }).with(CC, { val: "AC_C" }).commit();
+    qWorld.buildEntity().with(CA, {}).with(CB, {}).with(CC, {}).commit();
+    qWorld.buildEntity().with(CB, {}).with(CC, {}).with(CD, {}).commit();
+
+    const aspectsToTest = [
+      Aspect.all(CA),
+      Aspect.all(CA, CB),
+      Aspect.all(CA).exclude(CC),
+      Aspect.one(CB, CD),
+      Aspect.one(CA, CB).and(Aspect.one(CC, CD)),
+      Aspect.EMPTY,
+      Aspect.one(), // unsatisfiable
+      Aspect.exclude(CA, CB, CC, CD),
+      Aspect.all(CA).butNot(CB)
+    ];
+
+    for (const aspect of aspectsToTest) {
+      const entitiesArray = qWorld.getEntities(aspect);
+      const streamedEntities = Array.from(qWorld.view(aspect));
+      const totalCount = qWorld.count(aspect);
+      const firstEntity = qWorld.findFirst(aspect);
+      const matchingArchetypes = qWorld.getArchetypes(aspect);
+
+      // Verify no duplicate entities in array or view
+      const uniqueArray = new Set(entitiesArray);
+      assert.strictEqual(uniqueArray.size, entitiesArray.length, "getEntities must not contain duplicates");
+      assert.strictEqual(new Set(streamedEntities).size, streamedEntities.length, "view must not contain duplicates");
+
+      // Verify agreement between view() and getEntities()
+      assert.strictEqual(entitiesArray.length, streamedEntities.length, "view and getEntities must agree on length");
+      for (const ent of entitiesArray) {
+        assert.ok(streamedEntities.includes(ent), `view must contain entity ${ent}`);
+      }
+
+      // Verify count() agreement
+      assert.strictEqual(totalCount, entitiesArray.length, "count must equal getEntities length");
+
+      // Verify findFirst() agreement
+      if (entitiesArray.length === 0) {
+        assert.strictEqual(firstEntity, undefined, "findFirst must return undefined when no entities match");
+      } else {
+        assert.ok(firstEntity !== undefined && entitiesArray.includes(firstEntity), "findFirst must return an entity from matching entities");
+        assert.strictEqual(qWorld.matches(firstEntity, aspect), true, "findFirst entity must satisfy aspect");
+      }
+
+      // Verify getArchetypes() contains only matching archetypes without duplicates
+      const uniqueArchs = new Set(matchingArchetypes);
+      assert.strictEqual(uniqueArchs.size, matchingArchetypes.length, "getArchetypes must not return duplicate archetypes");
+      for (const arch of matchingArchetypes) {
+        assert.strictEqual(aspect.matches(arch.mask), true, "Each returned archetype mask must match aspect");
+      }
+
+      // Verify mutating returned archetype array does not corrupt query cache
+      const originalArchCount = matchingArchetypes.length;
+      matchingArchetypes.push(...matchingArchetypes); // external mutation
+      const freshArchetypes = qWorld.getArchetypes(aspect);
+      assert.strictEqual(freshArchetypes.length, originalArchCount, "Mutating getArchetypes return array must not corrupt cache");
+    }
+  }
+
+  // 2. Cached queries and new archetypes (QRY-006)
+  {
+    const cqWorld = new World();
+    const C1 = 20;
+    const C2 = 21;
+    const C3 = 22;
+    cqWorld.registerComponent(C1);
+    cqWorld.registerComponent(C2);
+    cqWorld.registerComponent(C3);
+
+    const query1 = Aspect.all(C1);
+    // Populate query cache
+    assert.strictEqual(cqWorld.count(query1), 0);
+    assert.deepStrictEqual(cqWorld.getEntities(query1), []);
+
+    // Create entity with C1 (new archetype mask C1)
+    const ent1 = cqWorld.buildEntity().with(C1, {}).commit();
+    assert.strictEqual(cqWorld.count(query1), 1);
+    assert.deepStrictEqual(cqWorld.getEntities(query1), [ent1]);
+
+    // Create entity with C2 (new archetype mask C2, non-matching)
+    const ent2 = cqWorld.buildEntity().with(C2, {}).commit();
+    assert.strictEqual(cqWorld.count(query1), 1);
+    assert.deepStrictEqual(cqWorld.getEntities(query1), [ent1]);
+
+    // Create entity with C1 + C3 (new archetype mask C1|C3, matching)
+    const ent3 = cqWorld.buildEntity().with(C1, {}).with(C3, {}).commit();
+    assert.strictEqual(cqWorld.count(query1), 2);
+    const res = cqWorld.getEntities(query1);
+    assert.strictEqual(res.length, 2);
+    assert.ok(res.includes(ent1) && res.includes(ent3) && !res.includes(ent2));
+
+    // Test repeated registration of existing archetype does not duplicate results
+    const qm = (cqWorld as unknown as { queries: { registerArchetype: (arch: unknown) => void; invalidateCache: () => void } }).queries;
+    const archC1 = (cqWorld as unknown as { components: { archetypes: Map<bigint, unknown> } }).components.archetypes.get(1n << BigInt(C1))!;
+    assert.ok(archC1 !== undefined);
+    qm.registerArchetype(archC1);
+    qm.registerArchetype(archC1);
+
+    assert.strictEqual(cqWorld.count(query1), 2, "Repeated registerArchetype must not duplicate count");
+    assert.strictEqual(cqWorld.getEntities(query1).length, 2, "Repeated registerArchetype must not duplicate entities");
+    assert.strictEqual(cqWorld.getArchetypes(query1).length, 2, "Repeated registerArchetype must not duplicate archetypes");
+
+    // Invalidate cache and verify clean re-evaluation
+    qm.invalidateCache();
+    assert.strictEqual(cqWorld.count(query1), 2);
+    assert.strictEqual(cqWorld.getEntities(query1).length, 2);
+  }
+
+  // 3. Structural changes: Immediate and Deferred (STR-001 - STR-007, ARC-006 - ARC-011)
+  {
+    const stWorld = new World();
+    const CA = 30;
+    const CB = 31;
+    stWorld.registerComponent(CA);
+    stWorld.registerComponent(CB);
+
+    const queryA = Aspect.all(CA);
+    const queryB = Aspect.all(CB);
+    const queryAB = Aspect.all(CA, CB);
+
+    // Warm caches
+    assert.strictEqual(stWorld.count(queryA), 0);
+    assert.strictEqual(stWorld.count(queryB), 0);
+    assert.strictEqual(stWorld.count(queryAB), 0);
+
+    // Create entity with CA
+    const entity = stWorld.createEntity();
+    stWorld.addComponent(entity, CA, { val: 1 });
+    assert.strictEqual(stWorld.count(queryA), 1);
+    assert.strictEqual(stWorld.count(queryB), 0);
+    assert.strictEqual(stWorld.count(queryAB), 0);
+
+    // Add CB (immediate transition to CA + CB)
+    stWorld.addComponent(entity, CB, { val: 2 });
+    assert.strictEqual(stWorld.count(queryA), 1);
+    assert.strictEqual(stWorld.count(queryB), 1);
+    assert.strictEqual(stWorld.count(queryAB), 1);
+
+    // Remove CA (immediate transition to CB)
+    stWorld.removeComponent(entity, CA);
+    assert.strictEqual(stWorld.count(queryA), 0);
+    assert.strictEqual(stWorld.count(queryB), 1);
+    assert.strictEqual(stWorld.count(queryAB), 0);
+
+    // Deferred structural changes
+    stWorld.setDeferred(true);
+    stWorld.addComponent(entity, CA, { val: 3 });
+    stWorld.removeComponent(entity, CB);
+
+    // Before flush, query results must reflect unchanged pre-flush state
+    assert.strictEqual(stWorld.count(queryA), 0, "Deferred add must not affect query before flush");
+    assert.strictEqual(stWorld.count(queryB), 1, "Deferred remove must not affect query before flush");
+
+    // Flush
+    stWorld.setDeferred(false);
+
+    // After flush, query results must reflect updated state
+    assert.strictEqual(stWorld.count(queryA), 1, "Deferred add must be reflected after flush");
+    assert.strictEqual(stWorld.count(queryB), 0, "Deferred remove must be reflected after flush");
+    assert.strictEqual(stWorld.count(queryAB), 0);
+
+    // Batch edits via editEntity / EntityEditor
+    const bEntity = stWorld.createEntity();
+    stWorld.edit(bEntity).add(CA, { val: "batchA" }).add(CB, { val: "batchB" }).commit();
+    assert.strictEqual(stWorld.count(queryAB), 1, "Batch edit adding CA and CB must update queryAB");
+
+    // Deferred batch editing
+    stWorld.setDeferred(true);
+    stWorld.edit(bEntity).remove(CA).commit();
+    assert.strictEqual(stWorld.count(queryAB), 1, "Deferred batch remove must not affect query before flush");
+    stWorld.flush();
+    assert.strictEqual(stWorld.count(queryAB), 0, "Deferred batch remove must update queryAB after flush");
+    assert.strictEqual(stWorld.count(queryB), 1, "Deferred batch remove keeps CB");
+    stWorld.setDeferred(false);
+  }
+
+  // 4. Deletion and ID Recycling (ENT-010, QRY-001)
+  {
+    const delWorld = new World();
+    const CA = 40;
+    const CB = 41;
+    delWorld.registerComponent(CA);
+    delWorld.registerComponent(CB);
+
+    const queryA = Aspect.all(CA);
+    const queryB = Aspect.all(CB);
+
+    const ent1 = delWorld.buildEntity().with(CA, { name: "first" }).commit();
+    const ent2 = delWorld.buildEntity().with(CA, { name: "second" }).commit();
+
+    assert.strictEqual(delWorld.count(queryA), 2);
+    assert.deepStrictEqual(new Set(delWorld.getEntities(queryA)), new Set([ent1, ent2]));
+
+    // Delete ent1
+    delWorld.deleteEntity(ent1);
+    assert.strictEqual(delWorld.isValid(ent1), false);
+    assert.strictEqual(delWorld.count(queryA), 1);
+    assert.deepStrictEqual(delWorld.getEntities(queryA), [ent2]);
+    assert.strictEqual(delWorld.findFirst(queryA), ent2);
+
+    // Recycle ID: allocate new entity (reuses ent1's slot with new version)
+    const ent3 = delWorld.createEntity();
+    assert.notStrictEqual(ent3, ent1, "New entity must have a new generation/version ID");
+    assert.strictEqual(delWorld.isValid(ent3), true);
+    assert.strictEqual(delWorld.isValid(ent1), false, "Stale ID must remain invalid");
+
+    // Before adding components, ent3 has no components
+    assert.strictEqual(delWorld.count(queryA), 1);
+    assert.strictEqual(delWorld.count(queryB), 0);
+
+    // Give ent3 component CB
+    delWorld.addComponent(ent3, CB, { name: "third" });
+    assert.strictEqual(delWorld.count(queryA), 1);
+    assert.strictEqual(delWorld.count(queryB), 1);
+    assert.deepStrictEqual(delWorld.getEntities(queryB), [ent3]);
+
+    // Ensure stale ent1 cannot match any queries
+    assert.strictEqual(delWorld.matches(ent1, queryA), false);
+    assert.strictEqual(delWorld.matches(ent1, queryB), false);
+    assert.ok(!delWorld.getEntities(queryA).includes(ent1));
+    assert.ok(!delWorld.getEntities(queryB).includes(ent1));
+  }
+
+  // 5. Composite Aspects and Cache Isolation (Task 9 Semantics Preservation)
+  {
+    const compWorld = new World();
+    const CA = 50;
+    const CB = 51;
+    const CC = 52;
+    const CD = 53;
+    compWorld.registerComponent(CA);
+    compWorld.registerComponent(CB);
+    compWorld.registerComponent(CC);
+    compWorld.registerComponent(CD);
+
+    const eA_C = compWorld.buildEntity().with(CA, {}).with(CC, {}).commit();
+    const eB_D = compWorld.buildEntity().with(CB, {}).with(CD, {}).commit();
+    const eA_only = compWorld.buildEntity().with(CA, {}).commit();
+    const eC_only = compWorld.buildEntity().with(CC, {}).commit();
+
+    const conjunctive = Aspect.one(CA, CB).and(Aspect.one(CC, CD));
+    const disjunctiveUnion = Aspect.one(CA, CB, CC, CD);
+    const emptyOne = Aspect.one();
+    const unconstrained = Aspect.EMPTY;
+
+    // Conjunction query: requires (A or B) AND (C or D)
+    const conjMatches = compWorld.getEntities(conjunctive);
+    assert.strictEqual(conjMatches.length, 2);
+    assert.ok(conjMatches.includes(eA_C) && conjMatches.includes(eB_D));
+    assert.ok(!conjMatches.includes(eA_only) && !conjMatches.includes(eC_only));
+
+    // Disjunctive union query: requires (A or B or C or D)
+    const unionMatches = compWorld.getEntities(disjunctiveUnion);
+    assert.strictEqual(unionMatches.length, 4);
+
+    // Empty one: unsatisfiable, matches 0 entities
+    assert.strictEqual(compWorld.count(emptyOne), 0);
+    assert.deepStrictEqual(compWorld.getEntities(emptyOne), []);
+    assert.strictEqual(compWorld.findFirst(emptyOne), undefined);
+
+    // Unconstrained Aspect.EMPTY matches all entities
+    assert.strictEqual(compWorld.count(unconstrained), 4);
+
+    // Invalidate cache and re-verify isolation
+    (compWorld as unknown as { queries: { invalidateCache: () => void } }).queries.invalidateCache();
+    assert.strictEqual(compWorld.count(emptyOne), 0, "Unsatisfiable aspect remains unsatisfiable after cache invalidation");
+    assert.strictEqual(compWorld.count(conjunctive), 2);
+    assert.strictEqual(compWorld.count(disjunctiveUnion), 4);
+    assert.strictEqual(compWorld.count(unconstrained), 4);
+  }
+
   console.log("World tests completed!");
 }
 

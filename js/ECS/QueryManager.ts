@@ -40,7 +40,7 @@ export class QueryManager {
     if (!matches) {
       matches = [];
       for (const arch of allArchetypes) {
-        if (aspect.matches(arch.mask)) matches.push(arch);
+        if (aspect.matches(arch.mask) && !matches.includes(arch)) matches.push(arch);
       }
       this.activeAspects.set(key, aspect);
       this.queryCache.set(key, matches);
@@ -105,7 +105,7 @@ export class QueryManager {
    * Use this for high-performance SoA processing.
    */
   public getArchetypes(aspect: Aspect, allArchetypes: IterableIterator<Archetype>): Archetype[] {
-    return this.getMatchingArchetypes(aspect, allArchetypes);
+    return [...this.getMatchingArchetypes(aspect, allArchetypes)];
   }
 
   public registerArchetype(arch: Archetype): void {
@@ -118,7 +118,7 @@ export class QueryManager {
     for (const [key, aspect] of this.activeAspects) {
       if (aspect.matches(arch.mask)) {
         const cached = this.queryCache.get(key);
-        if (cached) {
+        if (cached && !cached.includes(arch)) {
           cached.push(arch);
         }
       }
