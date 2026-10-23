@@ -96,6 +96,167 @@ export function testWorld() {
   const e7 = world.createEntity();
   assert.notStrictEqual(e6, e7, "e6 and e7 must be distinct entities after deferred duplicate deletion");
 
+  // --- Tests: Observer Notifications (BAT-003, OBS-001, OBS-003, OBS-004) ---
+  const obsWorld = new World();
+  const C1 = 1;
+  const C2 = 2;
+  const C3 = 3;
+  obsWorld.registerComponent(C1);
+  obsWorld.registerComponent(C2);
+  obsWorld.registerComponent(C3);
+
+  const addEventsC1: Array<{ entity: number; compId: number }> = [];
+  const addEventsC2: Array<{ entity: number; compId: number }> = [];
+  const removeEventsC1: Array<{ entity: number; compId: number }> = [];
+  const removeEventsC2: Array<{ entity: number; compId: number }> = [];
+  const maskEvents: Array<{ entity: number; oldMask: bigint; newMask: bigint }> = [];
+
+  const onAddC1 = (e: number, id: number) => addEventsC1.push({ entity: e, compId: id });
+  const onAddC2 = (e: number, id: number) => addEventsC2.push({ entity: e, compId: id });
+  const onRemC1 = (e: number, id: number) => removeEventsC1.push({ entity: e, compId: id });
+  const onRemC2 = (e: number, id: number) => removeEventsC2.push({ entity: e, compId: id });
+  const onMask = (e: number, oldM: bigint, newM: bigint) => maskEvents.push({ entity: e, oldMask: oldM, newMask: newM });
+
+  obsWorld.subscribeOnAdd(C1, onAddC1);
+  obsWorld.subscribeOnAdd(C2, onAddC2);
+  obsWorld.subscribeOnRemove(C1, onRemC1);
+  obsWorld.subscribeOnRemove(C2, onRemC2);
+  obsWorld.subscribeOnMaskChange(onMask);
+
+  // 1. Direct addition invokes add observer
+  const oe1 = obsWorld.createEntity();
+  obsWorld.addComponent(oe1, C1, { val: 1 });
+  assert.strictEqual(addEventsC1.length, 1, "Direct add: C1 add observer should be called once");
+  assert.deepStrictEqual(addEventsC1[0], { entity: oe1, compId: C1 });
+  assert.strictEqual(maskEvents.length, 1, "Direct add: mask observer should be called once");
+  assert.strictEqual(maskEvents[0].oldMask, 0n);
+  assert.strictEqual(maskEvents[0].newMask, 1n << BigInt(C1));
+
+  // 2. Direct removal invokes remove observer
+  obsWorld.removeComponent(oe1, C1);
+  assert.strictEqual(removeEventsC1.length, 1, "Direct remove: C1 remove observer should be called once");
+  assert.deepStrictEqual(removeEventsC1[0], { entity: oe1, compId: C1 });
+  assert.strictEqual(maskEvents.length, 2, "Direct remove: mask observer should be called again");
+  assert.strictEqual(maskEvents[1].oldMask, 1n << BigInt(C1));
+  assert.strictEqual(maskEvents[1].newMask, 0n);
+
+  // Reset event tracking
+  addEventsC1.length = 0;
+  addEventsC2.length = 0;
+  removeEventsC1.length = 0;
+  removeEventsC2.length = 0;
+  maskEvents.length = 0;
+
+  // 3. Batch addition invokes corresponding add observers (BAT-003, OBS-003)
+  const oe2 = obsWorld.createEntity();
+  obsWorld.edit(oe2).add(C1, { val: 10 }).add(C2, { val: 20 }).commit();
+  assert.strictEqual(addEventsC1.length, 1, "Batch add: C1 add observer should be called once");
+  assert.deepStrictEqual(addEventsC1[0], { entity: oe2, compId: C1 });
+  assert.strictEqual(addEventsC2.length, 1, "Batch add: C2 add observer should be called once");
+  assert.deepStrictEqual(addEventsC2[0], { entity: oe2, compId: C2 });
+  assert.strictEqual(maskEvents.length, 1, "Batch add: mask observer should be called once");
+  assert.strictEqual(maskEvents[0].oldMask, 0n);
+  assert.strictEqual(maskEvents[0].newMask, (1n << BigInt(C1)) | (1n << BigInt(C2)));
+
+  // Reset
+  addEventsC1.length = 0;
+  addEventsC2.length = 0;
+  removeEventsC1.length = 0;
+  removeEventsC2.length = 0;
+  maskEvents.length = 0;
+
+  // 4. Batch removal invokes corresponding remove observers (BAT-003, OBS-003)
+  obsWorld.edit(oe2).remove(C1).commit();
+  assert.strictEqual(removeEventsC1.length, 1, "Batch remove: C1 remove observer should be called once");
+  assert.deepStrictEqual(removeEventsC1[0], { entity: oe2, compId: C1 });
+  assert.strictEqual(removeEventsC2.length, 0, "Batch remove: C2 remove observer should not be called");
+  assert.strictEqual(maskEvents.length, 1, "Batch remove: mask observer should be called once");
+  assert.strictEqual(maskEvents[0].oldMask, (1n << BigInt(C1)) | (1n << BigInt(C2)));
+  assert.strictEqual(maskEvents[0].newMask, 1n << BigInt(C2));
+
+  // Reset
+  addEventsC1.length = 0;
+  addEventsC2.length = 0;
+  removeEventsC1.length = 0;
+  removeEventsC2.length = 0;
+  maskEvents.length = 0;
+
+  // 5. Simultaneous batch add and remove reports effective changes accurately (BAT-003, OBS-003)
+  // oe2 currently has C2. In batch: add C1 and remove C2.
+  obsWorld.edit(oe2).add(C1, { val: 100 }).remove(C2).commit();
+  assert.strictEqual(addEventsC1.length, 1, "Batch simultaneous: C1 added");
+  assert.strictEqual(removeEventsC2.length, 1, "Batch simultaneous: C2 removed");
+  assert.strictEqual(addEventsC2.length, 0, "Batch simultaneous: C2 not added");
+  assert.strictEqual(removeEventsC1.length, 0, "Batch simultaneous: C1 not removed");
+  assert.strictEqual(maskEvents.length, 1, "Batch simultaneous: mask changed");
+  assert.strictEqual(maskEvents[0].oldMask, 1n << BigInt(C2));
+  assert.strictEqual(maskEvents[0].newMask, 1n << BigInt(C1));
+
+  // Reset
+  addEventsC1.length = 0;
+  addEventsC2.length = 0;
+  removeEventsC1.length = 0;
+  removeEventsC2.length = 0;
+  maskEvents.length = 0;
+
+  // 6. No-op operations generate no false notifications (OBS-004)
+  // 6a. Direct value replacement (already has C1)
+  obsWorld.addComponent(oe2, C1, { val: 200 });
+  assert.strictEqual(addEventsC1.length, 0, "Direct value replace: no add notification");
+  assert.strictEqual(removeEventsC1.length, 0, "Direct value replace: no remove notification");
+  assert.strictEqual(maskEvents.length, 0, "Direct value replace: no mask notification");
+
+  // 6b. Direct removal of non-existent component
+  obsWorld.removeComponent(oe2, C2);
+  assert.strictEqual(removeEventsC2.length, 0, "Direct remove non-existent: no remove notification");
+  assert.strictEqual(maskEvents.length, 0, "Direct remove non-existent: no mask notification");
+
+  // 6c. Batch operation with no mask change (modifying existing C1 value)
+  obsWorld.edit(oe2).add(C1, { val: 300 }).commit();
+  assert.strictEqual(addEventsC1.length, 0, "Batch replace existing: no add notification");
+  assert.strictEqual(removeEventsC1.length, 0, "Batch replace existing: no remove notification");
+  assert.strictEqual(maskEvents.length, 0, "Batch replace existing: no mask notification");
+
+  // 7. Unsubscribe check
+  obsWorld.unsubscribeOnAdd(C1, onAddC1);
+  obsWorld.unsubscribeOnRemove(C1, onRemC1);
+  obsWorld.unsubscribeOnMaskChange(onMask);
+
+  const oe3 = obsWorld.createEntity();
+  obsWorld.addComponent(oe3, C1, { val: 5 });
+  obsWorld.removeComponent(oe3, C1);
+  assert.strictEqual(addEventsC1.length, 0, "Unsubscribed C1 add observer should not fire");
+  assert.strictEqual(removeEventsC1.length, 0, "Unsubscribed C1 remove observer should not fire");
+  assert.strictEqual(maskEvents.length, 0, "Unsubscribed mask observer should not fire");
+
+  // 8. EntityEditor.clear() batch removal (BAT-003, OBS-003)
+  const clearWorld = new World();
+  clearWorld.registerComponent(C1);
+  clearWorld.registerComponent(C2);
+  const clearRemoved: number[] = [];
+  clearWorld.subscribeOnRemove(C1, (_e, id) => clearRemoved.push(id));
+  clearWorld.subscribeOnRemove(C2, (_e, id) => clearRemoved.push(id));
+
+  const clearEntity = clearWorld.buildEntity().add(C1, { val: 1 }).add(C2, { val: 2 }).commit();
+  clearWorld.edit(clearEntity).clear().commit();
+  assert.strictEqual(clearRemoved.length, 2, "EntityEditor.clear() should trigger remove observers for all components");
+  assert.ok(clearRemoved.includes(C1), "C1 remove observer triggered on clear");
+  assert.ok(clearRemoved.includes(C2), "C2 remove observer triggered on clear");
+
+  // 9. Deferred batch operations with observers (STR-007, OBS-003)
+  const defWorld = new World();
+  defWorld.registerComponent(C1);
+  const defAdded: number[] = [];
+  defWorld.subscribeOnAdd(C1, (_e, id) => defAdded.push(id));
+
+  defWorld.setDeferred(true);
+  const defEntity = defWorld.createEntity();
+  defWorld.edit(defEntity).add(C1, { val: 42 }).commit();
+  assert.strictEqual(defAdded.length, 0, "Deferred batch add should not trigger observer before flush");
+
+  defWorld.setDeferred(false); // Disables deferred mode and flushes queue
+  assert.strictEqual(defAdded.length, 1, "Deferred batch add should trigger observer upon flush");
+
   console.log("World tests completed!");
 }
 

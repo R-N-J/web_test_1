@@ -223,6 +223,9 @@ export class ComponentManager {
     const oldMask = oldLocation?.arch.mask ?? 0n;
     const dataToMigrate = new Map<ComponentId, unknown>();
 
+    const addedBits = newMask & ~oldMask;
+    const removedBits = oldMask & ~newMask;
+
     if (oldLocation) {
       const { arch, row } = oldLocation;
       for (const [compId, col] of arch.columns) {
@@ -251,6 +254,8 @@ export class ComponentManager {
 
     const newRow = targetArch.addEntity(entity, dataToMigrate);
     this.entityManager.setLocation(entity, targetArch, newRow);
+
+    this.notifyObservers(entity, addedBits, removedBits);
     // NEW: structural event
     this.emitMaskChange(entity, oldMask, newMask);
   }
