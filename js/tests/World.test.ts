@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { World } from "../ECS/World";
 import { Aspect } from "../ECS/Aspect";
 import { Mapper } from "../ECS/Mapper";
-import { MAX_COMPONENT_ID } from "../ECS/Archetype";
+import { EntityId, MAX_COMPONENT_ID } from "../ECS/Archetype";
 import { registerAllComponents } from "../ECS/ComponentRegistry";
 import { All, And, One, AnyOf, Exclude, NoneOf, ButNot, Inject, Singleton, SingletonComponent } from "../ECS/Decorators";
 import { PrefabManager } from "../ECS/PrefabManager";
@@ -1503,6 +1503,427 @@ export function testWorld() {
     assert.strictEqual(addEvents.length, 0);
     assert.strictEqual(removeEvents.length, 0);
     assert.deepStrictEqual(bWorld.getComponent(ent, CC), { name: "C_batch" });
+  }
+
+  // 6. World Reset and Lifecycle (WLD-001 - WLD-006)
+  {
+    // 6.1 Entity and Storage Reset (WLD-002, WLD-005)
+    const resetWorld = new World();
+    const R_C1 = 210;
+    const R_C2 = 211;
+    const R_C3 = 212;
+    resetWorld.registerComponent(R_C1);
+    resetWorld.registerComponent(R_C2);
+    resetWorld.registerComponent(R_C3);
+
+    const e1 = resetWorld.createEntity();
+    const e2 = resetWorld.createEntity();
+    const e3 = resetWorld.createEntity();
+
+    resetWorld.addComponent(e1, R_C1, { val: "e1_c1" });
+    resetWorld.addComponent(e1, R_C2, { val: "e1_c2" });
+    resetWorld.addComponent(e2, R_C2, { val: "e2_c2" });
+    resetWorld.addComponent(e3, R_C3, { val: "e3_c3" });
+
+    assert.strictEqual(resetWorld.isValid(e1), true);
+    assert.strictEqual(resetWorld.isValid(e2), true);
+    assert.strictEqual(resetWorld.isValid(e3), true);
+    assert.strictEqual(resetWorld.hasComponent(e1, R_C1), true);
+
+    // Perform World.clear()
+    resetWorld.clear();
+
+    // Verify all pre-clear entity IDs are completely invalidated
+    assert.strictEqual(resetWorld.isValid(e1), false, "e1 must be invalid after clear");
+    assert.strictEqual(resetWorld.isValid(e2), false, "e2 must be invalid after clear");
+    assert.strictEqual(resetWorld.isValid(e3), false, "e3 must be invalid after clear");
+
+    // Verify old IDs cannot read, write, or query component data
+    assert.strictEqual(resetWorld.getComponent(e1, R_C1), undefined);
+    assert.strictEqual(resetWorld.hasComponent(e1, R_C1), false);
+    assert.strictEqual(resetWorld.setComponent(e1, R_C1, { val: "corrupt" }), false);
+    assert.strictEqual(resetWorld.updateComponent(e1, R_C1, () => ({ val: "corrupt" })), false);
+    assert.strictEqual(resetWorld.mutateComponent(e1, R_C1, () => {}), false);
+
+    // Create new entities in the cleared world and verify normal operation
+    const newE1 = resetWorld.createEntity();
+    const newE2 = resetWorld.createEntity();
+    assert.strictEqual(resetWorld.isValid(newE1), true);
+    assert.strictEqual(resetWorld.isValid(newE2), true);
+
+    // CRITICAL: New entities MUST NOT reuse old IDs from before World.clear()
+    assert.notStrictEqual(newE1, e1, "newE1 must not reuse e1 ID");
+    assert.notStrictEqual(newE1, e2, "newE1 must not reuse e2 ID");
+    assert.notStrictEqual(newE1, e3, "newE1 must not reuse e3 ID");
+    assert.notStrictEqual(newE2, e1, "newE2 must not reuse e1 ID");
+    assert.notStrictEqual(newE2, e2, "newE2 must not reuse e2 ID");
+    assert.notStrictEqual(newE2, e3, "newE2 must not reuse e3 ID");
+
+    // Pre-clear IDs must REMAIN invalid even after new entities are created
+    assert.strictEqual(resetWorld.isValid(e1), false, "e1 must remain invalid after new entity allocation");
+    assert.strictEqual(resetWorld.isValid(e2), false, "e2 must remain invalid after new entity allocation");
+    assert.strictEqual(resetWorld.isValid(e3), false, "e3 must remain invalid after new entity allocation");
+
+    // Stale pre-clear IDs cannot read/write/delete new entity storage
+    assert.strictEqual(resetWorld.getComponent(e1, R_C1), undefined);
+    assert.strictEqual(resetWorld.hasComponent(e1, R_C1), false);
+    assert.strictEqual(resetWorld.setComponent(e1, R_C1, { val: "stale" }), false);
+    resetWorld.deleteEntity(e1); // Must not delete newE1
+
+    resetWorld.addComponent(newE1, R_C1, { val: "new_e1_c1" });
+    resetWorld.addComponent(newE2, R_C2, { val: "new_e2_c2" });
+
+    assert.deepStrictEqual(resetWorld.getComponent(newE1, R_C1), { val: "new_e1_c1" });
+    assert.deepStrictEqual(resetWorld.getComponent(newE2, R_C2), { val: "new_e2_c2" });
+    assert.strictEqual(resetWorld.hasComponent(newE1, R_C1), true);
+    assert.strictEqual(resetWorld.hasComponent(newE1, R_C2), false);
+
+    resetWorld.deleteEntity(newE1);
+    assert.strictEqual(resetWorld.isValid(newE1), false);
+    assert.strictEqual(resetWorld.isValid(newE2), true);
+
+    // 6.2 Singleton and Internal Component Lifecycle (WLD-001, WLD-003)
+    const singWorld = new World();
+    const USER_SING_ID = 215;
+    singWorld.registerComponent(USER_SING_ID);
+
+    const initialSingEntity = singWorld.getSingletonEntity();
+    assert.strictEqual(singWorld.isValid(initialSingEntity), true, "Singleton entity must be valid on world init");
+    assert.strictEqual(singWorld.tags.getTag(initialSingEntity), "__world_singletons__", "Singleton entity must have __world_singletons__ tag");
+
+    singWorld.setSingleton(InternalComponents.CLOCK, { turn: 5 });
+    singWorld.setSingleton(USER_SING_ID, { setting: "active" });
+
+    assert.deepStrictEqual(singWorld.getSingleton(InternalComponents.CLOCK), { turn: 5 });
+    assert.deepStrictEqual(singWorld.getSingleton(USER_SING_ID), { setting: "active" });
+
+    // Clear world
+    singWorld.clear();
+
+    const postClearSingEntity = singWorld.getSingletonEntity();
+    assert.strictEqual(singWorld.isValid(postClearSingEntity), true, "Recreated singleton entity must be valid after clear");
+    assert.notStrictEqual(postClearSingEntity, initialSingEntity, "Recreated singleton must have a different ID from pre-clear singleton");
+    assert.strictEqual(singWorld.isValid(initialSingEntity), false, "Pre-clear singleton ID must remain invalid");
+    assert.strictEqual(singWorld.tags.getTag(postClearSingEntity), "__world_singletons__", "Recreated singleton entity must have __world_singletons__ tag");
+
+    // Setting singletons after clear must work without failing
+    singWorld.setSingleton(InternalComponents.CLOCK, { turn: 1 });
+    singWorld.setSingleton(USER_SING_ID, { setting: "reset_done" });
+
+    assert.deepStrictEqual(singWorld.getSingleton(InternalComponents.CLOCK), { turn: 1 });
+    assert.deepStrictEqual(singWorld.getSingleton(USER_SING_ID), { setting: "reset_done" });
+
+    // getOrCreateSingleton after clear
+    const createdStats = singWorld.getOrCreateSingleton(InternalComponents.ENGINE_STATS, { entities: 0, archetypes: 0, systems: [], lastUpdateMs: 0 });
+    assert.deepStrictEqual(createdStats, { entities: 0, archetypes: 0, systems: [], lastUpdateMs: 0 });
+    assert.deepStrictEqual(singWorld.getSingleton(InternalComponents.ENGINE_STATS), { entities: 0, archetypes: 0, systems: [], lastUpdateMs: 0 });
+
+    // Internal components remain registered and usable
+    for (const internalId of Object.values(InternalComponents)) {
+      assert.strictEqual(singWorld.isComponentRegistered(internalId), true, `Internal component ${internalId} must remain registered`);
+    }
+
+    // 6.3 Query Cache Reset & Archetype Isolation (WLD-002, QRY-006)
+    const qWorld = new World();
+    const Q_A = 220;
+    const Q_B = 221;
+    const Q_C = 222;
+    qWorld.registerComponent(Q_A);
+    qWorld.registerComponent(Q_B);
+    qWorld.registerComponent(Q_C);
+
+    const qe1 = qWorld.createEntity();
+    const qe2 = qWorld.createEntity();
+    qWorld.addComponent(qe1, Q_A, { a: 1 });
+    qWorld.addComponent(qe1, Q_B, { b: 1 });
+    qWorld.addComponent(qe2, Q_A, { a: 2 });
+
+    const aspAllA = Aspect.all(Q_A);
+    const aspAllAB = Aspect.all(Q_A, Q_B);
+    const aspOne = Aspect.one(Q_B, Q_C);
+
+    // Warm query cache
+    assert.strictEqual(qWorld.count(aspAllA), 2);
+    assert.strictEqual(qWorld.count(aspAllAB), 1);
+    assert.strictEqual(qWorld.count(aspOne), 1);
+
+    // Clear world
+    qWorld.clear();
+
+    // Queries immediately return 0 for user components
+    assert.strictEqual(qWorld.count(aspAllA), 0, "Query cache must not return stale entities after clear");
+    assert.strictEqual(qWorld.count(aspAllAB), 0);
+    assert.strictEqual(qWorld.count(aspOne), 0);
+    assert.deepStrictEqual(qWorld.getEntities(aspAllA), []);
+    assert.strictEqual(qWorld.findFirst(aspAllA), undefined);
+
+    // Create new entities and verify fresh query matching
+    const qeNew = qWorld.createEntity();
+    qWorld.addComponent(qeNew, Q_A, { a: 99 });
+    qWorld.addComponent(qeNew, Q_B, { b: 99 });
+
+    assert.strictEqual(qWorld.count(aspAllA), 1);
+    assert.strictEqual(qWorld.count(aspAllAB), 1);
+    assert.strictEqual(qWorld.count(aspOne), 1);
+    assert.deepStrictEqual(qWorld.getEntities(aspAllAB), [qeNew]);
+    assert.strictEqual(qWorld.findFirst(aspAllAB), qeNew);
+
+    // 6.4 Pending Operations, Deferred Mode & EntityEditor Cancellation (WLD-002, BAT-005)
+    const defWorld = new World();
+    const DEF_C1 = 225;
+    const DEF_C2 = 226;
+    defWorld.registerComponent(DEF_C1);
+    defWorld.registerComponent(DEF_C2);
+
+    const defEnt = defWorld.createEntity();
+    defWorld.setDeferred(true);
+
+    defWorld.addComponent(defEnt, DEF_C1, { deferred: true });
+    defWorld.deleteEntity(defEnt);
+
+    // Create uncommitted active editors
+    const editor = defWorld.edit(defEnt).add(DEF_C2, { editorVal: true });
+    const builder = defWorld.buildEntity().add(DEF_C1, { builderVal: true });
+
+    // Clear before flush
+    defWorld.clear();
+
+    // Verify that right after clear, the old entity index is invalid
+    assert.strictEqual(defWorld.isValid(defEnt), false, "defEnt must be invalid immediately after clear");
+
+    // Verify deferred mode was reset
+    const liveEnt = defWorld.createEntity();
+    defWorld.addComponent(liveEnt, DEF_C1, { immediate: true });
+    assert.deepStrictEqual(defWorld.getComponent(liveEnt, DEF_C1), { immediate: true }, "Operations after clear must apply immediately");
+
+    // Flushing must not replay stale deferred operations (e.g. stale deleteEntity)
+    defWorld.flush();
+    assert.strictEqual(defWorld.isValid(liveEnt), true, "liveEnt must remain valid; stale deleteEntity must not replay");
+    assert.deepStrictEqual(defWorld.getComponent(liveEnt, DEF_C1), { immediate: true }, "liveEnt component must remain intact");
+
+    // Committing discarded editors after clear must be safe no-ops
+    editor.commit();
+    builder.commit();
+    assert.strictEqual(defWorld.count(Aspect.all(DEF_C2)), 0, "Cancelled editor commit must not add components to world");
+
+    // 6.5 Tags, Groups, and Relationships Reset (WLD-002, WLD-005)
+    const mgrWorld = new World();
+    const REL_ID = 230;
+    mgrWorld.registerComponent(REL_ID);
+
+    const tagEnt = mgrWorld.createEntity();
+    const grpEnt1 = mgrWorld.createEntity();
+    const grpEnt2 = mgrWorld.createEntity();
+    const subjEnt = mgrWorld.createEntity();
+    const targetEnt = mgrWorld.createEntity();
+
+    mgrWorld.tags.register("player", tagEnt);
+    mgrWorld.groups.add("enemies", grpEnt1);
+    mgrWorld.groups.add("enemies", grpEnt2);
+    mgrWorld.relationships.add(subjEnt, REL_ID, targetEnt);
+
+    assert.strictEqual(mgrWorld.tags.findFirst("player", mgrWorld), tagEnt);
+    assert.strictEqual(mgrWorld.groups.count("enemies"), 2);
+    assert.deepStrictEqual(mgrWorld.relationships.getTargetsArray(subjEnt, REL_ID), [targetEnt]);
+
+    // Clear world
+    mgrWorld.clear();
+
+    // Verify all old tags, groups, and relationships are wiped
+    assert.strictEqual(mgrWorld.tags.findFirst("player", mgrWorld), undefined);
+    assert.deepStrictEqual(mgrWorld.tags.getEntities("player", mgrWorld), []);
+    assert.strictEqual(mgrWorld.groups.count("enemies"), 0);
+    assert.deepStrictEqual(mgrWorld.groups.getEntities("enemies", mgrWorld), []);
+    assert.deepStrictEqual(mgrWorld.relationships.getTargetsArray(subjEnt, REL_ID), []);
+    assert.deepStrictEqual(Array.from(mgrWorld.relationships.getRelated(REL_ID, targetEnt)), []);
+
+    // Create new tags, groups, and relationships in cleared world
+    const newHero = mgrWorld.createEntity();
+    const newMonster = mgrWorld.createEntity();
+    mgrWorld.tags.register("player", newHero);
+    mgrWorld.groups.add("enemies", newMonster);
+    mgrWorld.relationships.add(newMonster, REL_ID, newHero);
+
+    assert.strictEqual(mgrWorld.tags.findFirst("player", mgrWorld), newHero);
+    assert.deepStrictEqual(mgrWorld.groups.getEntities("enemies", mgrWorld), [newMonster]);
+    assert.deepStrictEqual(mgrWorld.relationships.getTargetsArray(newMonster, REL_ID), [newHero]);
+    assert.deepStrictEqual(Array.from(mgrWorld.relationships.getRelated(REL_ID, newHero)), [newMonster]);
+
+    // 6.6 Observers and EventBus Lifecycle (WLD-002, WLD-004, OBS-006)
+    const obsWorld = new World();
+    const OBS_C = 235;
+    obsWorld.registerComponent(OBS_C);
+
+    let oldAddFired = 0;
+    let oldRemoveFired = 0;
+    let oldMaskFired = 0;
+    let oldEventFired = 0;
+
+    obsWorld.subscribeOnAdd(OBS_C, () => { oldAddFired++; });
+    obsWorld.subscribeOnRemove(OBS_C, () => { oldRemoveFired++; });
+    obsWorld.subscribeOnMaskChange(() => { oldMaskFired++; });
+    obsWorld.events.subscribe("test_event", () => { oldEventFired++; });
+
+    const preObsEnt = obsWorld.createEntity();
+    obsWorld.addComponent(preObsEnt, OBS_C, { val: 1 });
+    assert.strictEqual(oldAddFired, 1);
+    assert.strictEqual(oldMaskFired, 1);
+
+    // Clear world
+    obsWorld.clear();
+
+    // Verify old observers and event handlers do NOT fire on post-clear actions
+    const postObsEnt = obsWorld.createEntity();
+    obsWorld.addComponent(postObsEnt, OBS_C, { val: 2 });
+    obsWorld.removeComponent(postObsEnt, OBS_C);
+    obsWorld.events.publish({ type: "test_event" });
+
+    assert.strictEqual(oldAddFired, 1, "Old add observer must not fire after clear");
+    assert.strictEqual(oldRemoveFired, 0, "Old remove observer must not fire after clear");
+    assert.strictEqual(oldMaskFired, 1, "Old mask observer must not fire after clear");
+    assert.strictEqual(oldEventFired, 0, "Old event handler must not fire after clear");
+
+    // Register new observers after clear and verify they function properly
+    let newAddFired = 0;
+    let newRemoveFired = 0;
+    let newMaskFired = 0;
+    let newEventFired = 0;
+
+    obsWorld.subscribeOnAdd(OBS_C, () => { newAddFired++; });
+    obsWorld.subscribeOnRemove(OBS_C, () => { newRemoveFired++; });
+    obsWorld.subscribeOnMaskChange(() => { newMaskFired++; });
+    obsWorld.events.subscribe("test_event_2", () => { newEventFired++; });
+
+    obsWorld.addComponent(postObsEnt, OBS_C, { val: 3 });
+    obsWorld.removeComponent(postObsEnt, OBS_C);
+    obsWorld.events.publish({ type: "test_event_2" });
+
+    assert.strictEqual(newAddFired, 1);
+    assert.strictEqual(newRemoveFired, 1);
+    assert.strictEqual(newMaskFired, 2);
+    assert.strictEqual(newEventFired, 1);
+
+    // 6.7 Repeated Reset Cycles (WLD-006)
+    const cycleWorld = new World();
+    const CYC_C1 = 240;
+    const CYC_C2 = 241;
+    cycleWorld.registerComponent(CYC_C1);
+    cycleWorld.registerComponent(CYC_C2);
+
+    const historicalIds = new Set<EntityId>();
+
+    for (let cycle = 1; cycle <= 5; cycle++) {
+      // Prior cycle IDs must remain invalid at start of new cycle
+      for (const oldId of historicalIds) {
+        assert.strictEqual(cycleWorld.isValid(oldId), false, `Historical ID ${oldId} from prior cycle must be invalid`);
+      }
+
+      // Create entities
+      const entA = cycleWorld.createEntity();
+      const entB = cycleWorld.createEntity();
+      const singEnt = cycleWorld.getSingletonEntity();
+
+      // No new entity ID or singleton can match any previous cycle's IDs
+      assert.strictEqual(historicalIds.has(entA), false, `entA ${entA} must be a brand new unique ID`);
+      assert.strictEqual(historicalIds.has(entB), false, `entB ${entB} must be a brand new unique ID`);
+      assert.strictEqual(historicalIds.has(singEnt), false, `singEnt ${singEnt} must be a brand new unique ID`);
+
+      historicalIds.add(entA);
+      historicalIds.add(entB);
+      historicalIds.add(singEnt);
+
+      cycleWorld.addComponent(entA, CYC_C1, { cycle, role: "A" });
+      cycleWorld.addComponent(entB, CYC_C1, { cycle, role: "B" });
+      cycleWorld.addComponent(entB, CYC_C2, { cycle, extra: true });
+
+      cycleWorld.tags.register(`hero_cycle_${cycle}`, entA);
+      cycleWorld.groups.add(`cycle_group`, entB);
+      cycleWorld.setSingleton(InternalComponents.CLOCK, { turn: cycle * 10 });
+
+      // Verify state in cycle
+      assert.strictEqual(cycleWorld.count(Aspect.all(CYC_C1)), 2);
+      assert.strictEqual(cycleWorld.count(Aspect.all(CYC_C2)), 1);
+      assert.strictEqual(cycleWorld.tags.findFirst(`hero_cycle_${cycle}`, cycleWorld), entA);
+      assert.strictEqual(cycleWorld.groups.count(`cycle_group`), 1);
+      assert.deepStrictEqual(cycleWorld.getSingleton(InternalComponents.CLOCK), { turn: cycle * 10 });
+
+      // Clear for next cycle
+      cycleWorld.clear();
+
+      // Assert post-clear invariants
+      assert.strictEqual(cycleWorld.isValid(entA), false);
+      assert.strictEqual(cycleWorld.isValid(entB), false);
+      assert.strictEqual(cycleWorld.isValid(singEnt), false);
+      assert.strictEqual(cycleWorld.count(Aspect.all(CYC_C1)), 0);
+      assert.strictEqual(cycleWorld.count(Aspect.all(CYC_C2)), 0);
+      assert.strictEqual(cycleWorld.groups.count(`cycle_group`), 0);
+      assert.strictEqual(cycleWorld.isValid(cycleWorld.getSingletonEntity()), true);
+    }
+
+    // 6.8 Snapshot Save / Load with Singleton Restoration (WLD-003, WLD-004)
+    const snapWorld = new World();
+    const SNAP_C = 245;
+    snapWorld.registerComponent(SNAP_C);
+
+    const snapEnt = snapWorld.createEntity();
+    snapWorld.addComponent(snapEnt, SNAP_C, { payload: "entity_data" });
+    snapWorld.setSingleton(InternalComponents.CLOCK, { turn: 42 });
+    snapWorld.setSingleton(SNAP_C, { payload: "singleton_data" });
+    snapWorld.tags.register("target", snapEnt);
+
+    const snapshot = snapWorld.saveSnapshot();
+
+    // Clear world
+    snapWorld.clear();
+    assert.strictEqual(snapWorld.count(Aspect.all(SNAP_C)), 0);
+
+    // Load snapshot
+    snapWorld.loadSnapshot(snapshot);
+
+    assert.strictEqual(snapWorld.count(Aspect.all(SNAP_C)), 2, "Entities and singleton with SNAP_C must be restored");
+    assert.deepStrictEqual(snapWorld.getSingleton(InternalComponents.CLOCK), { turn: 42 }, "Clock singleton restored");
+    assert.deepStrictEqual(snapWorld.getSingleton(SNAP_C), { payload: "singleton_data" }, "User singleton restored");
+
+    const loadedTarget = snapWorld.tags.findFirst("target", snapWorld);
+    assert.ok(loadedTarget !== undefined);
+    assert.deepStrictEqual(snapWorld.getComponent(loadedTarget, SNAP_C), { payload: "entity_data" });
+
+    // Modifying singleton after loadSnapshot
+    snapWorld.setSingleton(InternalComponents.CLOCK, { turn: 43 });
+    assert.deepStrictEqual(snapWorld.getSingleton(InternalComponents.CLOCK), { turn: 43 });
+
+    // 6.9 Snapshot Entity ID and Generation Pool Round-Trip (WLD-003, WLD-004)
+    const rtWorld = new World();
+    const RT_COMP = 246;
+    rtWorld.registerComponent(RT_COMP);
+
+    const rtE1 = rtWorld.createEntity();
+    const rtE2 = rtWorld.createEntity();
+    rtWorld.addComponent(rtE1, RT_COMP, { v: 10 });
+    rtWorld.addComponent(rtE2, RT_COMP, { v: 20 });
+    // Delete rtE1 so it is in freeEntities with incremented generation
+    rtWorld.deleteEntity(rtE1);
+
+    const rtSnapshot = rtWorld.saveSnapshot();
+    const freePoolBefore = rtSnapshot.freeEntities;
+
+    // Reset and load
+    const restoredWorld = new World();
+    restoredWorld.registerComponent(RT_COMP);
+    restoredWorld.loadSnapshot(rtSnapshot);
+
+    // Verify exact entity ID preservation: rtE2 must be valid, rtE1 must remain invalid
+    assert.strictEqual(restoredWorld.isValid(rtE2), true, "Active entity rtE2 must be valid with identical ID after snapshot load");
+    assert.strictEqual(restoredWorld.isValid(rtE1), false, "Deleted entity rtE1 must remain invalid after snapshot load");
+    assert.deepStrictEqual(restoredWorld.getComponent(rtE2, RT_COMP), { v: 20 });
+    assert.deepStrictEqual(restoredWorld.saveSnapshot().freeEntities, freePoolBefore, "Free entity pool in saved snapshot must match original");
+
+    // Creating an entity in restoredWorld should recycle from the loaded free pool (index of rtE1 with next generation)
+    const recycledInRestored = restoredWorld.createEntity();
+    assert.strictEqual(Math.floor(recycledInRestored / 65536), Math.floor(rtE1 / 65536), "Restored world recycles from loaded free pool");
+    assert.notStrictEqual(recycledInRestored, rtE1, "Recycled entity ID must have incremented generation compared to original rtE1");
+    assert.strictEqual(restoredWorld.isValid(rtE1), false, "Original rtE1 ID remains invalid");
+    assert.strictEqual(restoredWorld.isValid(recycledInRestored), true);
   }
 
   console.log("World tests completed!");

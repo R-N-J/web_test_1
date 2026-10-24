@@ -338,6 +338,7 @@ export class ComponentManager {
   public clearObservers(): void {
     this.onAddObservers.clear();
     this.onRemoveObservers.clear();
+    this.maskObservers.clear();
   }
 
   public clear(): void {

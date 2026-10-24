@@ -70,6 +70,8 @@ export class World {
   private deferredQueue: DeferredOp[] = [];
   private _isDeferred = false;
 
+  public scheduler?: Scheduler;
+
   constructor() {
     this.singletonEntity = this.createEntity();
     this.tags.register("__world_singletons__", this.singletonEntity);
@@ -80,8 +82,13 @@ export class World {
    * Links the scheduler to the world and initializes dependent managers.
    */
   public setScheduler(scheduler: Scheduler): void {
-    this.scenes = new SceneManager(this, scheduler);
-    this.turns = new TurnManager(this, scheduler);
+    this.scheduler = scheduler;
+    if (!this.scenes) {
+      this.scenes = new SceneManager(this, scheduler);
+    }
+    if (!this.turns) {
+      this.turns = new TurnManager(this, scheduler);
+    }
   }
 
   /**
@@ -749,6 +756,7 @@ export class World {
    * Useful for loading games or switching levels.
    */
   public clear(): void {
+    this._isDeferred = false;
     // 1. Clear Entities and their recycling versions
     this.entities.clear();
     // 2. Clear Archetype data and observers
@@ -766,8 +774,17 @@ export class World {
     // 6. Clear Event Bus handlers
     this.events.clear();
     // 7. Clear Active Editors and Deferred Queue
+    for (const editor of this.activeEditors) {
+      editor.cancel();
+    }
     this.activeEditors.clear();
     this.deferredQueue = [];
+    // 8. Recreate the singleton entity
+    this.singletonEntity = this.createEntity();
+    this.tags.register("__world_singletons__", this.singletonEntity);
+
+    // 9. Rebind active systems from scheduler
+    this.scheduler?.rebind();
     // Note: PrefabManager doesn't usually need clearing as
     // blueprints persist across level changes.
     // Note: Usually we don't clear assets here as they persist across levels,
@@ -872,6 +889,14 @@ export class World {
 
     this.tags.load(snapshot.tags);
     this.groups.load(snapshot.groups);
+
+    const savedSingleton = this.tags.findFirst("__world_singletons__", this);
+    if (savedSingleton !== undefined) {
+      this.singletonEntity = savedSingleton;
+    } else {
+      this.singletonEntity = this.createEntity();
+      this.tags.register("__world_singletons__", this.singletonEntity);
+    }
   }
 
 

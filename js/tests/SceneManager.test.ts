@@ -16,11 +16,11 @@ class TestScene implements Scene {
     this.name = name;
   }
 
-  public onEnter(_world: World): void {
+  public onEnter(): void {
     this.entered = true;
   }
 
-  public onExit(_world: World): void {
+  public onExit(): void {
     this.exited = true;
   }
 }
@@ -52,6 +52,19 @@ export function testSceneManager() {
   assert.strictEqual(scene1.exited, true, "Scene 1 should have been exited");
   assert.strictEqual(scene2.entered, true, "Scene 2 should have been entered");
   assert.strictEqual(world.getEntityCount(), 0, "World should have been cleared on scene switch");
+
+  // 3. Test: Entity ID isolation across scene switch (WLD-002, ENT-010)
+  const scene1Entity = world.createEntity();
+  assert.strictEqual(world.isValid(scene1Entity), true);
+
+  const scene3 = new TestScene("Level 3");
+  sceneManager.switchTo(scene3);
+
+  // Pre-switch entity ID must be permanently invalid
+  assert.strictEqual(world.isValid(scene1Entity), false, "Scene 1 entity ID must be invalid after scene switch");
+  const scene3Entity = world.createEntity();
+  assert.notStrictEqual(scene3Entity, scene1Entity, "New entity in Scene 3 must not reuse old entity ID from Scene 2");
+  assert.strictEqual(world.isValid(scene1Entity), false, "Scene 1 entity ID must remain invalid after new entity creation");
 
   console.log("SceneManager tests completed!");
 }

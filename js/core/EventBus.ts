@@ -25,10 +25,16 @@ export class EventBus {
    * Internal storage uses the base signature.
    */
   private handlers = new Map<string, Set<BaseHandler>>();
+  private subscriberHandlers = new Map<object, Array<{ type: string; handler: BaseHandler }>>();
 
   public register(subscriber: object): void {
+    if (this.subscriberHandlers.has(subscriber)) {
+      this.unregister(subscriber);
+    }
+
     const meta: SubscriptionMetadata[] = getSubscriptions(subscriber);
     const indexedSubscriber = subscriber as Record<string, unknown>;
+    const registeredList: Array<{ type: string; handler: BaseHandler }> = [];
 
     for (const sub of meta) {
       const method = indexedSubscriber[sub.methodName];
@@ -39,7 +45,22 @@ export class EventBus {
         // accept an event object (which satisfies BaseEvent).
         const handler = method.bind(subscriber) as BaseHandler;
         this.subscribe(sub.eventType, handler as unknown as Handler<string>);
+        registeredList.push({ type: sub.eventType, handler });
       }
+    }
+
+    if (registeredList.length > 0) {
+      this.subscriberHandlers.set(subscriber, registeredList);
+    }
+  }
+
+  public unregister(subscriber: object): void {
+    const list = this.subscriberHandlers.get(subscriber);
+    if (list) {
+      for (const { type, handler } of list) {
+        this.unsubscribe(type, handler as unknown as Handler<string>);
+      }
+      this.subscriberHandlers.delete(subscriber);
     }
   }
 

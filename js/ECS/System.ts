@@ -53,12 +53,19 @@ export abstract class BaseSystem {
 
 
   /**
+   * Called when the world resets or when subscriptions need to be re-established.
+   * Subclasses can override this to rebind component observers or custom subscriptions.
+   */
+  public rebind(): void {
+    // Optional implementation for subclasses
+  }
+
+  /**
    * Called when the system is removed from the world.
    * Use this to unsubscribe from observers or clean up event listeners.
    */
   public cleanup(): void {
     // Optional implementation for subclasses
-
   }
 }
 /**
@@ -143,13 +150,23 @@ export abstract class IteratingSystem extends BaseSystem {
   /**
    * Called exactly once when an entity begins matching this system's Aspect.
    */
-  protected onEntityAdded(_entity: EntityId): void {}
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  protected onEntityAdded(entity: EntityId): void {}
 
   /**
    * Called exactly once when an entity stops matching this system's Aspect.
    */
-  protected onEntityRemoved(_entity: EntityId): void {}
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  protected onEntityRemoved(entity: EntityId): void {}
 
+
+  /**
+   * Re-subscribes the system's mask observer to the world's component manager.
+   */
+  public override rebind(): void {
+    super.rebind();
+    this.world.subscribeOnMaskChange(this.maskObserver);
+  }
 
   /**
    * Ensure we unsubscribe to avoid leaks when systems are removed from the Scheduler.
@@ -304,7 +321,8 @@ export abstract class SortedIteratingSystem extends IteratingSystem {
  * It's called manually or by events (e.g., DamageSystem.process(entity, 10)).
  */
 export abstract class PassiveSystem extends BaseSystem {
-  update(_dt: number): void { /* Passive: doesn't update on tick */ }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  update(dt: number): void { /* Passive: doesn't update on tick */ }
 }
 
 

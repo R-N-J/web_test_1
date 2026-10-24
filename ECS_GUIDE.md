@@ -930,7 +930,9 @@ scheduler.update(1.0);
 **Key Methods:**
 - `add(system)`: Adds a system to the end of the execution chain.
 - `get(SystemClass)`: Returns the instance of a system. Useful if `CombatSystem` needs to trigger something in `ParticleSystem`.
+- `getSystems()`: Returns the list of all registered systems.
 - `setEnabled(SystemClass, boolean)`: Pauses or resumes a specific system.
+- `rebind()`: Rebinds all registered systems with the world event bus and observer pipeline (called automatically during `world.clear()`).
 - `clear()`: Removes all systems and calls their `cleanup()` hooks (crucial for level transitions).
 
 ### The TurnManager (The Library Way)
@@ -1379,7 +1381,7 @@ world.scenes?.switchTo(new MainMenuScene());
 
 When `switchTo(nextScene)` is called:
 1.  **onExit**: The current scene's `onExit` method is called.
-2.  **world.clear()**: The World is completely reset. All entities, tags, and groups are deleted.
+2.  **world.clear()**: The World is completely reset. All entities, tags, and groups are deleted, and entity generations are advanced so pre-reset IDs cannot collide with new entities.
 3.  **onEnter**: The new scene's `onEnter` method is called.
 
 ### Tutorial: Implementing Scenes

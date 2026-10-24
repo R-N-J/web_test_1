@@ -70,6 +70,7 @@ Entity IDs are represented as positive safe integers using safe arithmetic encod
 - Supported index range: 0 through 2^37 - 1 (137,438,953,471), keeping all possible IDs within `Number.MAX_SAFE_INTEGER` (2^53 - 1).
 - Decoding is performed via arithmetic division (`index = Math.floor(id / 65536)`) and modulo (`generation = id % 65536`), avoiding 32-bit signed bitwise shift limitations.
 - Slot exhaustion & retirement: When an entity at generation 65,535 is deleted/recycled, its slot is permanently retired and never reused. No stale reference can ever be resurrected.
+- World reset lifecycle: `world.clear()` advances entity generations across all allocated index slots (or retires slots at generation 65,535). IDs from before `world.clear()` remain permanently invalid and are never reused by newly allocated entities after reset. In contrast, snapshot loading (`loadSnapshot`) explicitly restores the saved entity IDs, versions, and free pool.
 - ID validation: `isValid(entity)` strictly validates that the identifier is a positive safe integer within allocated index bounds and matching the live generation.
 
 ### 3.3 Entity lifecycle invariants
@@ -289,9 +290,9 @@ The framework's `Scheduler` and `TurnManager` must have clearly separated respon
 - **WLD-001:** A newly initialized world has valid internal managers and required internal state.
 - **WLD-002:** `world.clear()` removes the intended game state without leaving stale entity IDs, component data, query results, tags, groups, relationships, or pending operations.
 - **WLD-003:** Internal singleton entities and required singleton values are recreated or deliberately preserved according to a documented policy.
-- **WLD-004:** Managers, event subscriptions, and scheduler references remain valid after a clear or scene transition, or are explicitly rebuilt.
+- **WLD-004:** Managers, event subscriptions, and scheduler references remain valid after a clear or scene transition, or are explicitly rebuilt. When `world.clear()` is called, world-scoped ephemeral observers and event handlers are cleared, while persistent active systems registered with the `Scheduler` are automatically rebound via `scheduler.rebind()` (restoring `@Subscribe` event listeners and system mask/component observers via `system.rebind()`).
 - **WLD-005:** Clearing a world and then creating, querying, and deleting entities must work normally.
-- **WLD-006:** Repeated clear and reinitialization cycles must not accumulate duplicate systems, subscriptions, or manager state.
+- **WLD-006:** Repeated clear and reinitialization cycles must not accumulate duplicate systems, subscriptions, or manager state. EventBus and ComponentManager registrations are idempotent and re-registered handlers execute exactly once per event.
 
 A scene transition must define which data belongs to the outgoing scene, which data survives, and which objects are reinitialized. The lifecycle must not depend on an undocumented assumption that clearing entities also resets every other subsystem.
 

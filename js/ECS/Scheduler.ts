@@ -10,6 +10,9 @@ export class Scheduler {
   private systems: BaseSystem[] = [];
 
   constructor(private world: World) {
+    if (!this.world.scheduler) {
+      this.world.setScheduler(this);
+    }
     // Initialize stats singleton if it doesn't exist
     if (!this.world.hasSingleton(InternalComponents.ENGINE_STATS)) {
       this.world.setSingleton<EngineStats>(InternalComponents.ENGINE_STATS, {
@@ -132,12 +135,31 @@ export class Scheduler {
   }
 
 
-   /**
+  /**
+   * Returns an unmodifiable list of systems registered with the scheduler.
+   */
+  public getSystems(): readonly BaseSystem[] {
+    return this.systems;
+  }
+
+  /**
+   * Rebinds all registered systems with the world's event bus and observer pipeline.
+   * Called during World.clear() to restore active system subscriptions.
+   */
+  public rebind(): void {
+    for (const system of this.systems) {
+      this.world.events.register(system);
+      system.rebind();
+    }
+  }
+
+  /**
    * Wipes all systems and triggers their cleanup hooks.
    * Essential for level transitions to prevent observer leaks.
    */
   public clear(): void {
     for (const system of this.systems) {
+      this.world.events.unregister(system);
       system.cleanup();
     }
     this.systems = [];
@@ -149,6 +171,7 @@ export class Scheduler {
   public remove(system: BaseSystem): void {
     const index = this.systems.indexOf(system);
     if (index !== -1) {
+      this.world.events.unregister(system);
       system.cleanup();
       this.systems.splice(index, 1);
     }

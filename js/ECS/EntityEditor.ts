@@ -13,6 +13,7 @@ export class EntityEditor {
   private additions = new Map<ComponentId, unknown>();
   private removals = new Set<ComponentId>();
   private committed = false;
+  private disposed = false;
 
   constructor(private world: World, private entity: EntityId, initialMask: bigint) {
     this.newMask = initialMask;
@@ -145,13 +146,23 @@ export class EntityEditor {
   }
 
   /**
+   * Cancels this editor, discarding any uncommitted changes.
+   */
+  public cancel(): void {
+    this.disposed = true;
+    this.additions.clear();
+    this.removals.clear();
+    this.world.finalizeEditor(this);
+  }
+
+  /**
    * Finalizes the changes.
    * In our engine, this can be called manually for immediate effect,
    * but will also be called automatically by World.flush() if omitted.
    * Calling commit() more than once is an idempotent no-op (BAT-005).
    */
   public commit(): EntityId {
-    if (this.committed) {
+    if (this.committed || this.disposed) {
       return this.entity;
     }
     if (!this.world.isValid(this.entity)) {
