@@ -1,28 +1,33 @@
 import { Aspect } from "./Aspect";
+import { MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
 
 /**
  * Polyfill for Symbol.metadata if it's missing (needed for Stage 3 decorators and hybrid support).
  */
-if (typeof Symbol !== "undefined" && !Symbol.metadata) {
-  (Symbol as any).metadata = Symbol("Symbol.metadata");
+if (typeof Symbol !== "undefined" && !(Symbol as unknown as { metadata: symbol }).metadata) {
+  (Symbol as unknown as { metadata: symbol }).metadata = Symbol("Symbol.metadata");
 }
 
 /**
  * Internal helper to retrieve the metadata object in a way that supports both
  * modern Stage 3 decorators and legacy Stage 2 decorators (used by toolchains like jiti/sucrase).
  */
-function getMetadata(value: any, context: any): Record<string, any> {
+function getMetadata(value: unknown, context: unknown): Record<string, unknown> {
   // Stage 3
   if (typeof context === "object" && context !== null && "metadata" in context) {
-    return (context.metadata || {}) as Record<string, any>;
+    return (((context as { metadata?: Record<string, unknown> }).metadata) || {}) as Record<string, unknown>;
   }
   // Stage 2
-  const constructor = typeof value === "function" ? value : value.constructor;
-  const metaKey = Symbol.metadata;
-  if (!constructor[metaKey]) {
-    constructor[metaKey] = {};
+  const constructor = (typeof value === "function" ? value : (value as { constructor?: unknown })?.constructor) as { [key: symbol]: Record<string, unknown> | undefined } | undefined;
+  if (!constructor) {
+    return {};
   }
-  return constructor[metaKey];
+  const metaKey = Symbol.metadata;
+  if (!Object.prototype.hasOwnProperty.call(constructor, metaKey)) {
+    const parentMeta = constructor[metaKey];
+    constructor[metaKey] = parentMeta ? Object.create(parentMeta) : {};
+  }
+  return constructor[metaKey] as Record<string, unknown>;
 }
 
 /**
@@ -56,21 +61,26 @@ export interface InjectMetadata { // Renamed from WireMetadata
  * @param id Optional ComponentId if injecting a Mapper.
  */
 export function Inject(id?: number) { // Renamed from Wire
-  return function(_value: any, context: any): void {
-    const metadata = getMetadata(_value, context) as Record<string, InjectMetadata[]>;
+  if (id !== undefined && !isValidComponentId(id)) {
+    throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+  }
+  return function(_value: unknown, context: unknown): void {
+    const metadata = getMetadata(_value, context);
 
     if (!Object.prototype.hasOwnProperty.call(metadata, INJECT_METADATA_KEY)) {
-      const parentMeta = metadata[INJECT_METADATA_KEY];
+      const parentMeta = metadata[INJECT_METADATA_KEY] as InjectMetadata[] | undefined;
       metadata[INJECT_METADATA_KEY] = parentMeta ? [...parentMeta] : [];
     }
 
     // Determine what we are injecting based on the property name or ID presence
-    const propertyKey = typeof context === "object" ? String(context.name) : String(context);
+    const propertyKey = typeof context === "object" && context !== null && "name" in context
+      ? String((context as { name: string | symbol }).name)
+      : String(context);
     let type: InjectMetadata['type'] = 'MANAGER';
     if (id !== undefined) type = 'MAPPER';
     if (propertyKey === 'events') type = 'EVENT_BUS';
 
-    metadata[INJECT_METADATA_KEY].push({ propertyKey, type, id });
+    (metadata[INJECT_METADATA_KEY] as InjectMetadata[]).push({ propertyKey, type, id });
   };
 }
 
@@ -86,7 +96,7 @@ export function getInjectMetadata(instance: object): InjectMetadata[] { // Renam
  * Replaced 'any' with 'unknown' and a specific object return type.
  */
 export function After(...systemNames: string[]) {
-  return function(_value: any, context: any): void {
+  return function(_value: unknown, context: unknown): void {
     const meta = getOrderMetadata(getMetadata(_value, context));
     meta.after.push(...systemNames);
   };
@@ -96,7 +106,7 @@ export function After(...systemNames: string[]) {
  * Ensures this system runs BEFORE the specified system names.
  */
 export function Before(...systemNames: string[]) {
-  return function(_value: any, context: any): void {
+  return function(_value: unknown, context: unknown): void {
     const meta = getOrderMetadata(getMetadata(_value, context));
     meta.before.push(...systemNames);
   };
@@ -105,7 +115,7 @@ export function Before(...systemNames: string[]) {
 /**
  * Internal: Retrieves or creates the order metadata.
  */
-function getOrderMetadata(metadata: DecoratorMetadata): OrderMetadata {
+function getOrderMetadata(metadata: Record<string, unknown>): OrderMetadata {
   const m = metadata as Record<string, OrderMetadata>;
   if (!Object.prototype.hasOwnProperty.call(m, ORDER_METADATA_KEY)) {
     const parentMeta = m[ORDER_METADATA_KEY];
@@ -131,8 +141,8 @@ export function getSystemOrder(instance: object): OrderMetadata {
  * Default is 1000.
  */
 export function Priority(value: number) {
-  return function(_value: any, context: any): void {
-    const metadata = getMetadata(_value, context) as Record<string, number>;
+  return function(_value: unknown, context: unknown): void {
+    const metadata = getMetadata(_value, context);
     metadata[PRIORITY_METADATA_KEY] = value;
   };
 }
@@ -161,16 +171,18 @@ export interface SubscriptionMetadata {
  * Uses 'object' and index signatures to avoid 'any'.
  */
 export function Subscribe(eventType: string) {
-  return function(_value: any, context: any): void {
-    const metadata = getMetadata(_value, context) as Record<string, SubscriptionMetadata[]>;
+  return function(_value: unknown, context: unknown): void {
+    const metadata = getMetadata(_value, context);
 
     if (!Object.prototype.hasOwnProperty.call(metadata, SUBSCRIBE_METADATA_KEY)) {
-      const parentMeta = metadata[SUBSCRIBE_METADATA_KEY];
+      const parentMeta = metadata[SUBSCRIBE_METADATA_KEY] as SubscriptionMetadata[] | undefined;
       metadata[SUBSCRIBE_METADATA_KEY] = parentMeta ? [...parentMeta] : [];
     }
 
-    const methodName = typeof context === "object" ? String(context.name) : String(context);
-    metadata[SUBSCRIBE_METADATA_KEY].push({ eventType, methodName });
+    const methodName = typeof context === "object" && context !== null && "name" in context
+      ? String((context as { name: string | symbol }).name)
+      : String(context);
+    (metadata[SUBSCRIBE_METADATA_KEY] as SubscriptionMetadata[]).push({ eventType, methodName });
   };
 }
 
@@ -188,29 +200,30 @@ export function getSubscriptions(instance: object): SubscriptionMetadata[] {
  */
 interface AspectData {
   allMask: bigint;
-  oneMask: bigint;
+  oneMasks: bigint[];
   excludeMask: bigint;
 }
 
-function getOrCreateAspectData(metadata: DecoratorMetadata): AspectData {
-  const m = metadata as Record<string, unknown>;
+function getOrCreateAspectData(metadata: Record<string, unknown>): AspectData {
+  const m = metadata;
   if (!Object.prototype.hasOwnProperty.call(m, ASPECT_METADATA_KEY)) {
     const parentData = m[ASPECT_METADATA_KEY] as AspectData | undefined;
     m[ASPECT_METADATA_KEY] = parentData
-      ? { ...parentData }
-      : { allMask: 0n, oneMask: 0n, excludeMask: 0n };
+      ? { allMask: parentData.allMask, oneMasks: [...parentData.oneMasks], excludeMask: parentData.excludeMask }
+      : { allMask: 0n, oneMasks: [], excludeMask: 0n };
   }
   return m[ASPECT_METADATA_KEY] as AspectData;
 }
 /**
  * Builds a bitmask from an array of component IDs.
- * Validates that IDs are non-negative integers.
+ * Validates that IDs are non-negative safe integers <= MAX_COMPONENT_ID.
  */
 function buildMask(ids: (number | bigint)[]): bigint {
   let mask = 0n;
   for (const id of ids) {
-    if (typeof id === 'number' && (!Number.isInteger(id) || id < 0)) {
-      throw new Error(`[ECS] Invalid Component ID: ${id}. IDs must be non-negative integers.`);
+    const numId = typeof id === "bigint" ? Number(id) : id;
+    if (!isValidComponentId(numId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
     mask |= (1n << BigInt(id));
   }
@@ -221,9 +234,10 @@ function buildMask(ids: (number | bigint)[]): bigint {
  * The entity must possess ALL of these components.
  */
 export function All(...componentIds: number[]) {
-  return function(_value: any, context: any): void {
+  const mask = buildMask(componentIds);
+  return function(_value: unknown, context: unknown): void {
     const data = getOrCreateAspectData(getMetadata(_value, context));
-    data.allMask |= buildMask(componentIds);
+    data.allMask |= mask;
   };
 }
 
@@ -238,9 +252,10 @@ export function And(...componentIds: number[]) {
  * The entity must possess AT LEAST ONE of these components.
  */
 export function One(...componentIds: number[]) {
-  return function(_value: any, context: any): void {
+  const mask = buildMask(componentIds);
+  return function(_value: unknown, context: unknown): void {
     const data = getOrCreateAspectData(getMetadata(_value, context));
-    data.oneMask |= buildMask(componentIds);
+    data.oneMasks.push(mask);
   };
 }
 
@@ -248,9 +263,10 @@ export function One(...componentIds: number[]) {
  * The entity may NOT possess any of these components.
  */
 export function Exclude(...componentIds: number[]) {
-  return function(_value: any, context: any): void {
+  const mask = buildMask(componentIds);
+  return function(_value: unknown, context: unknown): void {
     const data = getOrCreateAspectData(getMetadata(_value, context));
-    data.excludeMask |= buildMask(componentIds);
+    data.excludeMask |= mask;
   };
 }
 
@@ -273,10 +289,10 @@ export function AnyOf(...componentIds: number[]) {
  * Useful for reusing shared queries across multiple systems.
  */
 export function Match(aspect: Aspect) {
-  return function(_value: any, context: any): void {
+  return function(_value: unknown, context: unknown): void {
     const data = getOrCreateAspectData(getMetadata(_value, context));
     data.allMask |= aspect.allMask;
-    data.oneMask |= aspect.oneMask;
+    data.oneMasks.push(...aspect.oneMasks);
     data.excludeMask |= aspect.excludeMask;
   };
 }
@@ -294,7 +310,7 @@ export function ButNot(...componentIds: number[]) {
  * Associates the system with a specific entity group.
  */
 export function Group(name: string) {
-  return function(_value: any, context: any): void {
+  return function(_value: unknown, context: unknown): void {
     getMetadata(_value, context)[GROUP_METADATA_KEY] = name;
   };
 }
@@ -304,7 +320,7 @@ export function Group(name: string) {
  * Use this if a system should only ever process one specific entity.
  */
 export function Tag(name: string) {
-  return function(_value: any, context: any): void {
+  return function(_value: unknown, context: unknown): void {
     getMetadata(_value, context)[TAG_METADATA_KEY] = name;
   };
 }
@@ -314,7 +330,7 @@ export function Tag(name: string) {
  * In your game, this represents the number of turns.
  */
 export function Interval(period: number) {
-  return function(_value: any, context: any): void {
+  return function(_value: unknown, context: unknown): void {
     getMetadata(_value, context)[INTERVAL_METADATA_KEY] = period;
   };
 }
@@ -327,7 +343,7 @@ export function Interval(period: number) {
 export function getSystemAspect(constructor: unknown): Aspect {
   const metadata = (constructor as { [Symbol.metadata]?: Record<string, AspectData> | null })[Symbol.metadata];
   const meta = metadata?.[ASPECT_METADATA_KEY];
-  return meta ? new Aspect(meta.allMask, meta.oneMask, meta.excludeMask) : new Aspect();
+  return meta ? new Aspect(meta.allMask, meta.oneMasks, meta.excludeMask) : new Aspect();
 }
 
 /**
@@ -375,7 +391,10 @@ export function getSingletonComponentId(constructor: unknown): number | undefine
  * This can be used for automated registration or documentation.
  */
 export function SingletonComponent(id: number) {
-  return function(_value: any, context: any): void {
+  if (!isValidComponentId(id)) {
+    throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+  }
+  return function(_value: unknown, context: unknown): void {
     const metadata = getMetadata(_value, context) as Record<string, number>;
     metadata[SINGLETON_CLASS_METADATA_KEY] = id;
   };
@@ -386,16 +405,21 @@ export function SingletonComponent(id: number) {
  * Framework will automatically look for this ID on the World's singleton entity.
  */
 export function Singleton(id: number) {
-  return function(_value: any, context: any): void {
-    const metadata = getMetadata(_value, context) as Record<string, any>;
+  if (!isValidComponentId(id)) {
+    throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+  }
+  return function(_value: unknown, context: unknown): void {
+    const metadata = getMetadata(_value, context);
 
     if (!Object.prototype.hasOwnProperty.call(metadata, INJECT_METADATA_KEY)) {
-      const parentMeta = metadata[INJECT_METADATA_KEY];
+      const parentMeta = metadata[INJECT_METADATA_KEY] as InjectMetadata[] | undefined;
       metadata[INJECT_METADATA_KEY] = parentMeta ? [...parentMeta] : [];
     }
 
-    const propertyKey = typeof context === "object" ? String(context.name) : String(context);
-    metadata[INJECT_METADATA_KEY].push({
+    const propertyKey = typeof context === "object" && context !== null && "name" in context
+      ? String((context as { name: string | symbol }).name)
+      : String(context);
+    (metadata[INJECT_METADATA_KEY] as InjectMetadata[]).push({
       propertyKey,
       type: 'SINGLETON',
       id
@@ -403,8 +427,9 @@ export function Singleton(id: number) {
 
     // Also store in the specific singleton metadata for easier querying if needed
     if (!Object.prototype.hasOwnProperty.call(metadata, SINGLETON_METADATA_KEY)) {
-      metadata[SINGLETON_METADATA_KEY] = {};
+      const parentSingletonMeta = metadata[SINGLETON_METADATA_KEY] as Record<string, number> | undefined;
+      metadata[SINGLETON_METADATA_KEY] = parentSingletonMeta ? { ...parentSingletonMeta } : {};
     }
-    metadata[SINGLETON_METADATA_KEY][propertyKey] = id;
+    (metadata[SINGLETON_METADATA_KEY] as Record<string, number>)[propertyKey] = id;
   };
 }

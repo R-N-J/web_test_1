@@ -1,7 +1,8 @@
-import { Archetype, EntityId, ComponentId } from "./Archetype";
+import { Archetype, EntityId, ComponentId, MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
 import { EntityManager } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
 import { Bag } from "./Bag";
+import { InternalComponents, USER_COMPONENT_ID_START } from "./InternalComponents";
 
 /**
  * Fired whenever an entity's structural mask changes.
@@ -32,7 +33,11 @@ export class ComponentManager {
   constructor(
     private entityManager: EntityManager,
     private queryManager: QueryManager
-  ) {}
+  ) {
+    for (const id of Object.values(InternalComponents)) {
+      this.registeredComponents.add(id);
+    }
+  }
 
   public subscribeOnMaskChange(observer: MaskObserver): void {
     this.maskObservers.add(observer);
@@ -79,6 +84,9 @@ export class ComponentManager {
 
 
   public registerSerializer(id: ComponentId, serializer: ComponentSerializer): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     this.serializers.set(id, serializer);
   }
 
@@ -106,16 +114,25 @@ export class ComponentManager {
   }
 
   public subscribeOnAdd(id: ComponentId, observer: ComponentObserver): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     if (!this.onAddObservers.has(id)) this.onAddObservers.set(id, []);
     this.onAddObservers.get(id)!.push(observer);
   }
 
   public subscribeOnRemove(id: ComponentId, observer: ComponentObserver): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     if (!this.onRemoveObservers.has(id)) this.onRemoveObservers.set(id, []);
     this.onRemoveObservers.get(id)!.push(observer);
   }
 
   public unsubscribeOnAdd(id: ComponentId, observer: ComponentObserver): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     const observers = this.onAddObservers.get(id);
     if (observers) {
       this.onAddObservers.set(id, observers.filter(o => o !== observer));
@@ -123,6 +140,9 @@ export class ComponentManager {
   }
 
   public unsubscribeOnRemove(id: ComponentId, observer: ComponentObserver): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     const observers = this.onRemoveObservers.get(id);
     if (observers) {
       this.onRemoveObservers.set(id, observers.filter(o => o !== observer));
@@ -279,9 +299,22 @@ export class ComponentManager {
   }
 
   public addRegisteredComponent(id: ComponentId): void {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
+    if (id < USER_COMPONENT_ID_START && !this.registeredComponents.contains(id)) {
+      throw new Error(`[ECS] Cannot register reserved component ID: ${id}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+    }
     if (!this.registeredComponents.contains(id)) { // CLEANER: uses Bag.contains
       this.registeredComponents.add(id);
     }
+  }
+
+  /**
+   * Checks if a component ID is registered in the engine.
+   */
+  public isRegistered(id: ComponentId): boolean {
+    return this.registeredComponents.contains(id);
   }
 
   /**
@@ -305,6 +338,7 @@ export class ComponentManager {
   public clearObservers(): void {
     this.onAddObservers.clear();
     this.onRemoveObservers.clear();
+    this.maskObservers.clear();
   }
 
   public clear(): void {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { EntityManager } from "../ECS/EntityManager";
+import { EntityManager, MAX_GENERATION } from "../ECS/EntityManager";
 import { Archetype } from "../ECS/Archetype";
 
 /**
@@ -223,13 +223,34 @@ export function testEntityManager() {
 
   // 3. clear() and hardReset() on grown manager
   growEm.clear();
-  assert.strictEqual(growEm.getNextEntityId(), 0, "clear() resets nextEntityId to 0");
+  assert.strictEqual(growEm.getNextEntityId(), 1100, "clear() preserves nextEntityId allocated capacity");
   for (const oldId of createdIds) {
     assert.strictEqual(growEm.isValid(oldId), false, "All previously created IDs must be invalid after clear()");
   }
   const postClearEntity = growEm.createEntity();
-  assert.strictEqual(Math.floor(postClearEntity / 65536), 0, "First entity after clear() must allocate at index 0");
   assert.strictEqual(growEm.isValid(postClearEntity), true, "First entity after clear() must be valid");
+  assert.strictEqual(createdIds.includes(postClearEntity), false, "postClearEntity must not equal any pre-clear entity ID");
+  // Pre-clear IDs must remain invalid even after post-clear allocation
+  for (const oldId of createdIds) {
+    assert.strictEqual(growEm.isValid(oldId), false, "All previously created IDs must remain invalid after post-clear allocation");
+  }
+
+  // 4. Generation exhaustion and slot retirement on clear() (ENT-011, WLD-002)
+  const exhaustEm = new EntityManager();
+  // Artificially set an entity at MAX_GENERATION (65,535)
+  exhaustEm.setNextEntityId(1);
+  exhaustEm.loadVersions([MAX_GENERATION]);
+  const maxGenClearEnt = (0 * 65536) + MAX_GENERATION;
+  assert.strictEqual(exhaustEm.isValid(maxGenClearEnt), true, "Entity at MAX_GENERATION must be valid before clear");
+
+  exhaustEm.clear();
+  assert.strictEqual(exhaustEm.isValid(maxGenClearEnt), false, "Entity at MAX_GENERATION must be invalid after clear");
+  assert.strictEqual(exhaustEm.getFreeEntities().length, 0, "Slot reaching MAX_GENERATION must be retired and not added to free pool on clear()");
+
+  // Allocating a new entity allocates a brand new index
+  const nextNewEnt = exhaustEm.createEntity();
+  assert.strictEqual(Math.floor(nextNewEnt / 65536), 1, "New entity must allocate at next available index (1) since slot 0 is retired");
+  assert.strictEqual(exhaustEm.isValid(maxGenClearEnt), false, "Retired slot entity ID remains permanently invalid");
 
   growEm.hardReset();
   assert.strictEqual(growEm.getNextEntityId(), 0, "hardReset() resets nextEntityId to 0");

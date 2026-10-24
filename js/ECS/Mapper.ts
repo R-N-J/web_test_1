@@ -1,5 +1,5 @@
 import { World } from "./World";
-import { EntityId, ComponentId } from "./Archetype";
+import { EntityId, ComponentId, MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
 
 /**
  * Artemis-odb style Component Mapper.
@@ -9,7 +9,11 @@ export class Mapper<T> {
   constructor(
     private world: World,
     public readonly componentId: ComponentId
-  ) {}
+  ) {
+    if (!isValidComponentId(componentId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${componentId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
+  }
 
   /**
    * High-performance retrieval. Throws if the entity is invalid or missing the component.

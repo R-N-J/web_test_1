@@ -1,6 +1,19 @@
 export type ComponentId = number;
 export type EntityId = number;
 
+/**
+ * Maximum supported component ID (16-bit unsigned integer range 0..65535).
+ * Enforcing this bound guarantees bounded BigInt mask sizes (<= 8KB) and prevents runtime RangeErrors.
+ */
+export const MAX_COMPONENT_ID = 65535;
+
+/**
+ * Validates that a value is a valid ComponentId (non-negative safe integer <= MAX_COMPONENT_ID).
+ */
+export function isValidComponentId(id: unknown): id is ComponentId {
+  return typeof id === "number" && Number.isSafeInteger(id) && id >= 0 && id <= MAX_COMPONENT_ID;
+}
+
 
 
 /**

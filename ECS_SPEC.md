@@ -70,6 +70,7 @@ Entity IDs are represented as positive safe integers using safe arithmetic encod
 - Supported index range: 0 through 2^37 - 1 (137,438,953,471), keeping all possible IDs within `Number.MAX_SAFE_INTEGER` (2^53 - 1).
 - Decoding is performed via arithmetic division (`index = Math.floor(id / 65536)`) and modulo (`generation = id % 65536`), avoiding 32-bit signed bitwise shift limitations.
 - Slot exhaustion & retirement: When an entity at generation 65,535 is deleted/recycled, its slot is permanently retired and never reused. No stale reference can ever be resurrected.
+- World reset lifecycle: `world.clear()` advances entity generations across all allocated index slots (or retires slots at generation 65,535). IDs from before `world.clear()` remain permanently invalid and are never reused by newly allocated entities after reset. In contrast, snapshot loading (`loadSnapshot`) explicitly restores the saved entity IDs, versions, and free pool.
 - ID validation: `isValid(entity)` strictly validates that the identifier is a positive safe integer within allocated index bounds and matching the live generation.
 
 ### 3.3 Entity lifecycle invariants
@@ -93,7 +94,17 @@ At all times:
 - **CMP-004:** The framework must validate component IDs before using them to access masks, columns, or archetypes.
 - **CMP-005:** TypeScript generics provide compile-time assistance but must not be treated as runtime validation of component data.
 
-The framework must document the supported component ID range and the requirements for registering components. Compile-time checks should be supplemented by runtime validation where uniqueness or validity cannot be guaranteed by TypeScript.
+Component ID specifications and validation rules:
+- Supported component ID range: Non-negative safe integers in the 16-bit range (`0 <= id <= 65535`, where `MAX_COMPONENT_ID = 65535`). Internal engine components reserve `0..99` (`ENGINE_COMPONENT_ID_START = 0`), and user components use `100..65535` (`USER_COMPONENT_ID_START = 100`).
+- Registration partition: User component registration (`registerAllComponents`) rejects component IDs in the reserved engine range (`0..99`). Internal engine component registration validates and registers IDs in the reserved range.
+- Rationale: Aspect filtering and Archetype bitmasks use BigInt bit shifts (`1n << BigInt(id)`). Capping component IDs at `65535` guarantees strictly bounded BigInt mask allocations (<= 8 KB per mask) and prevents runtime `RangeError` or memory exhaustion from large integers (such as `Number.MAX_SAFE_INTEGER`), while providing ample capacity for up to 65,536 distinct component types.
+- Runtime validation: Invalid component IDs (negative, fractional, non-integer, unsafe integers, numbers > `MAX_COMPONENT_ID`, NaN, Infinity, non-numbers) are rejected with an actionable error at all API boundaries (`registerComponent`, `registerAllComponents`, `addComponent`, `removeComponent`, `getComponent`, `setComponent`, `updateComponent`, `mutateComponent`, `hasComponent`, Aspect construction, Mapper instantiation, EntityEditor methods, RelationshipManager methods, and World observer/serializer APIs) before any bitwise shifts, mask construction, array indexing, or storage mutations occur.
+- Uniqueness and collisions: Component IDs must be unique within a world configuration; duplicate registrations or ID collisions during registration throw clear errors.
+- Absent component semantics: A valid component ID that is registered or valid but not present on an entity follows documented missing-component behavior:
+  - `getComponent<T>()` and `edit.get<T>()` return `undefined`.
+  - `hasComponent()` and `edit.has()` return `false`.
+  - `setComponent()`, `updateComponent()`, and `mutateComponent()` return `false` without modifying storage.
+  - `removeComponent()` and `edit.remove()` are safe no-ops that do not modify archetype storage, alter component masks, or produce false removal notifications.
 
 ### 4.2 Adding, retrieving, replacing, and removing components
 
@@ -156,11 +167,19 @@ The following definitions are normative:
 - `Aspect.one(A, B)`: an entity must have at least one of A or B.
 - `Aspect.exclude(A, B)`: an entity must have neither A nor B.
 - `butNot(...)`: excludes entities with the specified components.
-- `and(...)`: combines the requirements of aspects.
+- `and(...)`: combines the requirements of aspects using logical conjunction (AND) across all requirement categories and multiple one-of groups.
 
-If an aspect contains multiple categories of requirements, the entity must satisfy all applicable categories.
+If an aspect contains multiple categories of requirements, the entity must satisfy all applicable categories. Conjunction of multiple `one()` aspects (e.g., `Aspect.one(A, B).and(Aspect.one(C, D))`) requires that the entity contains at least one component from each respective group `(A or B) and (C or D)`.
 
-Empty requirement lists must have documented behavior, including for `all`, `one`, and `exclude`.
+Empty requirement semantics:
+- `Aspect.EMPTY` (and `new Aspect()`): represents an unconstrained aspect (matches all entities).
+- `Aspect.all()`: 0 required components; imposes no presence constraints (matches all entities).
+- `Aspect.exclude()`: 0 excluded components; imposes no exclusion constraints (matches all entities).
+- `Aspect.one()`: requires at least one component from an empty set; unsatisfiable (matches 0 entities).
+
+Legacy compatibility:
+- The `Aspect` constructor accepts `(allMask, oneMask, excludeMask)` where `oneMask` can be a single `bigint` (legacy representation) or an array of disjunctive bitmasks `readonly bigint[]`.
+- The `oneMask` getter returns a bitwise OR union of all disjunctive masks in `oneMasks`. For composite aspects combining multiple independent `one()` groups, this bitwise union represents the candidate component pool but cannot express the multi-clause conjunction semantics.
 
 ### 6.2 Query APIs
 
@@ -271,9 +290,9 @@ The framework's `Scheduler` and `TurnManager` must have clearly separated respon
 - **WLD-001:** A newly initialized world has valid internal managers and required internal state.
 - **WLD-002:** `world.clear()` removes the intended game state without leaving stale entity IDs, component data, query results, tags, groups, relationships, or pending operations.
 - **WLD-003:** Internal singleton entities and required singleton values are recreated or deliberately preserved according to a documented policy.
-- **WLD-004:** Managers, event subscriptions, and scheduler references remain valid after a clear or scene transition, or are explicitly rebuilt.
+- **WLD-004:** Managers, event subscriptions, and scheduler references remain valid after a clear or scene transition, or are explicitly rebuilt. When `world.clear()` is called, world-scoped ephemeral observers and event handlers are cleared, while persistent active systems registered with the `Scheduler` are automatically rebound via `scheduler.rebind()` (restoring `@Subscribe` event listeners and system mask/component observers via `system.rebind()`).
 - **WLD-005:** Clearing a world and then creating, querying, and deleting entities must work normally.
-- **WLD-006:** Repeated clear and reinitialization cycles must not accumulate duplicate systems, subscriptions, or manager state.
+- **WLD-006:** Repeated clear and reinitialization cycles must not accumulate duplicate systems, subscriptions, or manager state. EventBus and ComponentManager registrations are idempotent and re-registered handlers execute exactly once per event.
 
 A scene transition must define which data belongs to the outgoing scene, which data survives, and which objects are reinitialized. The lifecycle must not depend on an undocumented assumption that clearing entities also resets every other subsystem.
 
@@ -437,7 +456,7 @@ Do not combine a large architectural rewrite with unrelated bug fixes. Do not ma
 
 The following decisions must be confirmed during implementation review:
 
-- The supported entity ID range and exact index/version encoding (Resolved: 16-bit generation [1..65,535], 37-bit index [0..2^37 - 1], arithmetic encoding `id = index * 65536 + generation`, permanent slot retirement at generation 65,535).
+- The supported entity ID range and exact index/version encoding (Resolved: 16-bit generation (1..65,535), 37-bit index (0..2^37 - 1), arithmetic encoding `id = index * 65536 + generation`, permanent slot retirement at generation 65,535).
 - Whether adding an existing component replaces its value or throws.
 - Whether deleting an invalid entity is a no-op or an error.
 - The precise visibility of deferred creations and edits before commit.

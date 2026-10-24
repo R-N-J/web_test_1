@@ -1,7 +1,7 @@
-import type { ComponentId } from "./Archetype";
+import { MAX_COMPONENT_ID, isValidComponentId, type ComponentId } from "./Archetype";
 import type { World } from "./World";
 import type { ComponentSerializer } from "./ComponentManager";
-import { InternalComponents } from "./InternalComponents";
+import { InternalComponents, ENGINE_COMPONENT_ID_START, USER_COMPONENT_ID_START } from "./InternalComponents";
 
 
 
@@ -57,12 +57,28 @@ export function registerAllComponents(world: World, userComponents: Record<strin
   // 1. Map names for debugging
   ComponentNames.clear();
 
-  const allEntries = [
-    ...Object.entries(InternalComponents),
-    ...Object.entries(userComponents)
-  ];
+  // Validate and map InternalComponents (reserved engine range 0..99)
+  for (const [name, id] of Object.entries(InternalComponents)) {
+    if (!isValidComponentId(id) || id < ENGINE_COMPONENT_ID_START || id >= USER_COMPONENT_ID_START) {
+      const msg = `[ECS] CRITICAL: Invalid Internal Component ID ${id} for '${name}'. Internal Component IDs must be in range ${ENGINE_COMPONENT_ID_START}..${USER_COMPONENT_ID_START - 1}.`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+    if (ComponentNames.has(id)) {
+      const msg = `[ECS] CRITICAL: Component ID Collision! ID ${id} is used by both '${ComponentNames.get(id)}' and '${name}'. IDs must be unique.`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+    ComponentNames.set(id, name);
+  }
 
-  for (const [name, id] of allEntries) {
+  // Validate and register userComponents (user range 100..65535)
+  for (const [name, id] of Object.entries(userComponents)) {
+    if (!isValidComponentId(id) || id < USER_COMPONENT_ID_START) {
+      const msg = `[ECS] CRITICAL: Invalid User Component ID ${id} for '${name}'. User Component IDs must be in range ${USER_COMPONENT_ID_START}..${MAX_COMPONENT_ID} (0..${USER_COMPONENT_ID_START - 1} are reserved for engine components).`;
+      console.error(msg);
+      throw new Error(msg);
+    }
     if (ComponentNames.has(id)) {
       const msg = `[ECS] CRITICAL: Component ID Collision! ID ${id} is used by both '${ComponentNames.get(id)}' and '${name}'. IDs must be unique.`;
       console.error(msg);

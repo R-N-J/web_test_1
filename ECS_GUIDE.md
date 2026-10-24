@@ -370,12 +370,12 @@ An `Aspect` defines the requirements for an entity to be included in a query. It
 #### Factory Methods
 | Method | Description |
 | :--- | :--- |
-| `Aspect.all(...ids)` | Matches entities that have **ALL** of the specified components. |
-| `Aspect.one(...ids)` | Matches entities that have **AT LEAST ONE** of the specified components. |
-| `Aspect.exclude(...ids)`| Matches entities that have **NONE** of the specified components. |
+| `Aspect.all(...ids)` | Matches entities that have **ALL** of the specified components. An empty list imposes no presence constraints (matches all entities). |
+| `Aspect.one(...ids)` | Matches entities that have **AT LEAST ONE** of the specified components. An empty list is unsatisfiable (matches 0 entities). |
+| `Aspect.exclude(...ids)`| Matches entities that have **NONE** of the specified components. An empty list imposes no exclusions (matches all entities). |
 
 #### Composing Complex Queries
-You can chain methods to create complex requirements:
+You can chain methods or use `.and(otherAspect)` to compose requirements using true logical conjunction (AND):
 
 ```typescript
 import { Aspect } from './ECS/Aspect';
@@ -387,9 +387,17 @@ const aliveFighters = Aspect.all(Components.POSITION, Components.HEALTH)
 // Entities that have either FIRE_RESIST or WATER_RESIST
 const resistant = Aspect.one(Components.FIRE_RESIST, Components.WATER_RESIST);
 
-// Combining requirements from another Aspect
+// Combining requirements from another Aspect: requires ALIVE and FIGHTER and (FIRE_RESIST or WATER_RESIST)
 const combined = aliveFighters.and(resistant);
+
+// Conjunction of multiple one() requirements: requires at least one from (A or B) AND at least one from (C or D)
+const multiOne = Aspect.one(Components.FIRE_RESIST, Components.WATER_RESIST)
+                       .and(Aspect.one(Components.SWORD, Components.BOW));
 ```
+
+#### Legacy Compatibility
+- **Direct Constructor**: `new Aspect(allMask, oneMask, excludeMask)` remains compatible with legacy code passing numeric/bigint masks.
+- **Combined `oneMask` Getter**: Returns a bitwise OR union of all disjunctive masks in `oneMasks`. Note that while this provides backwards compatibility, a single bitmask cannot represent the full semantics of multi-group queries (e.g. `(A or B) and (C or D)`). Use `aspect.oneMasks` for the full array of disjunctive clauses.
 
 ### The Unified Query API
 The `World` provides a consistent set of methods for retrieving entities based on an `Aspect`, `Group`, or `Tag`. This symmetric API ensures that you use the same vocabulary regardless of how you are searching for entities.
@@ -922,7 +930,9 @@ scheduler.update(1.0);
 **Key Methods:**
 - `add(system)`: Adds a system to the end of the execution chain.
 - `get(SystemClass)`: Returns the instance of a system. Useful if `CombatSystem` needs to trigger something in `ParticleSystem`.
+- `getSystems()`: Returns the list of all registered systems.
 - `setEnabled(SystemClass, boolean)`: Pauses or resumes a specific system.
+- `rebind()`: Rebinds all registered systems with the world event bus and observer pipeline (called automatically during `world.clear()`).
 - `clear()`: Removes all systems and calls their `cleanup()` hooks (crucial for level transitions).
 
 ### The TurnManager (The Library Way)
@@ -1371,7 +1381,7 @@ world.scenes?.switchTo(new MainMenuScene());
 
 When `switchTo(nextScene)` is called:
 1.  **onExit**: The current scene's `onExit` method is called.
-2.  **world.clear()**: The World is completely reset. All entities, tags, and groups are deleted.
+2.  **world.clear()**: The World is completely reset. All entities, tags, and groups are deleted, and entity generations are advanced so pre-reset IDs cannot collide with new entities.
 3.  **onEnter**: The new scene's `onEnter` method is called.
 
 ### Tutorial: Implementing Scenes
@@ -1749,9 +1759,10 @@ Every time you call `addComponent`, `removeComponent`, or `deleteEntity`, the en
 - **What to watch out for**: Avoid toggling components frequently (e.g., adding/removing a `VISIBLE` tag every frame). Use a boolean inside a component instead, or use **Batch Editing** via `world.edit(entity)`.
 
 ### 2. Manual Component ID Management
-The system relies on unique numeric IDs for components (e.g., `0`, `1`, `100`).
+The system relies on unique numeric IDs for components in the 16-bit unsigned range `0..65535` (`MAX_COMPONENT_ID = 65535`).
+- **Internal vs. User IDs**: IDs `0..99` are reserved for internal engine components; user-defined components must use IDs `100..65535`.
 - **The Negative**: If you accidentally assign the same ID to two different components, the ECS will treat them as the same, leading to "impossible" bugs.
-- **What to watch out for**: Always define IDs in a central place like `ComponentRegistry.ts` and use the `as const satisfies Record<string, ComponentId>` pattern to catch duplicates at compile time.
+- **What to watch out for**: Always define IDs in a central place like `ComponentRegistry.ts` and use the `as const satisfies Record<string, ComponentId>` pattern to catch duplicates at compile time. IDs outside `0..65535` are rejected with runtime errors.
 
 ### 3. Archetype fragmentation
 If your entities have highly varied combinations of components, you will end up with many Archetypes, each containing only a few entities.

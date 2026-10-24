@@ -1,4 +1,5 @@
-import { EntityId, ComponentId } from "./Archetype";
+import { EntityId, ComponentId, MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
+import { USER_COMPONENT_ID_START } from "./InternalComponents";
 import { EntityManager } from "./EntityManager";
 import { ComponentManager } from "./ComponentManager";
 
@@ -21,6 +22,12 @@ export class RelationshipManager {
    * @param exclusive If true, replaces existing target. If false, adds to a collection.
    */
   public add(subject: EntityId, relationId: ComponentId, target: EntityId, exclusive = true): void {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
+    if (relationId < USER_COMPONENT_ID_START && !this.components.isRegistered(relationId)) {
+      throw new Error(`[ECS] Cannot add unregistered reserved component ID: ${relationId}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+    }
     if (!this.entities.isValid(target) || !this.entities.isValid(subject)) return;
 
     this.components.addRegisteredComponent(relationId);
@@ -89,6 +96,9 @@ export class RelationshipManager {
    * This is very helpful for "foreach" loops in your systems.
    */
   public getTargetsArray(subject: EntityId, relationId: ComponentId): EntityId[] {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     const targets = this.getTargets(subject, relationId);
     if (targets === undefined) return [];
     if (targets instanceof Set) return Array.from(targets);
@@ -99,10 +109,10 @@ export class RelationshipManager {
   /**
    * Removes a specific target from a relationship.
    */
-  /**
-   * Removes a specific target from a relationship.
-   */
   public remove(subject: EntityId, relationId: ComponentId, target?: EntityId): void {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     const loc = this.entities.getLocation(subject);
     if (!loc) return;
 
@@ -191,6 +201,9 @@ export class RelationshipManager {
    * Returns a single EntityId for exclusive, or a Set<EntityId> for non-exclusive.
    */
   public getTargets(subject: EntityId, relationId: ComponentId): EntityId | Set<EntityId> | undefined {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     const val = this.entities.getComponentValue<EntityId | Set<EntityId>>(subject, relationId);
 
     if (val === undefined) return undefined;
@@ -212,6 +225,9 @@ export class RelationshipManager {
    * Now handles both raw IDs and Sets.
    */
   public *getRelated(relationId: ComponentId, target: EntityId): IterableIterator<EntityId> {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     if (!this.entities.isValid(target)) return;
 
     for (const arch of this.components.getArchetypes()) {
@@ -234,6 +250,9 @@ export class RelationshipManager {
    * Returns the number of entities that point to a specific target via a relation.
    */
   public countRelated(relationId: ComponentId, target: EntityId): number {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     let count = 0;
     for (const arch of this.components.getArchetypes()) {
       const column = arch.columns.get(relationId);
@@ -254,6 +273,9 @@ export class RelationshipManager {
    * Removes all targets for a specific relationship on a subject.
    */
   public clearRelations(subject: EntityId, relationId: ComponentId): void {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     this.removeComponent(subject, relationId);
   }
 

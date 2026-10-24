@@ -205,14 +205,27 @@ export class EntityManager {
 
   public clear(): void {
     this.entityToLocation.clear();
-    this.nextEntityId = 0;
-    // Reuse Bag storage if you want; if not available, recreate it (your current approach).
+
+    // Clear the free entity lists and rebuild them with advanced generations
     this.freeEntities = new Bag<EntityId>();
     this.freeEntitiesSet.clear();
 
-    // Reset versions so any old EntityId becomes invalid after a clear.
-    // This keeps behavior predictable across world resets / snapshot loads.
-    this.versions.fill(0);
+    // Advance generation for every allocated index (0 <= index < this.nextEntityId)
+    // so any pre-clear EntityId becomes permanently invalid and cannot be resurrected (ENT-010).
+    for (let i = 0; i < this.nextEntityId; i++) {
+      if (this.versions[i] > 0) {
+        const nextGen = this.versions[i] + 1;
+        if (nextGen <= MAX_GENERATION) {
+          this.versions[i] = nextGen;
+          const newFreeId = this.pack(i, nextGen);
+          this.freeEntities.add(newFreeId);
+          this.freeEntitiesSet.add(newFreeId);
+        } else {
+          // Permanently retire slot when reaching generation limit (ENT-011)
+          this.versions[i] = 0;
+        }
+      }
+    }
   }
 
 

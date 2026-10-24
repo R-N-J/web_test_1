@@ -3,17 +3,16 @@ import { World } from "../ECS/World";
 import { Aspect } from "../ECS/Aspect";
 
 // Mock RPG Component IDs
-const POSITION = 1;
-const STATS = 2;
-const NAME = 3;
-const INVENTORY = 4;
-const RELATION_OWNER = 10;
-const GAME_STATE = 50;
+const POSITION = 100;
+const STATS = 101;
+const NAME = 102;
+const INVENTORY = 103;
+const RELATION_OWNER = 104;
+const GAME_STATE = 105;
 
 interface Position { x: number; y: number; }
 interface Stats { hp: number; maxHp: number; level: number; }
 interface Name { value: string; }
-interface Inventory { items: string[]; }
 interface GameState { paused: boolean; difficulty: string; }
 
 /**
@@ -54,7 +53,7 @@ export function testRPGScenario() {
     .group("monsters")
     .commit();
 
-  const orc = world.buildEntity()
+  world.buildEntity()
     .add(NAME, { value: "Orc" })
     .add(POSITION, { x: 10, y: 10 })
     .add(STATS, { hp: 80, maxHp: 80, level: 3 })

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { World } from "../ECS/World";
 import { Scheduler } from "../ECS/Scheduler";
 import { IteratingSystem, BaseSystem } from "../ECS/System";
-import { All, Inject, After, Priority } from "../ECS/Decorators";
+import { All, Inject, After, Priority, Subscribe } from "../ECS/Decorators";
 import { Aspect } from "../ECS/Aspect";
+import { EntityId } from "../ECS/Archetype";
 import { InternalComponents, EngineStats } from "../ECS/InternalComponents";
 
 // Component IDs
@@ -411,6 +412,257 @@ export function testSystems() {
   assert.strictEqual(obsBCount, 1, "Subsequent component addition observer fired");
   assert.strictEqual(maskObsCount, 1, "Mask observer fired on subsequent valid component addition");
   assert.strictEqual(obsWorld.hasComponent(obsEntity, OBS_COMP_B), true, "Entity has second component");
+
+  // ==========================================
+  // System Execution and Event Lifecycle Across World.clear() (WLD-002, WLD-004, SYS-007)
+  // ==========================================
+  const sysWorld = new World();
+  const sysScheduler = new Scheduler(sysWorld);
+
+  const SYS_POS = 150;
+  const SYS_VEL = 151;
+  sysWorld.registerComponent(SYS_POS);
+  sysWorld.registerComponent(SYS_VEL);
+
+  @All(SYS_POS, SYS_VEL)
+  class TestMovementSystem extends IteratingSystem {
+    public processedEntities: number[] = [];
+
+    protected override processEntity(entity: number): void {
+      this.processedEntities.push(entity);
+      const pos = this.getComponent<{ x: number }>(entity, SYS_POS);
+      const vel = this.getComponent<{ vx: number }>(entity, SYS_VEL);
+      if (pos && vel) {
+        pos.x += vel.vx;
+      }
+    }
+  }
+
+  const moveSys = new TestMovementSystem(sysWorld);
+  sysScheduler.add(moveSys);
+
+  // 1. Initial run before clear
+  const e1 = sysWorld.createEntity();
+  sysWorld.addComponent(e1, SYS_POS, { x: 10 });
+  sysWorld.addComponent(e1, SYS_VEL, { vx: 2 });
+
+  sysScheduler.update(1.0);
+  assert.deepStrictEqual(moveSys.processedEntities, [e1], "System processed e1 on first update");
+  assert.deepStrictEqual(sysWorld.getComponent(e1, SYS_POS), { x: 12 });
+
+  // 2. Clear world
+  sysWorld.clear();
+  moveSys.processedEntities = [];
+
+  // 3. Create new entities after clear and execute scheduler update
+  const e2 = sysWorld.createEntity();
+  const e3 = sysWorld.createEntity();
+  sysWorld.addComponent(e2, SYS_POS, { x: 100 });
+  sysWorld.addComponent(e2, SYS_VEL, { vx: 5 });
+  sysWorld.addComponent(e3, SYS_POS, { x: 200 }); // missing SYS_VEL, should not match
+
+  sysScheduler.update(1.0);
+  assert.deepStrictEqual(moveSys.processedEntities, [e2], "System should process newly created matching entity e2 after clear and ignore e3");
+  assert.deepStrictEqual(sysWorld.getComponent(e2, SYS_POS), { x: 105 });
+  assert.deepStrictEqual(sysWorld.getComponent(e3, SYS_POS), { x: 200 });
+
+  // 4. Test EventBus re-registration and system lifecycle across clear (WLD-002, WLD-004, SYS-001)
+  class TestEventSubscriber {
+    public eventCount = 0;
+    public lastPayload = "";
+
+    public handleGameEvent(event: { type: string; payload: string }): void {
+      this.eventCount++;
+      this.lastPayload = event.payload;
+    }
+  }
+
+  const subscriber = new TestEventSubscriber();
+  // Manually subscribe on event bus
+  sysWorld.events.subscribe("GAME_EVENT", (ev: { type: string; payload: string }) => subscriber.handleGameEvent(ev));
+
+  sysWorld.events.publish({ type: "GAME_EVENT", payload: "first" });
+  assert.strictEqual(subscriber.eventCount, 1);
+  assert.strictEqual(subscriber.lastPayload, "first");
+
+  // Clearing world wipes ephemeral event handlers
+  sysWorld.clear();
+  sysWorld.events.publish({ type: "GAME_EVENT", payload: "stale" });
+  assert.strictEqual(subscriber.eventCount, 1, "Wiped ephemeral event handler must not receive event after clear");
+
+  // Re-registering manual handler operates cleanly without duplicate callbacks
+  sysWorld.events.subscribe("GAME_EVENT", (ev: { type: string; payload: string }) => subscriber.handleGameEvent(ev));
+  sysWorld.events.publish({ type: "GAME_EVENT", payload: "second" });
+  assert.strictEqual(subscriber.eventCount, 2);
+  assert.strictEqual(subscriber.lastPayload, "second");
+
+  // ==========================================
+  // Comprehensive Active System Subscriptions Across Repeated Resets (WLD-002, WLD-004, OBS-001..OBS-006, SYS-001)
+  // ==========================================
+  const subWorld = new World();
+  const subScheduler = new Scheduler(subWorld);
+
+  const C_SUB_A = 200;
+  const C_SUB_B = 201;
+  const C_SUB_C = 202;
+  subWorld.registerComponent(C_SUB_A);
+  subWorld.registerComponent(C_SUB_B);
+  subWorld.registerComponent(C_SUB_C);
+
+  // System 1: Decorated Event Listener System
+  class EventListeningSystem extends BaseSystem {
+    public eventReceivedCount = 0;
+    public lastEventPayload = "";
+
+    @Subscribe("CUSTOM_ALERT")
+    public onCustomAlert(event: { type: string; payload: string }): void {
+      this.eventReceivedCount++;
+      this.lastEventPayload = event.payload;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public override update(dt: number): void {}
+  }
+
+  // System 2: Component Observer System (subscribes via rebind)
+  class ComponentObservingSystem extends BaseSystem {
+    public addCount = 0;
+    public removeCount = 0;
+    public lastAddedEntity: EntityId = -1;
+    public lastRemovedEntity: EntityId = -1;
+
+    public override rebind(): void {
+      super.rebind();
+      this.world.subscribeOnAdd(C_SUB_A, (entity) => {
+        this.addCount++;
+        this.lastAddedEntity = entity;
+      });
+      this.world.subscribeOnRemove(C_SUB_A, (entity) => {
+        this.removeCount++;
+        this.lastRemovedEntity = entity;
+      });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public override update(dt: number): void {}
+  }
+
+  // System 3: Iterating System with Mask Change Hooks
+  @All(C_SUB_B, C_SUB_C)
+  class MaskObservingSystem extends IteratingSystem {
+    public addedEntities: EntityId[] = [];
+    public removedEntities: EntityId[] = [];
+
+    protected override onEntityAdded(entity: EntityId): void {
+      this.addedEntities.push(entity);
+    }
+
+    protected override onEntityRemoved(entity: EntityId): void {
+      this.removedEntities.push(entity);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    protected override processEntity(entity: EntityId): void {}
+  }
+
+  const eventSys = new EventListeningSystem(subWorld);
+  const compObsSys = new ComponentObservingSystem(subWorld);
+  const maskObsSys = new MaskObservingSystem(subWorld);
+
+  // Register all 3 systems with the scheduler
+  subScheduler.add(eventSys);
+  subScheduler.add(compObsSys);
+  subScheduler.add(maskObsSys);
+
+  // Trigger initial rebind for compObsSys so its add/remove listeners are registered
+  compObsSys.rebind();
+
+  // Ephemeral outside-of-scheduler listeners to prove discarded world state does NOT survive
+  let ephemeralEventCount = 0;
+  subWorld.events.subscribe("CUSTOM_ALERT", () => { ephemeralEventCount++; });
+  let ephemeralCompAddCount = 0;
+  subWorld.subscribeOnAdd(C_SUB_A, () => { ephemeralCompAddCount++; });
+
+  // --- Initial Phase (Cycle 0: before any world clear) ---
+  subWorld.events.publish({ type: "CUSTOM_ALERT", payload: "init_alert" });
+  assert.strictEqual(eventSys.eventReceivedCount, 1, "EventSystem received initial event");
+  assert.strictEqual(eventSys.lastEventPayload, "init_alert");
+  assert.strictEqual(ephemeralEventCount, 1, "Ephemeral event listener received initial event");
+
+  const ent0 = subWorld.createEntity();
+  subWorld.addComponent(ent0, C_SUB_A, { val: "ent0_a" });
+  assert.strictEqual(compObsSys.addCount, 1, "ComponentObservingSystem notified on add before clear");
+  assert.strictEqual(compObsSys.lastAddedEntity, ent0);
+  assert.strictEqual(ephemeralCompAddCount, 1, "Ephemeral component listener notified before clear");
+
+  subWorld.addComponent(ent0, C_SUB_B, { val: "ent0_b" });
+  assert.strictEqual(maskObsSys.addedEntities.length, 0, "MaskObservingSystem not added yet (missing C_SUB_C)");
+  subWorld.addComponent(ent0, C_SUB_C, { val: "ent0_c" });
+  assert.strictEqual(maskObsSys.addedEntities.length, 1, "MaskObservingSystem received onEntityAdded");
+  assert.strictEqual(maskObsSys.addedEntities[0], ent0);
+
+  subWorld.removeComponent(ent0, C_SUB_B);
+  assert.strictEqual(maskObsSys.removedEntities.length, 1, "MaskObservingSystem received onEntityRemoved");
+  assert.strictEqual(maskObsSys.removedEntities[0], ent0);
+
+  subWorld.removeComponent(ent0, C_SUB_A);
+  assert.strictEqual(compObsSys.removeCount, 1, "ComponentObservingSystem notified on remove before clear");
+  assert.strictEqual(compObsSys.lastRemovedEntity, ent0);
+
+  // --- Run Repeated Reset Cycles (Cycles 1 through 3) ---
+  for (let cycle = 1; cycle <= 3; cycle++) {
+    // Perform World reset
+    subWorld.clear();
+
+    // 1. Verify pre-reset entity is invalid and not referenced
+    assert.strictEqual(subWorld.isValid(ent0), false, `Pre-reset entity ent0 must be invalid in cycle ${cycle}`);
+
+    // 2. Publish event: Active EventListeningSystem must receive exactly 1 notification per cycle; ephemeral must NOT receive
+    subWorld.events.publish({ type: "CUSTOM_ALERT", payload: `alert_cycle_${cycle}` });
+    assert.strictEqual(eventSys.eventReceivedCount, 1 + cycle, `EventListeningSystem received event in cycle ${cycle} exactly once (no duplicates)`);
+    assert.strictEqual(eventSys.lastEventPayload, `alert_cycle_${cycle}`);
+    assert.strictEqual(ephemeralEventCount, 1, `Ephemeral event handler must NOT receive event after clear in cycle ${cycle}`);
+
+    // 3. Create new entity for this cycle
+    const cycleEnt = subWorld.createEntity();
+    assert.strictEqual(subWorld.isValid(cycleEnt), true);
+    assert.notStrictEqual(cycleEnt, ent0, "New entity ID must not collide with pre-clear entity");
+
+    // 4. Test ComponentObservingSystem add/remove on new entity
+    subWorld.addComponent(cycleEnt, C_SUB_A, { cycle, name: "cycleEnt" });
+    assert.strictEqual(compObsSys.addCount, 1 + cycle, `ComponentObservingSystem addCount incremented exactly once in cycle ${cycle}`);
+    assert.strictEqual(compObsSys.lastAddedEntity, cycleEnt, `ComponentObservingSystem received current valid entity in cycle ${cycle}`);
+    assert.strictEqual(ephemeralCompAddCount, 1, `Ephemeral component add listener must NOT receive notification in cycle ${cycle}`);
+
+    // 5. Test MaskObservingSystem onEntityAdded/onEntityRemoved on new entity
+    subWorld.addComponent(cycleEnt, C_SUB_B, { cycle });
+    assert.strictEqual(maskObsSys.addedEntities.length, cycle, `MaskObservingSystem not triggered before full aspect match in cycle ${cycle}`);
+
+    subWorld.addComponent(cycleEnt, C_SUB_C, { cycle });
+    assert.strictEqual(maskObsSys.addedEntities.length, 1 + cycle, `MaskObservingSystem addedEntities incremented exactly once in cycle ${cycle}`);
+    assert.strictEqual(maskObsSys.addedEntities[maskObsSys.addedEntities.length - 1], cycleEnt);
+
+    subWorld.removeComponent(cycleEnt, C_SUB_C);
+    assert.strictEqual(maskObsSys.removedEntities.length, 1 + cycle, `MaskObservingSystem removedEntities incremented exactly once in cycle ${cycle}`);
+    assert.strictEqual(maskObsSys.removedEntities[maskObsSys.removedEntities.length - 1], cycleEnt);
+
+    subWorld.removeComponent(cycleEnt, C_SUB_A);
+    assert.strictEqual(compObsSys.removeCount, 1 + cycle, `ComponentObservingSystem removeCount incremented exactly once in cycle ${cycle}`);
+    assert.strictEqual(compObsSys.lastRemovedEntity, cycleEnt);
+  }
+
+  // --- Test System Removal and Cleanup from Scheduler ---
+  const eventCountBeforeRemove = eventSys.eventReceivedCount;
+  subScheduler.remove(eventSys);
+  subWorld.events.publish({ type: "CUSTOM_ALERT", payload: "after_removal" });
+  assert.strictEqual(eventSys.eventReceivedCount, eventCountBeforeRemove, "Removed system must no longer receive event notifications");
+
+  const maskAddCountBeforeRemove = maskObsSys.addedEntities.length;
+  subScheduler.remove(maskObsSys);
+  const entAfterRemove = subWorld.createEntity();
+  subWorld.addComponent(entAfterRemove, C_SUB_B, {});
+  subWorld.addComponent(entAfterRemove, C_SUB_C, {});
+  assert.strictEqual(maskObsSys.addedEntities.length, maskAddCountBeforeRemove, "Removed iterating system must no longer receive onEntityAdded mask notifications");
 
   console.log("Systems & Decorators tests completed!");
 }

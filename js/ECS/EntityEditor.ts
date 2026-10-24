@@ -1,5 +1,6 @@
 
-import { EntityId, ComponentId } from "./Archetype";
+import { EntityId, ComponentId, MAX_COMPONENT_ID, isValidComponentId } from "./Archetype";
+import { USER_COMPONENT_ID_START } from "./InternalComponents";
 import type { World } from "./World";
 
 
@@ -12,6 +13,7 @@ export class EntityEditor {
   private additions = new Map<ComponentId, unknown>();
   private removals = new Set<ComponentId>();
   private committed = false;
+  private disposed = false;
 
   constructor(private world: World, private entity: EntityId, initialMask: bigint) {
     this.newMask = initialMask;
@@ -22,6 +24,9 @@ export class EntityEditor {
    * Checks pending additions first, then falls back to the world data.
    */
   public get<T>(id: ComponentId): T | undefined {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     if (this.additions.has(id)) return this.additions.get(id) as T;
     if (this.removals.has(id)) return undefined;
     return this.world.getComponent<T>(this.entity, id);
@@ -31,6 +36,9 @@ export class EntityEditor {
    * Checks if the entity will have this component after commit.
    */
   public has(id: ComponentId): boolean {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     return (this.newMask & (1n << BigInt(id))) !== 0n;
   }
 
@@ -73,6 +81,12 @@ export class EntityEditor {
   }
 
   public add(id: ComponentId, value: unknown): this {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
+    if (id < USER_COMPONENT_ID_START && !this.world.isComponentRegistered(id)) {
+      throw new Error(`[ECS] Cannot add unregistered reserved component ID: ${id}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+    }
     this.newMask |= (1n << BigInt(id));
     this.additions.set(id, value);
     this.removals.delete(id);
@@ -108,6 +122,9 @@ export class EntityEditor {
 
 
   public remove(id: ComponentId): this {
+    if (!isValidComponentId(id)) {
+      throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
     this.newMask &= ~(1n << BigInt(id));
     this.removals.add(id);
     this.additions.delete(id);
@@ -129,13 +146,23 @@ export class EntityEditor {
   }
 
   /**
+   * Cancels this editor, discarding any uncommitted changes.
+   */
+  public cancel(): void {
+    this.disposed = true;
+    this.additions.clear();
+    this.removals.clear();
+    this.world.finalizeEditor(this);
+  }
+
+  /**
    * Finalizes the changes.
    * In our engine, this can be called manually for immediate effect,
    * but will also be called automatically by World.flush() if omitted.
    * Calling commit() more than once is an idempotent no-op (BAT-005).
    */
   public commit(): EntityId {
-    if (this.committed) {
+    if (this.committed || this.disposed) {
       return this.entity;
     }
     if (!this.world.isValid(this.entity)) {
