@@ -364,6 +364,7 @@ export class World {
 
   /**
    * Fast-path iterator that yields raw SoA columns for matching archetypes.
+   * If a matching archetype is missing a requested component column, that column will be undefined.
    *
    * Example usage:
    * for (const { entities, columns: [pos, vel] } of world.viewColumns(aspect, POS, VEL)) { ... }
@@ -371,25 +372,25 @@ export class World {
   public* viewColumns(
     aspect: Aspect,
     ...componentIds: ComponentId[]
-  ): IterableIterator<{ arch: Archetype; entities: EntityId[]; columns: unknown[][] }> {
+  ): IterableIterator<{ arch: Archetype; entities: EntityId[]; columns: (unknown[] | undefined)[] }> {
+    for (const id of componentIds) {
+      if (!isValidComponentId(id)) {
+        throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+      }
+    }
+
     const archetypes = this.getArchetypes(aspect);
 
     for (const arch of archetypes) {
-      const cols: unknown[][] = [];
-      let ok = true;
+      if (arch.entities.length === 0) continue;
 
+      const cols: (unknown[] | undefined)[] = [];
       for (const id of componentIds) {
         const col = arch.getColumn<unknown>(id);
-        if (!col) {
-          ok = false;
-          break;
-        }
         cols.push(col);
       }
 
-      if (!ok) continue;
-
-      yield {arch, entities: arch.entities, columns: cols};
+      yield { arch, entities: arch.entities, columns: cols };
     }
   }
 
@@ -404,6 +405,12 @@ export class World {
     aspect: Aspect,
     ...componentIds: ComponentId[]
   ): IterableIterator<{ arch: Archetype; entities: EntityId[]; columns: unknown[][] }> {
+    for (const id of componentIds) {
+      if (!isValidComponentId(id)) {
+        throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+      }
+    }
+
     const archetypes = this.getArchetypes(aspect);
 
     for (const arch of archetypes) {
@@ -419,7 +426,9 @@ export class World {
         cols.push(col);
       }
 
-      yield {arch, entities: arch.entities, columns: cols};
+      if (arch.entities.length === 0) continue;
+
+      yield { arch, entities: arch.entities, columns: cols };
     }
   }
 

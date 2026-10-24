@@ -199,7 +199,7 @@ Requirements:
 - **QRY-002:** Query results must not contain duplicate entity IDs.
 - **QRY-003:** Query counts must equal the number of matching entities.
 - **QRY-004:** Array and iterator query forms must agree on entity membership when evaluated against the same unchanged world state.
-- **QRY-005:** Strict column queries must fail clearly if a requested component column is not available.
+- **QRY-005:** Strict column queries (`viewColumnsStrict`) must fail clearly if a matching archetype lacks a requested component column. Ordinary column queries (`viewColumns`) yield `undefined` for requested component columns that do not exist in a matching archetype. Empty archetypes (0 live entities) are skipped and not yielded as empty batches.
 - **QRY-006:** Cached archetype matches must be invalidated or updated when relevant archetypes are created or otherwise change.
 - **QRY-007:** Mutation and deletion during iteration must follow the structural-change rules in Section 7.
 

@@ -1926,6 +1926,388 @@ export function testWorld() {
     assert.strictEqual(restoredWorld.isValid(recycledInRestored), true);
   }
 
+  // ==========================================
+  // Task 14: Column Query Correctness (viewColumns, viewColumnsStrict)
+  // ==========================================
+
+  // 14.1 Column/entity alignment and data mapping
+  {
+    const colWorld = new World();
+    const POS = 100;
+    const VEL = 101;
+    const HP = 102;
+    colWorld.registerComponent(POS);
+    colWorld.registerComponent(VEL);
+    colWorld.registerComponent(HP);
+
+    const e1 = colWorld.buildEntity().with(POS, { x: 10, y: 20 }).with(VEL, { vx: 1, vy: 2 }).with(HP, { cur: 100 }).commit();
+    const e2 = colWorld.buildEntity().with(POS, { x: 30, y: 40 }).with(VEL, { vx: 3, vy: 4 }).with(HP, { cur: 200 }).commit();
+    const e3 = colWorld.buildEntity().with(POS, { x: 50, y: 60 }).with(VEL, { vx: 5, vy: 6 }).with(HP, { cur: 300 }).commit();
+
+    const aspect = Aspect.all(POS, VEL);
+    let totalArchetypes = 0;
+    let totalEntities = 0;
+
+    for (const { arch, entities, columns } of colWorld.viewColumns(aspect, POS, VEL, HP)) {
+      totalArchetypes++;
+      assert.strictEqual(columns.length, 3, "Must yield exactly 3 columns");
+      const [posCol, velCol, hpCol] = columns;
+      assert.ok(posCol !== undefined && velCol !== undefined && hpCol !== undefined);
+      assert.strictEqual(posCol.length, entities.length);
+      assert.strictEqual(velCol.length, entities.length);
+      assert.strictEqual(hpCol.length, entities.length);
+      assert.deepStrictEqual(entities, [e1, e2, e3]);
+
+      for (let row = 0; row < entities.length; row++) {
+        totalEntities++;
+        const ent = entities[row];
+        assert.deepStrictEqual(posCol[row], colWorld.getComponent(ent, POS));
+        assert.deepStrictEqual(velCol[row], colWorld.getComponent(ent, VEL));
+        assert.deepStrictEqual(hpCol[row], colWorld.getComponent(ent, HP));
+        assert.strictEqual(arch.getValue(POS, row), posCol[row]);
+        assert.strictEqual(arch.getValue(VEL, row), velCol[row]);
+        assert.strictEqual(arch.getValue(HP, row), hpCol[row]);
+      }
+    }
+
+    assert.strictEqual(totalArchetypes, 1);
+    assert.strictEqual(totalEntities, 3);
+  }
+
+  // 14.2 Missing columns in ordinary viewColumns API (yields undefined for missing column)
+  {
+    const missingColWorld = new World();
+    const C_A = 110;
+    const C_B = 111;
+    const C_C = 112;
+    missingColWorld.registerComponent(C_A);
+    missingColWorld.registerComponent(C_B);
+    missingColWorld.registerComponent(C_C);
+
+    // Archetype 1: has C_A only
+    const eA = missingColWorld.buildEntity().with(C_A, { name: "onlyA" }).commit();
+    // Archetype 2: has C_B only
+    const eB = missingColWorld.buildEntity().with(C_B, { name: "onlyB" }).commit();
+    // Archetype 3: has C_A and C_B
+    const eAB = missingColWorld.buildEntity().with(C_A, { name: "AB_A" }).with(C_B, { name: "AB_B" }).commit();
+
+    // Query matches all entities with at least C_A or C_B
+    const aspect = Aspect.one(C_A, C_B);
+    const results = Array.from(missingColWorld.viewColumns(aspect, C_A, C_B, C_C));
+
+    assert.strictEqual(results.length, 3, "Must yield all 3 matching archetypes");
+
+    let foundA = false;
+    let foundB = false;
+    let foundAB = false;
+
+    for (const { entities, columns } of results) {
+      assert.strictEqual(columns.length, 3);
+      const [colA, colB, colC] = columns;
+      // C_C is absent in all archetypes
+      assert.strictEqual(colC, undefined, "Missing column C_C must be undefined");
+
+      if (entities.includes(eA)) {
+        foundA = true;
+        assert.ok(colA !== undefined, "colA must be defined for archetype with C_A");
+        assert.strictEqual(colB, undefined, "colB must be undefined for archetype without C_B");
+        assert.strictEqual(colA.length, 1);
+        assert.deepStrictEqual(colA[0], { name: "onlyA" });
+      } else if (entities.includes(eB)) {
+        foundB = true;
+        assert.strictEqual(colA, undefined, "colA must be undefined for archetype without C_A");
+        assert.ok(colB !== undefined, "colB must be defined for archetype with C_B");
+        assert.strictEqual(colB.length, 1);
+        assert.deepStrictEqual(colB[0], { name: "onlyB" });
+      } else if (entities.includes(eAB)) {
+        foundAB = true;
+        assert.ok(colA !== undefined, "colA must be defined for archetype with C_A and C_B");
+        assert.ok(colB !== undefined, "colB must be defined for archetype with C_A and C_B");
+        assert.strictEqual(colA.length, 1);
+        assert.strictEqual(colB.length, 1);
+        assert.deepStrictEqual(colA[0], { name: "AB_A" });
+        assert.deepStrictEqual(colB[0], { name: "AB_B" });
+      }
+    }
+
+    assert.strictEqual(foundA, true);
+    assert.strictEqual(foundB, true);
+    assert.strictEqual(foundAB, true);
+  }
+
+  // 14.3 Strict behavior: viewColumnsStrict throws on missing column, safe on no-match
+  {
+    const strictWorld = new World();
+    const S_A = 120;
+    const S_B = 121;
+    const S_C = 122;
+    const S_UNUSED = 123;
+    strictWorld.registerComponent(S_A);
+    strictWorld.registerComponent(S_B);
+    strictWorld.registerComponent(S_C);
+    strictWorld.registerComponent(S_UNUSED);
+
+    strictWorld.buildEntity().with(S_A, { a: 1 }).commit();
+    strictWorld.buildEntity().with(S_A, { a: 2 }).with(S_B, { b: 2 }).commit();
+
+    // 1. viewColumnsStrict on Aspect.all(S_A, S_B) requesting S_A, S_B
+    let countStrict = 0;
+    for (const { entities, columns: [colA, colB] } of strictWorld.viewColumnsStrict(Aspect.all(S_A, S_B), S_A, S_B)) {
+      countStrict += entities.length;
+      assert.ok(colA !== undefined && colB !== undefined);
+      assert.strictEqual(colA.length, entities.length);
+      assert.strictEqual(colB.length, entities.length);
+    }
+    assert.strictEqual(countStrict, 1);
+
+    // 2. viewColumnsStrict on Aspect.all(S_A) requesting S_A, S_B -> throws because archetype with only S_A lacks S_B
+    assert.throws(
+      () => {
+        Array.from(strictWorld.viewColumnsStrict(Aspect.all(S_A), S_A, S_B));
+      },
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /viewColumnsStrict: archetype mask=.* is missing column for componentId=121/);
+        return true;
+      },
+      "viewColumnsStrict must throw with archetype mask and component ID when column is missing"
+    );
+
+    // 3. Query that matches NO archetypes does NOT throw
+    let noMatchCount = 0;
+    for (const { entities } of strictWorld.viewColumnsStrict(Aspect.all(S_UNUSED), S_UNUSED, S_A)) {
+      noMatchCount += entities.length;
+    }
+    assert.strictEqual(noMatchCount, 0, "Query matching no archetypes must not throw and yields 0 chunks");
+
+    // Unsatisfiable Aspect.one() matching no entities
+    let unsatisfiableCount = 0;
+    for (const { entities } of strictWorld.viewColumnsStrict(Aspect.one(), S_A)) {
+      unsatisfiableCount += entities.length;
+    }
+    assert.strictEqual(unsatisfiableCount, 0);
+
+    // 4. Empty Aspect (matches all) requesting S_A throws if an archetype lacks S_A
+    strictWorld.buildEntity().with(S_C, { c: 1 }).commit(); // archetype with only S_C
+    assert.throws(
+      () => {
+        Array.from(strictWorld.viewColumnsStrict(Aspect.EMPTY, S_A));
+      },
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /viewColumnsStrict: archetype mask=.* is missing column for componentId=120/);
+        return true;
+      },
+      "viewColumnsStrict with Aspect.EMPTY must throw if any matching archetype lacks requested column"
+    );
+  }
+
+  // 14.4 Edge Cases: empty componentIds, duplicate component IDs, invalid IDs, composite Aspects
+  {
+    const edgeWorld = new World();
+    const E_A = 130;
+    const E_B = 131;
+    const E_C = 132;
+    const E_D = 133;
+    edgeWorld.registerComponent(E_A);
+    edgeWorld.registerComponent(E_B);
+    edgeWorld.registerComponent(E_C);
+    edgeWorld.registerComponent(E_D);
+
+    const ent1 = edgeWorld.buildEntity().with(E_A, { val: "A" }).with(E_C, { val: "C" }).commit();
+    const ent2 = edgeWorld.buildEntity().with(E_B, { val: "B" }).with(E_D, { val: "D" }).commit();
+
+    // 1. Empty componentIds
+    const emptyColsResults = Array.from(edgeWorld.viewColumns(Aspect.all(E_A)));
+    assert.strictEqual(emptyColsResults.length, 1);
+    assert.deepStrictEqual(emptyColsResults[0].entities, [ent1]);
+    assert.deepStrictEqual(emptyColsResults[0].columns, []);
+
+    const emptyColsStrictResults = Array.from(edgeWorld.viewColumnsStrict(Aspect.all(E_A)));
+    assert.strictEqual(emptyColsStrictResults.length, 1);
+    assert.deepStrictEqual(emptyColsStrictResults[0].entities, [ent1]);
+    assert.deepStrictEqual(emptyColsStrictResults[0].columns, []);
+
+    // 2. Duplicate component IDs
+    for (const { entities, columns } of edgeWorld.viewColumns(Aspect.all(E_A), E_A, E_A)) {
+      assert.strictEqual(columns.length, 2);
+      assert.strictEqual(columns[0], columns[1], "Duplicate component IDs must return the same column reference");
+      assert.deepStrictEqual(columns[0]![0], { val: "A" });
+      assert.deepStrictEqual(columns[1]![0], { val: "A" });
+      assert.strictEqual(entities[0], ent1);
+    }
+
+    for (const { entities, columns } of edgeWorld.viewColumnsStrict(Aspect.all(E_A), E_A, E_A)) {
+      assert.strictEqual(columns.length, 2);
+      assert.strictEqual(columns[0], columns[1]);
+      assert.deepStrictEqual(columns[0][0], { val: "A" });
+      assert.strictEqual(entities[0], ent1);
+    }
+
+    // 3. Composite Aspect behavior: (E_A or E_B) AND (E_C or E_D)
+    const compositeAspect = Aspect.one(E_A, E_B).and(Aspect.one(E_C, E_D));
+    const compEntities: number[] = [];
+    for (const { entities } of edgeWorld.viewColumns(compositeAspect)) {
+      compEntities.push(...entities);
+    }
+    assert.strictEqual(compEntities.length, 2);
+    assert.ok(compEntities.includes(ent1));
+    assert.ok(compEntities.includes(ent2));
+
+    // 4. Invalid Component ID validation
+    const invalidIds = [-1, 1.5, NaN, Infinity, 65536];
+    for (const badId of invalidIds) {
+      assert.throws(
+        () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          Array.from(edgeWorld.viewColumns(Aspect.all(E_A), badId as any));
+        },
+        { name: "Error", message: /Invalid Component ID/ },
+        `viewColumns must reject invalid component ID ${badId}`
+      );
+
+      assert.throws(
+        () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          Array.from(edgeWorld.viewColumnsStrict(Aspect.all(E_A), badId as any));
+        },
+        { name: "Error", message: /Invalid Component ID/ },
+        `viewColumnsStrict must reject invalid component ID ${badId}`
+      );
+    }
+  }
+
+  // 14.5 Structural mutations: transitions, deletions, swap-and-pop relocation, batch edits, deferred flushes
+  {
+    const mutWorld = new World();
+    const M_POS = 140;
+    const M_VEL = 141;
+    const M_TAG = 142;
+    mutWorld.registerComponent(M_POS);
+    mutWorld.registerComponent(M_VEL);
+    mutWorld.registerComponent(M_TAG);
+
+    // Create 3 entities in POS+VEL archetype
+    const m1 = mutWorld.buildEntity().with(M_POS, { x: 1 }).with(M_VEL, { v: 10 }).commit();
+    const m2 = mutWorld.buildEntity().with(M_POS, { x: 2 }).with(M_VEL, { v: 20 }).commit();
+    const m3 = mutWorld.buildEntity().with(M_POS, { x: 3 }).with(M_VEL, { v: 30 }).commit();
+
+    const aspect = Aspect.all(M_POS, M_VEL);
+
+    // Initial check
+    const initialChunks = Array.from(mutWorld.viewColumnsStrict(aspect, M_POS, M_VEL));
+    assert.strictEqual(initialChunks.length, 1);
+    assert.deepStrictEqual(initialChunks[0].entities, [m1, m2, m3]);
+    assert.deepStrictEqual(initialChunks[0].columns[0], [{ x: 1 }, { x: 2 }, { x: 3 }]);
+    assert.deepStrictEqual(initialChunks[0].columns[1], [{ v: 10 }, { v: 20 }, { v: 30 }]);
+
+    // 1. Swap-and-pop row relocation: delete non-last row m2
+    // m3 should move to row 1 (index of m2)
+    mutWorld.deleteEntity(m2);
+
+    const postDeleteChunks = Array.from(mutWorld.viewColumnsStrict(aspect, M_POS, M_VEL));
+    assert.strictEqual(postDeleteChunks.length, 1);
+    assert.deepStrictEqual(postDeleteChunks[0].entities, [m1, m3]);
+    assert.deepStrictEqual(postDeleteChunks[0].columns[0], [{ x: 1 }, { x: 3 }]);
+    assert.deepStrictEqual(postDeleteChunks[0].columns[1], [{ v: 10 }, { v: 30 }]);
+
+    // 2. Archetype transition: add M_TAG to m1 (moves m1 to POS+VEL+TAG archetype)
+    mutWorld.addComponent(m1, M_TAG, { tag: "leader" });
+
+    const postAddChunks = Array.from(mutWorld.viewColumns(aspect, M_POS, M_VEL, M_TAG));
+    assert.strictEqual(postAddChunks.length, 2, "Must yield both POS+VEL and POS+VEL+TAG archetypes");
+
+    let foundPV = false;
+    let foundPVT = false;
+    for (const chunk of postAddChunks) {
+      if (chunk.entities.includes(m1)) {
+        foundPVT = true;
+        assert.deepStrictEqual(chunk.entities, [m1]);
+        assert.deepStrictEqual(chunk.columns[0]![0], { x: 1 });
+        assert.deepStrictEqual(chunk.columns[1]![0], { v: 10 });
+        assert.deepStrictEqual(chunk.columns[2]![0], { tag: "leader" });
+      } else if (chunk.entities.includes(m3)) {
+        foundPV = true;
+        assert.deepStrictEqual(chunk.entities, [m3]);
+        assert.deepStrictEqual(chunk.columns[0]![0], { x: 3 });
+        assert.deepStrictEqual(chunk.columns[1]![0], { v: 30 });
+        assert.strictEqual(chunk.columns[2], undefined, "M_TAG is absent in POS+VEL archetype");
+      }
+    }
+    assert.strictEqual(foundPV, true);
+    assert.strictEqual(foundPVT, true);
+
+    // 3. Batch editing: change m3 to have M_TAG and remove M_VEL
+    mutWorld.edit(m3).add(M_TAG, { tag: "scout" }).remove(M_VEL).commit();
+
+    // m3 is now in POS+TAG archetype; Aspect.all(M_POS, M_VEL) only matches m1
+    const postBatchChunks = Array.from(mutWorld.viewColumnsStrict(aspect, M_POS, M_VEL));
+    assert.strictEqual(postBatchChunks.length, 1);
+    assert.deepStrictEqual(postBatchChunks[0].entities, [m1]);
+
+    // 4. Deferred operations
+    mutWorld.setDeferred(true);
+    // Queue deferred addition of M_VEL back to m3 and delete m1
+    mutWorld.addComponent(m3, M_VEL, { v: 99 });
+    mutWorld.deleteEntity(m1);
+
+    // Before flush, viewColumns reflects pre-flush state (m1 has POS+VEL, m3 does not)
+    const preFlushChunks = Array.from(mutWorld.viewColumnsStrict(aspect, M_POS, M_VEL));
+    assert.strictEqual(preFlushChunks.length, 1);
+    assert.deepStrictEqual(preFlushChunks[0].entities, [m1]);
+
+    // Flush deferred queue
+    mutWorld.setDeferred(false);
+
+    // After flush, m1 is deleted and m3 is in POS+TAG+VEL archetype (matches aspect)
+    const postFlushChunks = Array.from(mutWorld.viewColumnsStrict(aspect, M_POS, M_VEL));
+    assert.strictEqual(postFlushChunks.length, 1);
+    assert.deepStrictEqual(postFlushChunks[0].entities, [m3]);
+    assert.deepStrictEqual(postFlushChunks[0].columns[0], [{ x: 3 }]);
+    assert.deepStrictEqual(postFlushChunks[0].columns[1], [{ v: 99 }]);
+
+    // 5. Empty archetype handling: delete m3 so POS+TAG+VEL archetype becomes empty
+    mutWorld.deleteEntity(m3);
+    const emptyArchChunks = Array.from(mutWorld.viewColumns(aspect, M_POS, M_VEL));
+    assert.strictEqual(emptyArchChunks.length, 0, "Empty archetypes with 0 entities must not yield empty chunks");
+
+    const emptyStrictChunks = Array.from(mutWorld.viewColumnsStrict(aspect, M_POS, M_VEL));
+    assert.strictEqual(emptyStrictChunks.length, 0, "Empty archetypes with 0 entities must not yield empty chunks in viewColumnsStrict");
+  }
+
+  // 14.6 Strict queries against empty matching archetypes
+  {
+    const emptyMatchWorld = new World();
+    const COMP_A = 150;
+    const COMP_B = 151;
+    emptyMatchWorld.registerComponent(COMP_A);
+    emptyMatchWorld.registerComponent(COMP_B);
+
+    const entA = emptyMatchWorld.buildEntity().with(COMP_A, { val: "A" }).commit();
+    const entB = emptyMatchWorld.buildEntity().with(COMP_B, { val: "B" }).commit();
+
+    emptyMatchWorld.deleteEntity(entB);
+
+    const aspect = Aspect.one(COMP_A, COMP_B);
+
+    const ordinaryResults = Array.from(emptyMatchWorld.viewColumns(aspect, COMP_A));
+    assert.strictEqual(ordinaryResults.length, 1, "viewColumns must skip empty B-only archetype and yield only nonempty matching archetype");
+    assert.deepStrictEqual(ordinaryResults[0].entities, [entA]);
+    assert.deepStrictEqual(ordinaryResults[0].columns[0], [{ val: "A" }]);
+
+    assert.throws(
+      () => {
+        Array.from(emptyMatchWorld.viewColumnsStrict(aspect, COMP_A));
+      },
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /viewColumnsStrict: archetype mask=.* is missing column for componentId=150/);
+        return true;
+      },
+      "viewColumnsStrict must throw for empty matching archetype lacking requested column"
+    );
+  }
+
   console.log("World tests completed!");
 }
 

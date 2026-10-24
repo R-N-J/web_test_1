@@ -87,8 +87,10 @@ export function testRPGScenario() {
   // 5. Using viewColumns for efficient data access (SoA access)
   let totalHp = 0;
   for (const { entities, columns: [statsCol] } of world.viewColumns(combatantsAspect, STATS)) {
-    for (let i = 0; i < entities.length; i++) {
-      totalHp += (statsCol[i] as Stats).hp;
+    if (statsCol) {
+      for (let i = 0; i < entities.length; i++) {
+        totalHp += (statsCol[i] as Stats).hp;
+      }
     }
   }
   assert.strictEqual(totalHp, 100 + 20 + 80, `Total HP should be 200, got ${totalHp}`);
