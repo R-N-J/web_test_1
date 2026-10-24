@@ -928,15 +928,29 @@ scheduler.update(1.0);
 ```
 
 **Key Methods:**
-- `add(system)`: Adds a system to the end of the execution chain.
+- `add(system)`: Adds a system and topologically sorts the execution chain based on `@Priority`, `@Before`, and `@After`.
 - `get(SystemClass)`: Returns the instance of a system. Useful if `CombatSystem` needs to trigger something in `ParticleSystem`.
 - `getSystems()`: Returns the list of all registered systems.
 - `setEnabled(SystemClass, boolean)`: Pauses or resumes a specific system.
+- `pauseAll()`: Pauses all registered systems.
+- `resumeAll()`: Resumes all registered systems.
+- `remove(system)`: Removes a system, unregisters its events, and calls `cleanup()`.
 - `rebind()`: Rebinds all registered systems with the world event bus and observer pipeline (called automatically during `world.clear()`).
 - `clear()`: Removes all systems and calls their `cleanup()` hooks (crucial for level transitions).
 
 ### The TurnManager (The Library Way)
 The `TurnManager` is the "brain" of a turn-based game loop. It coordinates between the Player's input and the World's systems, and tracks the passage of time via a `CLOCK` singleton.
+
+**Key Methods & Properties:**
+- `isPlayerTurn`: `true` when waiting for player input and not paused.
+- `isPaused`: `true` when turn progression and systems are paused.
+- `turnNumber`: Current turn index from the `CLOCK` singleton.
+- `nextTurn()`: Advances the turn, ticks the scheduler, and restores player turn.
+- `tick(dt)`: Manually ticks enabled scheduler systems.
+- `pause()`: Halts turn processing and pauses all systems via `scheduler.pauseAll()`.
+- `resume()`: Resumes turn processing and all systems via `scheduler.resumeAll()`.
+- `reset()`: Resets clock turn count to 0 and resumes turn execution.
+- `setSystemState(SystemClass, boolean)`: Toggles specific systems on or off.
 
 **Note:** In the **Framework Way**, the `TurnManager` is a managed service available via `@Inject() turns: TurnManager` or `world.turns`.
 

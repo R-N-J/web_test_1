@@ -8,6 +8,8 @@ export type SystemConstructor<T extends BaseSystem> = { new (...args: never[]): 
 
 export class Scheduler {
   private systems: BaseSystem[] = [];
+  private addedDuringPass: Set<BaseSystem> | null = null;
+  private removedDuringPass: Set<BaseSystem> | null = null;
 
   constructor(private world: World) {
     if (!this.world.scheduler) {
@@ -25,14 +27,28 @@ export class Scheduler {
   }
 
   public add(system: BaseSystem): void {
-    // Perform Dependency Injection
-    this.injectDependencies(system);
-    this.systems.push(system);
+    if (!system || typeof system !== "object") {
+      throw new Error("[ECS] Invalid system: Expected a system instance.");
+    }
+    if (this.systems.includes(system)) {
+      return;
+    }
 
-    // Resolution: Auto-register systems with the world's event bus
+    // 1. Verify topological sort with candidate list before mutating scheduler or event bus state
+    const candidateSystems = [...this.systems, system];
+    const sorted = this.topologicalSort(candidateSystems);
+
+    // 2. Perform Dependency Injection
+    this.injectDependencies(system);
+
+    // 3. Auto-register systems with the world's event bus
     this.world.events.register(system);
-    // Perform a robust sort
-    this.systems = this.topologicalSort(this.systems);
+
+    // 4. Commit sorted systems and record addition if an update pass is currently active
+    this.systems = sorted;
+    if (this.addedDuringPass) {
+      this.addedDuringPass.add(system);
+    }
   }
 
   /**
@@ -73,49 +89,115 @@ export class Scheduler {
 
 
   /**
-   * Pro-level Topological Sort to resolve @Before and @After dependencies.
+   * Topological Sort to resolve @Before and @After dependencies with priority tie-breaking.
    */
   private topologicalSort(systems: BaseSystem[]): BaseSystem[] {
-    // Pro-Tip: Pre-sort by priority so systems without rules
-    // are naturally ordered by their numerical weight.
-    const sortedSystems = [...systems].sort((a, b) =>
-      getSystemPriority(a) - getSystemPriority(b)
-    );
+    const adj = new Map<BaseSystem, BaseSystem[]>();
+    const inDegree = new Map<BaseSystem, number>();
+    const effectivePriority = new Map<BaseSystem, number>();
+    const regIndexMap = new Map<BaseSystem, number>();
 
-    const sorted: BaseSystem[] = [];
-    const visited = new Set<BaseSystem>();
-    const temp = new Set<BaseSystem>();
+    systems.forEach((sys, idx) => {
+      adj.set(sys, []);
+      inDegree.set(sys, 0);
+      effectivePriority.set(sys, getSystemPriority(sys));
+      regIndexMap.set(sys, idx);
+    });
 
-    const visit = (sys: BaseSystem) => {
-      if (temp.has(sys)) {
-        const msg = `[ECS] CRITICAL: Circular dependency detected involving ${sys.constructor.name}`;
-        console.error(msg);
-        throw new Error(msg);
-      }
-      if (visited.has(sys)) return;
-
-      temp.add(sys);
-
+    for (const sys of systems) {
       const order = getSystemOrder(sys);
       const sysName = sys.constructor.name;
 
-      // Check against the priority-ordered list
-      for (const other of sortedSystems) {
-        const otherName = other.constructor.name;
-        const otherOrder = getSystemOrder(other);
-
-        if (order.after.includes(otherName) || otherOrder.before.includes(sysName)) {
-          visit(other);
-        }
+      if (order.before.includes(sysName) || order.after.includes(sysName)) {
+        const msg = `[ECS] CRITICAL: Circular dependency detected involving ${sysName}`;
+        console.error(msg);
+        throw new Error(msg);
       }
 
-      temp.delete(sys);
-      visited.add(sys);
-      sorted.push(sys);
-    };
+      for (const other of systems) {
+        if (sys === other) continue;
+        const otherName = other.constructor.name;
 
-    for (const sys of sortedSystems) {
-      if (!visited.has(sys)) visit(sys);
+        if (order.after.includes(otherName)) {
+          // 'other' must execute BEFORE 'sys' (edge: other -> sys)
+          adj.get(other)!.push(sys);
+          inDegree.set(sys, (inDegree.get(sys) ?? 0) + 1);
+        }
+
+        if (order.before.includes(otherName)) {
+          // 'sys' must execute BEFORE 'other' (edge: sys -> other)
+          adj.get(sys)!.push(other);
+          inDegree.set(other, (inDegree.get(other) ?? 0) + 1);
+        }
+      }
+    }
+
+    // Propagate effective priorities along explicit constraint directives
+    const maxPasses = systems.length;
+    for (let pass = 0; pass < maxPasses; pass++) {
+      let changed = false;
+      for (const sys of systems) {
+        const order = getSystemOrder(sys);
+        const prioSys = effectivePriority.get(sys)!;
+
+        for (const other of systems) {
+          if (sys === other) continue;
+          const otherName = other.constructor.name;
+          const prioOther = effectivePriority.get(other)!;
+
+          // @Before: sys must execute before other -> sys priority must be <= other priority
+          if (order.before.includes(otherName) && prioSys >= prioOther) {
+            effectivePriority.set(sys, prioOther - 0.0001);
+            changed = true;
+          }
+
+          // @After: sys must execute after other -> sys priority must be >= other priority
+          if (order.after.includes(otherName) && prioSys <= prioOther) {
+            effectivePriority.set(sys, prioOther + 0.0001);
+            changed = true;
+          }
+        }
+      }
+      if (!changed) break;
+    }
+
+    // Kahn's algorithm with priority queue
+    const ready: BaseSystem[] = [];
+    for (const sys of systems) {
+      if ((inDegree.get(sys) ?? 0) === 0) {
+        ready.push(sys);
+      }
+    }
+
+    const sorted: BaseSystem[] = [];
+    while (ready.length > 0) {
+      ready.sort((a, b) => {
+        const prioA = effectivePriority.get(a)!;
+        const prioB = effectivePriority.get(b)!;
+        if (prioA !== prioB) {
+          return prioA - prioB;
+        }
+        return (regIndexMap.get(a) ?? 0) - (regIndexMap.get(b) ?? 0);
+      });
+
+      const next = ready.shift()!;
+      sorted.push(next);
+
+      for (const neighbor of adj.get(next) ?? []) {
+        const newDeg = (inDegree.get(neighbor) ?? 0) - 1;
+        inDegree.set(neighbor, newDeg);
+        if (newDeg === 0) {
+          ready.push(neighbor);
+        }
+      }
+    }
+
+    if (sorted.length < systems.length) {
+      const unvisited = systems.find((s) => !sorted.includes(s));
+      const sysName = unvisited ? unvisited.constructor.name : "System";
+      const msg = `[ECS] CRITICAL: Circular dependency detected involving ${sysName}`;
+      console.error(msg);
+      throw new Error(msg);
     }
 
     return sorted;
@@ -158,6 +240,11 @@ export class Scheduler {
    * Essential for level transitions to prevent observer leaks.
    */
   public clear(): void {
+    if (this.removedDuringPass) {
+      for (const system of this.systems) {
+        this.removedDuringPass.add(system);
+      }
+    }
     for (const system of this.systems) {
       this.world.events.unregister(system);
       system.cleanup();
@@ -174,6 +261,9 @@ export class Scheduler {
       this.world.events.unregister(system);
       system.cleanup();
       this.systems.splice(index, 1);
+      if (this.removedDuringPass) {
+        this.removedDuringPass.add(system);
+      }
     }
   }
 
@@ -210,13 +300,23 @@ export class Scheduler {
     const startTime = performance.now();
     const systemStats: { name: string, duration: number }[] = [];
 
+    // Track systems added or removed mid-pass to protect iteration boundaries
+    this.addedDuringPass = new Set<BaseSystem>();
+    this.removedDuringPass = new Set<BaseSystem>();
+
     // Enter deferred mode to protect system iteration
     this.world.setDeferred(true);
 
     let systemError: unknown;
     try {
-      for (const system of this.systems) {
-        if (system.enabled) {
+      const systemsToRun = [...this.systems];
+      for (const system of systemsToRun) {
+        if (
+          system.enabled &&
+          this.systems.includes(system) &&
+          !this.removedDuringPass.has(system) &&
+          !this.addedDuringPass.has(system)
+        ) {
           const sysStart = performance.now();
           try {
             system.runUpdate(dt);
@@ -230,6 +330,9 @@ export class Scheduler {
       }
     } catch (err) {
       systemError = err;
+    } finally {
+      this.addedDuringPass = null;
+      this.removedDuringPass = null;
     }
 
     let flushError: unknown;

@@ -260,20 +260,20 @@ Component notifications and archetype/mask-change notifications are distinct con
 
 ### 9.1 System lifecycle
 
-- **SYS-001:** A registered system is initialized and injected before its first execution.
-- **SYS-002:** Systems execute in a documented order.
-- **SYS-003:** `@Before` and `@After` constraints are honored when valid.
-- **SYS-004:** `@Priority` determines ordering according to its documented rule.
-- **SYS-005:** Conflicting constraints and dependency cycles are reported clearly rather than silently producing an arbitrary order.
-- **SYS-006:** A system is not executed twice in one scheduler pass unless explicitly configured to do so.
+- **SYS-001:** A registered system is initialized and injected before its first execution via `injectDependencies()`. Missing required singletons or managers throw actionable bootstrap errors. `onEnable()` hook executes exactly once before the system's first update.
+- **SYS-002:** Systems execute in a documented order determined by topological sort of explicit `@Before`/`@After` dependency constraints and `@Priority` weights.
+- **SYS-003:** `@Before` and `@After` constraints are honored when valid and take precedence over priority weights. Optional non-existent dependency targets are ignored safely without failing topological sort.
+- **SYS-004:** `@Priority` determines default ordering (lower numerical value executes earlier; default priority is 1000). Priority values must be finite numbers.
+- **SYS-005:** Conflicting constraints and dependency cycles (direct, indirect, contradictory, self-referential) throw actionable circular dependency errors.
+- **SYS-006:** A system is not executed twice in one scheduler pass unless explicitly configured to do so. Duplicate registration of the exact same system instance is idempotent and ignored without duplicating subscriptions or executions. Registering distinct instances of the same class is supported, with instances ordered deterministically by priority and registration order.
 
 ### 9.2 Update and exception behavior
 
-- **SYS-007:** A scheduler update runs the eligible systems in their established order.
+- **SYS-007:** A scheduler update runs eligible systems from a snapshot of registered systems taken at the start of the pass (`systemsToRun = [...this.systems]`). Systems added mid-pass do not run in the active pass and execute on subsequent passes. Systems removed or cleared mid-pass are skipped immediately for the remainder of the active pass and do not run on subsequent passes.
 - **SYS-008:** The scheduler reliably restores its internal state when a system throws, including deferred-operation mode and turn state. Any structural changes queued prior to the failure are flushed upon exiting deferred mode in `finally`.
 - **SYS-009:** When a system throws during an update pass, subsequent systems in that pass do not execute to prevent cascading errors; the exception propagates to the caller, and the scheduler and world remain ready for subsequent updates once the error condition is resolved.
-- **SYS-010:** Enabling, disabling, pausing, resuming, and resetting systems or turns must have consistent semantics.
-- **SYS-011:** Interval-based systems execute according to the documented tick or time basis, including boundary conditions.
+- **SYS-010:** Enabling, disabling, pausing, resuming, and resetting systems or turns must have consistent semantics. Disabling invokes `onPause()`, enabling invokes `onResume()`, and pausing `TurnManager` or `Scheduler` halts execution while preserving partially accumulated interval timers and internal state.
+- **SYS-011:** Interval-based systems (`IntervalSystem`, `@Interval(period)`) advance an internal accumulator by `dt` on each update pass, execute when `accumulator >= interval` with accumulated `dt`, and reset accumulator to 0 upon execution. Partially accumulated time is preserved across disable/pause and resume cycles, and reset to 0 upon explicit `resetAccumulator()` or world clear / rebind. Interval values must be finite positive numbers (`> 0`).
 
 ### 9.3 Turn-based gameplay
 

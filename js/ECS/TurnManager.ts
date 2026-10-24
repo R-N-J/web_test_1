@@ -18,6 +18,10 @@ export class TurnManager {
     return this._isPlayerTurn && !this._isPaused;
   }
 
+  public get isPaused(): boolean {
+    return this._isPaused;
+  }
+
   public get turnNumber(): number {
     return this.world.getSingleton<Clock>(InternalComponents.CLOCK)?.turn ?? 0;
   }

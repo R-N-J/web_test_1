@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { World } from "../ECS/World";
 import { Scheduler } from "../ECS/Scheduler";
-import { IteratingSystem, BaseSystem } from "../ECS/System";
-import { All, Inject, After, Priority, Subscribe } from "../ECS/Decorators";
+import { IteratingSystem, BaseSystem, IntervalSystem, SortedIteratingSystem, PassiveSystem } from "../ECS/System";
+import { All, Inject, After, Before, Priority, Subscribe, Interval, Singleton } from "../ECS/Decorators";
 import { Aspect } from "../ECS/Aspect";
 import { EntityId } from "../ECS/Archetype";
 import { InternalComponents, EngineStats } from "../ECS/InternalComponents";
@@ -663,6 +663,977 @@ export function testSystems() {
   subWorld.addComponent(entAfterRemove, C_SUB_B, {});
   subWorld.addComponent(entAfterRemove, C_SUB_C, {});
   assert.strictEqual(maskObsSys.addedEntities.length, maskAddCountBeforeRemove, "Removed iterating system must no longer receive onEntityAdded mask notifications");
+
+  // ==========================================
+  // 6. Comprehensive System Ordering & Dependency Resolution (SYS-002..SYS-006)
+  // ==========================================
+  const ordWorld = new World();
+  const ordScheduler = new Scheduler(ordWorld);
+
+  // 6.1: Priority ordering (lower numerical value runs earlier)
+  @Priority(-50)
+  class PriorityMinus50System extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @Priority(0)
+  class PriorityZeroSystem extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @Priority(10)
+  class Priority10System extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @Priority(500)
+  class Priority500System extends BaseSystem {
+    public override update(): void {}
+  }
+
+  class DefaultPrioritySystem extends BaseSystem { // Priority 1000
+    public override update(): void {}
+  }
+
+  const p500 = new Priority500System(ordWorld);
+  const pMinus50 = new PriorityMinus50System(ordWorld);
+  const pDef = new DefaultPrioritySystem(ordWorld);
+  const p10 = new Priority10System(ordWorld);
+  const p0 = new PriorityZeroSystem(ordWorld);
+
+  ordScheduler.add(p500);
+  ordScheduler.add(pMinus50);
+  ordScheduler.add(pDef);
+  ordScheduler.add(p10);
+  ordScheduler.add(p0);
+
+  const ordList = ordScheduler.getSystems();
+  assert.strictEqual(ordList[0], pMinus50, "Priority -50 must run first");
+  assert.strictEqual(ordList[1], p0, "Priority 0 must run second");
+  assert.strictEqual(ordList[2], p10, "Priority 10 must run third");
+  assert.strictEqual(ordList[3], p500, "Priority 500 must run fourth");
+  assert.strictEqual(ordList[4], pDef, "Default Priority (1000) must run last");
+
+  // 6.2: Priority validation
+  assert.throws(
+    () => {
+      Priority(Number.NaN);
+    },
+    { name: "Error", message: /Invalid Priority/ },
+    "Priority decorator must reject NaN"
+  );
+  assert.throws(
+    () => {
+      Priority(Infinity);
+    },
+    { name: "Error", message: /Invalid Priority/ },
+    "Priority decorator must reject Infinity"
+  );
+
+  // 6.3: @Before and @After constraints overriding priority
+  const constrWorld = new World();
+  const constrScheduler = new Scheduler(constrWorld);
+
+  @Priority(100)
+  class ConstraintTargetSystem extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @Priority(10)
+  @After("ConstraintTargetSystem")
+  class LowPriorityAfterTargetSystem extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @Priority(1000)
+  @Before("ConstraintTargetSystem")
+  class HighPriorityBeforeTargetSystem extends BaseSystem {
+    public override update(): void {}
+  }
+
+  const cTarget = new ConstraintTargetSystem(constrWorld);
+  const cAfter = new LowPriorityAfterTargetSystem(constrWorld);
+  const cBefore = new HighPriorityBeforeTargetSystem(constrWorld);
+
+  constrScheduler.add(cAfter);
+  constrScheduler.add(cTarget);
+  constrScheduler.add(cBefore);
+
+  const constrList = constrScheduler.getSystems();
+  assert.strictEqual(constrList[0], cBefore, "@Before constraint must place HighPriorityBeforeTargetSystem before Target");
+  assert.strictEqual(constrList[1], cTarget, "Target system must run in middle");
+  assert.strictEqual(constrList[2], cAfter, "@After constraint must place LowPriorityAfterTargetSystem after Target");
+
+  // 6.4: Missing/optional dependency references are safely ignored
+  const optWorld = new World();
+  const optScheduler = new Scheduler(optWorld);
+
+  @Before("NonExistentSystemA")
+  @After("NonExistentSystemB")
+  class OptionalDependencySystem extends BaseSystem {
+    public override update(): void {}
+  }
+
+  const optSys = new OptionalDependencySystem(optWorld);
+  optScheduler.add(optSys);
+  assert.strictEqual(optScheduler.getSystems().length, 1);
+  assert.strictEqual(optScheduler.getSystems()[0], optSys, "Optional missing dependencies must be handled safely");
+
+  // 6.5: Circular dependency detection
+  // Direct cycle: A after B, B after A
+  const cycleWorld1 = new World();
+  const cycleScheduler1 = new Scheduler(cycleWorld1);
+
+  @After("DirectCycleB")
+  class DirectCycleA extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @After("DirectCycleA")
+  class DirectCycleB extends BaseSystem {
+    public override update(): void {}
+  }
+
+  cycleScheduler1.add(new DirectCycleA(cycleWorld1));
+  assert.throws(
+    () => {
+      cycleScheduler1.add(new DirectCycleB(cycleWorld1));
+    },
+    { name: "Error", message: /Circular dependency detected/ },
+    "Direct cycle (A after B, B after A) must throw circular dependency error"
+  );
+
+  // Indirect cycle: A after B, B after C, C after A
+  const cycleWorld2 = new World();
+  const cycleScheduler2 = new Scheduler(cycleWorld2);
+
+  @After("IndirectCycleC")
+  class IndirectCycleA extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @After("IndirectCycleA")
+  class IndirectCycleB extends BaseSystem {
+    public override update(): void {}
+  }
+
+  @After("IndirectCycleB")
+  class IndirectCycleC extends BaseSystem {
+    public override update(): void {}
+  }
+
+  cycleScheduler2.add(new IndirectCycleA(cycleWorld2));
+  cycleScheduler2.add(new IndirectCycleB(cycleWorld2));
+  assert.throws(
+    () => {
+      cycleScheduler2.add(new IndirectCycleC(cycleWorld2));
+    },
+    { name: "Error", message: /Circular dependency detected/ },
+    "Indirect cycle (A -> B -> C -> A) must throw circular dependency error"
+  );
+
+  // Contradictory constraints: A before B and A after B
+  const cycleWorld3 = new World();
+  const cycleScheduler3 = new Scheduler(cycleWorld3);
+
+  @Before("ContradictoryB")
+  @After("ContradictoryB")
+  class ContradictoryA extends BaseSystem {
+    public override update(): void {}
+  }
+
+  class ContradictoryB extends BaseSystem {
+    public override update(): void {}
+  }
+
+  cycleScheduler3.add(new ContradictoryA(cycleWorld3));
+  assert.throws(
+    () => {
+      cycleScheduler3.add(new ContradictoryB(cycleWorld3));
+    },
+    { name: "Error", message: /Circular dependency detected/ },
+    "Contradictory before and after constraints on same system must throw"
+  );
+
+  // Self-dependency: A after A
+  const cycleWorld4 = new World();
+  const cycleScheduler4 = new Scheduler(cycleWorld4);
+
+  @After("SelfReferentialA")
+  class SelfReferentialA extends BaseSystem {
+    public override update(): void {}
+  }
+
+  assert.throws(
+    () => {
+      cycleScheduler4.add(new SelfReferentialA(cycleWorld4));
+    },
+    { name: "Error", message: /Circular dependency detected/ },
+    "Self-referential dependency must throw"
+  );
+
+  // 6.6: Deterministic tie-breaking (equal priority preserves registration order)
+  const tieWorld = new World();
+  const tieScheduler = new Scheduler(tieWorld);
+
+  class TieSystem1 extends BaseSystem { public override update(): void {} }
+  class TieSystem2 extends BaseSystem { public override update(): void {} }
+  class TieSystem3 extends BaseSystem { public override update(): void {} }
+
+  const t1 = new TieSystem1(tieWorld);
+  const t2 = new TieSystem2(tieWorld);
+  const t3 = new TieSystem3(tieWorld);
+
+  tieScheduler.add(t1);
+  tieScheduler.add(t2);
+  tieScheduler.add(t3);
+
+  const tieList = tieScheduler.getSystems();
+  assert.strictEqual(tieList[0], t1);
+  assert.strictEqual(tieList[1], t2);
+  assert.strictEqual(tieList[2], t3);
+
+  // 6.7: Failure-safe system registration (cycle or wiring error leaves no side effects)
+  const failSafeWorld = new World();
+  const failSafeScheduler = new Scheduler(failSafeWorld);
+
+  let validRunCount = 0;
+  let failedEventCount = 0;
+
+  class ValidExistingSystem extends BaseSystem {
+    public override update(): void {
+      validRunCount++;
+    }
+  }
+
+  @After("CycleSystemB")
+  class CycleSystemA extends BaseSystem {
+    @Subscribe("TEST_FAILSAFE_EVENT")
+    public onTestEvent(): void {
+      failedEventCount++;
+    }
+    public override update(): void {}
+  }
+
+  @After("CycleSystemA")
+  class CycleSystemB extends BaseSystem {
+    @Subscribe("TEST_FAILSAFE_EVENT")
+    public onTestEvent(): void {
+      failedEventCount++;
+    }
+    public override update(): void {}
+  }
+
+  const validSys = new ValidExistingSystem(failSafeWorld);
+  const cycleA = new CycleSystemA(failSafeWorld);
+  const cycleB = new CycleSystemB(failSafeWorld);
+
+  failSafeScheduler.add(validSys);
+  failSafeScheduler.add(cycleA);
+
+  assert.strictEqual(failSafeScheduler.getSystems().length, 2);
+
+  // Attempting to add cycleB creates a cycle between cycleA and cycleB
+  assert.throws(
+    () => {
+      failSafeScheduler.add(cycleB);
+    },
+    { name: "Error", message: /Circular dependency detected/ },
+    "Registration of cycleB must throw circular dependency error"
+  );
+
+  // Assertions for failure safety:
+  // 1. cycleB was NOT left in scheduler's registered systems list
+  assert.strictEqual(failSafeScheduler.getSystems().includes(cycleB), false, "Failed system must not be in scheduler systems");
+  assert.strictEqual(failSafeScheduler.getSystems().length, 2, "Scheduler systems length must remain unchanged");
+  assert.strictEqual(failSafeScheduler.getSystems()[0], validSys);
+  assert.strictEqual(failSafeScheduler.getSystems()[1], cycleA);
+
+  // 2. cycleB event handler must not be subscribed on event bus
+  failSafeWorld.events.publish({ type: "TEST_FAILSAFE_EVENT" });
+  assert.strictEqual(failedEventCount, 1, "Only cycleA should receive event; cycleB must not be subscribed");
+
+  // 3. Existing registered systems remain in valid order and scheduler updates successfully
+  failSafeScheduler.update(1.0);
+  assert.strictEqual(validRunCount, 1, "Existing valid system must execute successfully on subsequent update");
+
+  // 6.8: Verify actual runtime execution order via update() tracking
+  const execOrderWorld = new World();
+  const execOrderScheduler = new Scheduler(execOrderWorld);
+  const executionLog: string[] = [];
+
+  @Before("ExecOrderPriority100System")
+  @Priority(2000)
+  class ExecOrderBeforeOverridingPrioritySystem extends BaseSystem {
+    public override update(): void {
+      executionLog.push("BEFORE_OVERRIDE_2000");
+    }
+  }
+
+  @Priority(100)
+  class ExecOrderPriority100System extends BaseSystem {
+    public override update(): void {
+      executionLog.push("P_100");
+    }
+  }
+
+  @Priority(300)
+  class ExecOrderEqualPrioritySystemA extends BaseSystem {
+    public override update(): void {
+      executionLog.push("EQUAL_A_300");
+    }
+  }
+
+  @Priority(300)
+  class ExecOrderEqualPrioritySystemB extends BaseSystem {
+    public override update(): void {
+      executionLog.push("EQUAL_B_300");
+    }
+  }
+
+  @Priority(500)
+  class ExecOrderPriority500System extends BaseSystem {
+    public override update(): void {
+      executionLog.push("P_500");
+    }
+  }
+
+  @Priority(1000)
+  class ExecOrderPriority1000System extends BaseSystem {
+    public override update(): void {
+      executionLog.push("P_1000");
+    }
+  }
+
+  @After("ExecOrderPriority1000System")
+  @Priority(50)
+  class ExecOrderAfterOverridingPrioritySystem extends BaseSystem {
+    public override update(): void {
+      executionLog.push("AFTER_OVERRIDE_50");
+    }
+  }
+
+  // Register in arbitrary order
+  execOrderScheduler.add(new ExecOrderPriority500System(execOrderWorld));
+  execOrderScheduler.add(new ExecOrderPriority1000System(execOrderWorld));
+  execOrderScheduler.add(new ExecOrderEqualPrioritySystemA(execOrderWorld));
+  execOrderScheduler.add(new ExecOrderEqualPrioritySystemB(execOrderWorld));
+  execOrderScheduler.add(new ExecOrderPriority100System(execOrderWorld));
+  execOrderScheduler.add(new ExecOrderBeforeOverridingPrioritySystem(execOrderWorld));
+  execOrderScheduler.add(new ExecOrderAfterOverridingPrioritySystem(execOrderWorld));
+
+  execOrderScheduler.update(1.0);
+
+  // Assert exact runtime execution sequence:
+  // 1. BEFORE_OVERRIDE_2000 (forced before P_100 despite high priority weight)
+  // 2. P_100
+  // 3. EQUAL_A_300 (equal priority tie-break: registered before B)
+  // 4. EQUAL_B_300 (equal priority tie-break: registered after A)
+  // 5. P_500
+  // 6. P_1000
+  // 7. AFTER_OVERRIDE_50 (forced after P_1000 despite low priority weight)
+  assert.deepStrictEqual(
+    executionLog,
+    [
+      "BEFORE_OVERRIDE_2000",
+      "P_100",
+      "EQUAL_A_300",
+      "EQUAL_B_300",
+      "P_500",
+      "P_1000",
+      "AFTER_OVERRIDE_50"
+    ],
+    "Actual runtime update execution sequence must honor priorities, explicit constraints, and deterministic tie-breaking"
+  );
+
+  // ==========================================
+  // 7. Initialization, Registration & Lifecycle (SYS-001, SYS-006, SYS-007)
+  // ==========================================
+  const initWorld = new World();
+  const initScheduler = new Scheduler(initWorld);
+
+  const C_INIT_DATA = 300;
+  const S_INIT_SINGLETON = 301;
+  initWorld.registerComponent(C_INIT_DATA);
+  initWorld.registerComponent(S_INIT_SINGLETON);
+  initWorld.setSingleton(S_INIT_SINGLETON, { configValue: 42 });
+
+  class FullyInjectedSystem extends BaseSystem {
+    private _mapper: unknown;
+    private _events: unknown;
+    private _tags: unknown;
+    private _singleton: unknown;
+
+    @Inject(C_INIT_DATA)
+    public set mapper(val: unknown) { this._mapper = val; }
+    public get mapper(): unknown { return this._mapper; }
+
+    @Inject()
+    public set events(val: unknown) { this._events = val; }
+    public get events(): unknown { return this._events; }
+
+    @Inject()
+    public set tags(val: unknown) { this._tags = val; }
+    public get tags(): unknown { return this._tags; }
+
+    @Singleton(S_INIT_SINGLETON)
+    public set singleton(val: unknown) { this._singleton = val; }
+    public get singleton(): unknown { return this._singleton; }
+
+    public onEnableCount = 0;
+    public updateCount = 0;
+
+    protected override onEnable(): void {
+      this.onEnableCount++;
+    }
+
+    public override update(): void {
+      this.updateCount++;
+    }
+  }
+
+  const fullyInjected = new FullyInjectedSystem(initWorld);
+  initScheduler.add(fullyInjected);
+
+  // Verify dependency injections
+  assert.strictEqual(fullyInjected.mapper, initWorld.getMapper(C_INIT_DATA));
+  assert.strictEqual(fullyInjected.events, initWorld.events);
+  assert.strictEqual(fullyInjected.tags, initWorld.tags);
+  assert.deepStrictEqual(fullyInjected.singleton, { configValue: 42 });
+
+  // 7.1: onEnable is called before first execution, not at registration
+  assert.strictEqual(fullyInjected.onEnableCount, 0, "onEnable must not be called upon registration");
+  initScheduler.update(1.0);
+  assert.strictEqual(fullyInjected.onEnableCount, 1, "onEnable must be called exactly once upon first update");
+  assert.strictEqual(fullyInjected.updateCount, 1);
+
+  initScheduler.update(1.0);
+  assert.strictEqual(fullyInjected.onEnableCount, 1, "onEnable must not be re-called on subsequent update");
+  assert.strictEqual(fullyInjected.updateCount, 2);
+
+  // 7.2: Idempotent registration of duplicate system instance
+  initScheduler.add(fullyInjected);
+  assert.strictEqual(initScheduler.getSystems().length, 1, "Registering identical system must be idempotent");
+  initScheduler.update(1.0);
+  assert.strictEqual(fullyInjected.updateCount, 3, "Duplicate registration must not cause multiple executions per pass");
+
+  // 7.3: Invalid system rejection
+  assert.throws(
+    () => {
+      // @ts-expect-error - testing invalid system registration
+      initScheduler.add(null);
+    },
+    { name: "Error", message: /Invalid system/ },
+    "Scheduler.add must reject null"
+  );
+
+  // 7.4: Missing required singleton throws actionable wiring error
+  const S_MISSING = 302;
+  initWorld.registerComponent(S_MISSING);
+
+  class MissingSingletonSystem extends BaseSystem {
+    private _singletonVal: unknown;
+    @Singleton(S_MISSING)
+    public set singletonVal(val: unknown) { this._singletonVal = val; }
+    public get singletonVal(): unknown { return this._singletonVal; }
+    public override update(): void {}
+  }
+
+  assert.throws(
+    () => {
+      initScheduler.add(new MissingSingletonSystem(initWorld));
+    },
+    { name: "Error", message: /Wiring Failed: System 'MissingSingletonSystem' required Singleton ID 302/ },
+    "Missing singleton must throw actionable wiring error"
+  );
+
+  // 7.5: System removal and clear
+  let cleanupCalled = false;
+  class CleanupTestSystem extends BaseSystem {
+    public override update(): void {}
+    public override cleanup(): void {
+      cleanupCalled = true;
+    }
+  }
+
+  const clSys = new CleanupTestSystem(initWorld);
+  initScheduler.add(clSys);
+  assert.strictEqual(initScheduler.getSystems().includes(clSys), true);
+
+  initScheduler.remove(clSys);
+  assert.strictEqual(initScheduler.getSystems().includes(clSys), false);
+  assert.strictEqual(cleanupCalled, true, "Scheduler.remove must invoke system.cleanup()");
+
+  initScheduler.clear();
+  assert.strictEqual(initScheduler.getSystems().length, 0, "Scheduler.clear must remove all systems");
+
+  // 7.6: Mutation during update pass (Snapshot protection)
+  const mutWorld = new World();
+  const mutScheduler = new Scheduler(mutWorld);
+
+  let sysLateRan = false;
+  class LateSystem extends BaseSystem {
+    public lateRuns = 0;
+    public override update(): void {
+      sysLateRan = true;
+      this.lateRuns++;
+    }
+  }
+
+  const lateSys = new LateSystem(mutWorld);
+
+  let removedSysRan = false;
+  class SystemToBeRemoved extends BaseSystem {
+    public override update(): void {
+      removedSysRan = true;
+    }
+  }
+  const toRemove = new SystemToBeRemoved(mutWorld);
+
+  class DynamicMutatingSystem extends BaseSystem {
+    public override update(): void {
+      // Dynamically add a system during update pass
+      mutScheduler.add(lateSys);
+      // Dynamically remove a system during update pass
+      mutScheduler.remove(toRemove);
+    }
+  }
+
+  mutScheduler.add(new DynamicMutatingSystem(mutWorld));
+  mutScheduler.add(toRemove);
+
+  // First update pass: DynamicMutatingSystem runs, adds lateSys and removes toRemove
+  mutScheduler.update(1.0);
+  assert.strictEqual(sysLateRan, false, "Dynamically added system must not run in the current update pass");
+  assert.strictEqual(removedSysRan, false, "Dynamically removed system must not run later in the current pass");
+
+  // Second update pass: lateSys now executes exactly once
+  mutScheduler.update(1.0);
+  assert.strictEqual(sysLateRan, true, "Dynamically added system must run on the next update pass");
+  assert.strictEqual(lateSys.lateRuns, 1, "Dynamically added system must execute exactly once in second pass");
+
+  // 7.7: Calling Scheduler.clear() during active update pass
+  const clearMutWorld = new World();
+  const clearMutScheduler = new Scheduler(clearMutWorld);
+
+  let preClearRan = false;
+  let postClearRan = false;
+  let clearedCleanupCount = 0;
+
+  class PreClearSystem extends BaseSystem {
+    public override update(): void {
+      preClearRan = true;
+      clearMutScheduler.clear(); // Clear all systems mid-pass
+    }
+  }
+
+  class PostClearSystem extends BaseSystem {
+    public override update(): void {
+      postClearRan = true;
+    }
+    public override cleanup(): void {
+      clearedCleanupCount++;
+    }
+  }
+
+  clearMutScheduler.add(new PreClearSystem(clearMutWorld));
+  const postSys = new PostClearSystem(clearMutWorld);
+  clearMutScheduler.add(postSys);
+
+  clearMutScheduler.update(1.0);
+  assert.strictEqual(preClearRan, true, "PreClearSystem should run");
+  assert.strictEqual(postClearRan, false, "PostClearSystem must be skipped when scheduler is cleared mid-pass");
+  assert.strictEqual(clearedCleanupCount, 1, "PostClearSystem cleanup should have been invoked during clear()");
+  assert.strictEqual(clearMutScheduler.getSystems().length, 0, "Scheduler systems must be empty after mid-pass clear()");
+
+  // 7.8: Registering multiple instances of the same system class
+  const multiWorld = new World();
+  const multiScheduler = new Scheduler(multiWorld);
+
+  class WorkerSystem extends BaseSystem {
+    constructor(world: World, public readonly id: string) {
+      super(world);
+    }
+    public runs = 0;
+    public override update(): void {
+      this.runs++;
+    }
+  }
+
+  const worker1 = new WorkerSystem(multiWorld, "worker-1");
+  const worker2 = new WorkerSystem(multiWorld, "worker-2");
+
+  multiScheduler.add(worker1);
+  multiScheduler.add(worker2);
+
+  assert.strictEqual(multiScheduler.getSystems().length, 2, "Multiple distinct instances of same class must be supported");
+  multiScheduler.update(1.0);
+  assert.strictEqual(worker1.runs, 1);
+  assert.strictEqual(worker2.runs, 1);
+
+  // 7.9: Removing and re-adding the exact same system instance mid-pass
+  const readdWorld = new World();
+  const readdScheduler = new Scheduler(readdWorld);
+
+  let readdEventsReceived = 0;
+  let readdCleanups = 0;
+  let readdUpdates = 0;
+
+  class SystemBWithEvents extends BaseSystem {
+    public override cleanup(): void {
+      readdCleanups++;
+    }
+
+    @Subscribe("READD_EVENT")
+    public onEvent(): void {
+      readdEventsReceived++;
+    }
+
+    public override update(): void {
+      readdUpdates++;
+    }
+  }
+
+  const sysB = new SystemBWithEvents(readdWorld);
+
+  class SystemARemovingAndReaddingB extends BaseSystem {
+    public runs = 0;
+    public override update(): void {
+      this.runs++;
+      if (this.runs === 1) {
+        // Remove system B before B's turn in current pass
+        readdScheduler.remove(sysB);
+        // Re-add the exact same B instance before B's turn
+        readdScheduler.add(sysB);
+      }
+    }
+  }
+
+  const sysA = new SystemARemovingAndReaddingB(readdWorld);
+
+  readdScheduler.add(sysA);
+  readdScheduler.add(sysB);
+
+  // First update pass: sysA runs, removes sysB, and re-adds sysB
+  readdScheduler.update(1.0);
+
+  // In Pass 1:
+  // sysA executed.
+  // sysB was removed and re-added mid-pass, so sysB MUST NOT execute in pass 1!
+  assert.strictEqual(readdUpdates, 0, "System B must not execute in the active pass when removed and re-added mid-pass");
+  assert.strictEqual(readdCleanups, 1, "System B cleanup must be called upon removal");
+
+  // Verify event bus subscription for sysB is active and not duplicated
+  readdWorld.events.publish({ type: "READD_EVENT" });
+  assert.strictEqual(readdEventsReceived, 1, "System B event handler must be subscribed exactly once after re-adding");
+
+  // Second update pass: sysB executes normally
+  readdScheduler.update(1.0);
+  assert.strictEqual(readdUpdates, 1, "System B must execute on subsequent update pass after being re-added");
+
+  // Verify event handling after pass 2
+  readdWorld.events.publish({ type: "READD_EVENT" });
+  assert.strictEqual(readdEventsReceived, 2, "System B event handler must remain subscribed without duplication");
+
+  // ==========================================
+  // 8. System State, Toggling, Pause & Resume (SYS-010)
+  // ==========================================
+  const stateWorld = new World();
+  const stateScheduler = new Scheduler(stateWorld);
+
+  class StateTestSystem extends BaseSystem {
+    public updateCount = 0;
+    public pauses = 0;
+    public resumes = 0;
+
+    protected override onPause(): void {
+      this.pauses++;
+    }
+
+    protected override onResume(): void {
+      this.resumes++;
+    }
+
+    public override update(): void {
+      this.updateCount++;
+    }
+  }
+
+  const stateSys = new StateTestSystem(stateWorld);
+  stateScheduler.add(stateSys);
+
+  stateScheduler.update(1.0);
+  assert.strictEqual(stateSys.updateCount, 1);
+
+  // Toggle state
+  stateSys.toggle(false);
+  assert.strictEqual(stateSys.enabled, false);
+  assert.strictEqual(stateSys.pauses, 1);
+
+  stateScheduler.update(1.0);
+  assert.strictEqual(stateSys.updateCount, 1, "Disabled system must not update");
+
+  stateSys.toggle(true);
+  assert.strictEqual(stateSys.enabled, true);
+  assert.strictEqual(stateSys.resumes, 1);
+
+  stateScheduler.update(1.0);
+  assert.strictEqual(stateSys.updateCount, 2, "Re-enabled system must update");
+
+  // pauseAll & resumeAll
+  stateScheduler.pauseAll();
+  assert.strictEqual(stateSys.enabled, false);
+  assert.strictEqual(stateSys.pauses, 2);
+
+  stateScheduler.resumeAll();
+  assert.strictEqual(stateSys.enabled, true);
+  assert.strictEqual(stateSys.resumes, 2);
+
+  // setEnabled by constructor
+  stateScheduler.setEnabled(StateTestSystem, false);
+  assert.strictEqual(stateSys.enabled, false);
+  assert.strictEqual(stateSys.pauses, 3);
+
+  stateScheduler.setEnabled(StateTestSystem, true);
+  assert.strictEqual(stateSys.enabled, true);
+  assert.strictEqual(stateSys.resumes, 3);
+
+  // ==========================================
+  // 9. Interval Systems (SYS-011)
+  // ==========================================
+  const intWorld = new World();
+  const intScheduler = new Scheduler(intWorld);
+
+  const C_INT_COMP = 400;
+  intWorld.registerComponent(C_INT_COMP);
+
+  @All(C_INT_COMP)
+  @Interval(3)
+  class DecoratedIntervalSystem extends IntervalSystem {
+    public executions: number[] = [];
+
+    protected override processEntity(_entity: EntityId, dt: number): void {
+      this.executions.push(dt);
+    }
+  }
+
+  const intEntity = intWorld.createEntity();
+  intWorld.addComponent(intEntity, C_INT_COMP, { val: 1 });
+
+  const intSys = new DecoratedIntervalSystem(intWorld);
+  intScheduler.add(intSys);
+
+  // Update 1 (dt = 1): accumulator = 1 < 3 -> no run
+  intScheduler.update(1.0);
+  assert.strictEqual(intSys.executions.length, 0);
+  assert.strictEqual(intSys.getAccumulator(), 1.0);
+
+  // Update 2 (dt = 1): accumulator = 2 < 3 -> no run
+  intScheduler.update(1.0);
+  assert.strictEqual(intSys.executions.length, 0);
+  assert.strictEqual(intSys.getAccumulator(), 2.0);
+
+  // Update 3 (dt = 1): accumulator = 3 >= 3 -> runs with dt = 3, accumulator resets to 0
+  intScheduler.update(1.0);
+  assert.strictEqual(intSys.executions.length, 1);
+  assert.strictEqual(intSys.executions[0], 3.0);
+  assert.strictEqual(intSys.getAccumulator(), 0);
+
+  // Update 4 (dt = 2): accumulator = 2 < 3 -> no run
+  intScheduler.update(2.0);
+  assert.strictEqual(intSys.executions.length, 1);
+  assert.strictEqual(intSys.getAccumulator(), 2.0);
+
+  // Update 5 (dt = 2): accumulator = 4 >= 3 -> runs with dt = 4, accumulator resets to 0
+  intScheduler.update(2.0);
+  assert.strictEqual(intSys.executions.length, 2);
+  assert.strictEqual(intSys.executions[1], 4.0);
+  assert.strictEqual(intSys.getAccumulator(), 0);
+
+  // Fractional intervals & Multi-step boundary tests
+  class FractionalIntervalSystem extends IntervalSystem {
+    public runCount = 0;
+    public passedDts: number[] = [];
+    protected override processEntity(_ent: EntityId, dt: number): void {
+      this.runCount++;
+      this.passedDts.push(dt);
+    }
+  }
+
+  const fracSys = new FractionalIntervalSystem(intWorld, Aspect.all(C_INT_COMP), 1.0);
+  intScheduler.add(fracSys);
+
+  // Tick 1: dt = 0.3 (accum = 0.3 < 1.0)
+  intScheduler.update(0.3);
+  assert.strictEqual(fracSys.runCount, 0);
+  assert.strictEqual(Math.round(fracSys.getAccumulator() * 100) / 100, 0.3);
+
+  // Tick 2: dt = 0.3 (accum = 0.6 < 1.0)
+  intScheduler.update(0.3);
+  assert.strictEqual(fracSys.runCount, 0);
+  assert.strictEqual(Math.round(fracSys.getAccumulator() * 100) / 100, 0.6);
+
+  // Pause and update while paused
+  fracSys.toggle(false);
+  intScheduler.update(0.3);
+  assert.strictEqual(fracSys.runCount, 0);
+  assert.strictEqual(Math.round(fracSys.getAccumulator() * 100) / 100, 0.6, "Accumulator must remain 0.6 while paused");
+
+  // Resume and tick with dt = 0.4 -> reaches 1.0 exactly
+  fracSys.toggle(true);
+  intScheduler.update(0.4);
+  assert.strictEqual(fracSys.runCount, 1, "Should execute on reaching boundary of 1.0");
+  assert.strictEqual(Math.round(fracSys.passedDts[0] * 100) / 100, 1.0, "Should receive accumulated dt of 1.0");
+  assert.strictEqual(fracSys.getAccumulator(), 0, "Accumulator should reset to 0 after execution");
+
+  // Invalid interval validation
+  assert.throws(
+    () => {
+      Interval(0);
+    },
+    { name: "Error", message: /Invalid Interval/ },
+    "@Interval must reject 0"
+  );
+  assert.throws(
+    () => {
+      Interval(-2);
+    },
+    { name: "Error", message: /Invalid Interval/ },
+    "@Interval must reject negative interval"
+  );
+  assert.throws(
+    () => {
+      Interval(Number.NaN);
+    },
+    { name: "Error", message: /Invalid Interval/ },
+    "@Interval must reject NaN"
+  );
+  assert.throws(
+    () => {
+      class BadIntervalSystem extends IntervalSystem {
+        protected override processEntity(): void {}
+      }
+      new BadIntervalSystem(intWorld, Aspect.all(C_INT_COMP), -1);
+    },
+    { name: "Error", message: /Invalid interval/ },
+    "IntervalSystem constructor must reject negative interval"
+  );
+
+  // Interval pause and rebind reset
+  const accBefore = intSys.getAccumulator(); // 0.5 from fractional test updates
+  intSys.toggle(false);
+  intScheduler.update(1.0);
+  assert.strictEqual(intSys.getAccumulator(), accBefore, "Accumulator must not advance while disabled");
+
+  intSys.toggle(true);
+  intScheduler.update(1.0);
+  assert.strictEqual(intSys.getAccumulator(), accBefore + 1.0);
+
+  intSys.resetAccumulator();
+  assert.strictEqual(intSys.getAccumulator(), 0);
+
+  intScheduler.update(1.0);
+  assert.strictEqual(intSys.getAccumulator(), 1.0);
+  intWorld.clear(); // World clear calls scheduler.rebind() -> system.rebind()
+  assert.strictEqual(intSys.getAccumulator(), 0, "World clear must reset interval accumulator");
+
+  // ==========================================
+  // 10. Scheduler Exception Recovery (SYS-008, SYS-009)
+  // ==========================================
+  const recWorld = new World();
+  const recScheduler = new Scheduler(recWorld);
+
+  let stepA = 0;
+  let stepB = 0;
+  let shouldFail = true;
+
+  @Priority(10)
+  class RecoverableStepA extends BaseSystem {
+    public override update(): void {
+      stepA++;
+      if (shouldFail) {
+        throw new Error("Simulated failure in StepA");
+      }
+    }
+  }
+
+  @Priority(20)
+  class RecoverableStepB extends BaseSystem {
+    public override update(): void {
+      stepB++;
+    }
+  }
+
+  recScheduler.add(new RecoverableStepA(recWorld));
+  recScheduler.add(new RecoverableStepB(recWorld));
+
+  assert.throws(
+    () => {
+      recScheduler.update(1.0);
+    },
+    { name: "Error", message: "Simulated failure in StepA" }
+  );
+
+  assert.strictEqual(stepA, 1);
+  assert.strictEqual(stepB, 0, "StepB must not execute when StepA throws");
+  assert.strictEqual(recWorld.isDeferred, false, "Deferred mode must be restored on error");
+
+  // Now clear error condition and verify scheduler executes cleanly
+  shouldFail = false;
+  recScheduler.update(1.0);
+  assert.strictEqual(stepA, 2, "StepA must execute on retry");
+  assert.strictEqual(stepB, 1, "StepB must execute on retry");
+
+  // ==========================================
+  // 11. SortedIteratingSystem and PassiveSystem
+  // ==========================================
+  const sortWorld = new World();
+  const sortScheduler = new Scheduler(sortWorld);
+
+  const C_SORT_VAL = 500;
+  sortWorld.registerComponent(C_SORT_VAL);
+
+  @All(C_SORT_VAL)
+  class TestSortedSystem extends SortedIteratingSystem {
+    public processedOrder: number[] = [];
+
+    public override sort(a: EntityId, b: EntityId): number {
+      const valA = this.getComponent<{ val: number }>(a, C_SORT_VAL)?.val ?? 0;
+      const valB = this.getComponent<{ val: number }>(b, C_SORT_VAL)?.val ?? 0;
+      return valA - valB;
+    }
+
+    protected override processEntity(entity: EntityId): void {
+      const val = this.getComponent<{ val: number }>(entity, C_SORT_VAL)?.val ?? 0;
+      this.processedOrder.push(val);
+    }
+  }
+
+  class TestPassiveSystem extends PassiveSystem {
+    public manualCalls = 0;
+    public customAction(): void {
+      this.manualCalls++;
+    }
+  }
+
+  const sortedSys = new TestSortedSystem(sortWorld);
+  const passSys = new TestPassiveSystem(sortWorld);
+  sortScheduler.add(sortedSys);
+  sortScheduler.add(passSys);
+
+  const eHigh = sortWorld.createEntity();
+  sortWorld.addComponent(eHigh, C_SORT_VAL, { val: 100 });
+  const eLow = sortWorld.createEntity();
+  sortWorld.addComponent(eLow, C_SORT_VAL, { val: 10 });
+  const eMid = sortWorld.createEntity();
+  sortWorld.addComponent(eMid, C_SORT_VAL, { val: 50 });
+
+  sortScheduler.update(1.0);
+  assert.deepStrictEqual(sortedSys.processedOrder, [10, 50, 100], "SortedIteratingSystem must process entities in sorted order");
+  assert.strictEqual(passSys.manualCalls, 0, "PassiveSystem must not update automatically during tick");
+
+  passSys.customAction();
+  assert.strictEqual(passSys.manualCalls, 1, "PassiveSystem responds to manual calls");
 
   console.log("Systems & Decorators tests completed!");
 }

@@ -277,7 +277,24 @@ export abstract class IntervalSystem extends IteratingSystem {
   constructor(world: World, aspect?: Aspect, interval?: number) {
     super(world, aspect);
     // Use 'interval' if provided, otherwise check decorator metadata
-    this.interval = interval ?? getSystemInterval(this.constructor) ?? 1;
+    const resolvedInterval = interval ?? getSystemInterval(this.constructor) ?? 1;
+    if (typeof resolvedInterval !== "number" || !Number.isFinite(resolvedInterval) || resolvedInterval <= 0) {
+      throw new Error(`[ECS] Invalid interval: ${resolvedInterval}. Interval must be a positive finite number (> 0).`);
+    }
+    this.interval = resolvedInterval;
+  }
+
+  public getAccumulator(): number {
+    return this.accumulator;
+  }
+
+  public resetAccumulator(): void {
+    this.accumulator = 0;
+  }
+
+  public override rebind(): void {
+    super.rebind();
+    this.accumulator = 0;
   }
 
   update(dt: number): void {

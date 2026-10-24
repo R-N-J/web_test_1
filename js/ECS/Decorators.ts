@@ -141,6 +141,9 @@ export function getSystemOrder(instance: object): OrderMetadata {
  * Default is 1000.
  */
 export function Priority(value: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`[ECS] Invalid Priority: ${value}. Priority must be a finite number.`);
+  }
   return function(_value: unknown, context: unknown): void {
     const metadata = getMetadata(_value, context);
     metadata[PRIORITY_METADATA_KEY] = value;
@@ -327,9 +330,12 @@ export function Tag(name: string) {
 
 /**
  * Defines the period (how often) an IntervalSystem runs.
- * In your game, this represents the number of turns.
+ * In your game, this represents the number of turns or time units.
  */
 export function Interval(period: number) {
+  if (typeof period !== "number" || !Number.isFinite(period) || period <= 0) {
+    throw new Error(`[ECS] Invalid Interval: ${period}. Interval must be a positive finite number (> 0).`);
+  }
   return function(_value: unknown, context: unknown): void {
     getMetadata(_value, context)[INTERVAL_METADATA_KEY] = period;
   };
