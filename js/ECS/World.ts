@@ -332,8 +332,7 @@ export class World {
     return this.groups.findFirst(group, this);
   }
   public countGroup(group: string): number {
-    // We return the raw count for performance, as GroupManager handles valid filtering in views
-    return this.groups.count(group);
+    return this.groups.count(group, this);
   }
 
   // --- Tag Based (Unique-entity search) ---
@@ -667,11 +666,9 @@ export class World {
 
     editor.commit();
 
-    // Optional: Add to same groups as source
-    for (const groupName of this.groups.save() ? Object.keys(this.groups.save()) : []) {
-      if (this.groups.has(groupName, source)) {
-        this.groups.add(groupName, newEntity);
-      }
+    // Add to same groups as source
+    for (const groupName of this.groups.getGroups(source)) {
+      this.groups.add(groupName, newEntity);
     }
 
     return newEntity;

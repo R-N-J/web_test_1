@@ -65,10 +65,37 @@ export class GroupManager {
 
   /**
    * Unified API: Returns the number of entities currently in the group.
-   * Note: This counts total membership; use world.countGroup for valid-only count.
+   * When called without a world object, returns the raw count of all tracked entity IDs in the group.
+   * When a world object is provided, filters and counts only currently valid entities.
+   *
+   * @param group The group name to count.
+   * @param world Optional World validator to count only valid entities.
+   * @returns The raw tracked count if world is omitted, or the count of valid entities if world is provided.
    */
-  public count(group: string): number {
-    return this.groups.get(group)?.size ?? 0;
+  public count(group: string, world?: { isValid(id: EntityId): boolean }): number {
+    const set = this.groups.get(group);
+    if (!set) return 0;
+    if (!world) return set.size;
+    let count = 0;
+    for (const id of set) {
+      if (world.isValid(id)) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Returns all group names this entity belongs to.
+   */
+  public getGroups(entity: EntityId): string[] {
+    const set = this.entityToGroups.get(entity);
+    return set ? Array.from(set) : [];
+  }
+
+  /**
+   * Returns all registered group names.
+   */
+  public getGroupNames(): string[] {
+    return Array.from(this.groups.keys());
   }
 
   public remove(entity: EntityId): void {

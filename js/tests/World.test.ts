@@ -3,6 +3,7 @@ import { World } from "../ECS/World";
 import { Aspect } from "../ECS/Aspect";
 import { Mapper } from "../ECS/Mapper";
 import { EntityId, Archetype, MAX_COMPONENT_ID } from "../ECS/Archetype";
+import { GENERATION_SHIFT } from "../ECS/EntityManager";
 import { registerAllComponents } from "../ECS/ComponentRegistry";
 import { All, And, One, AnyOf, Exclude, NoneOf, ButNot, Inject, Singleton, SingletonComponent } from "../ECS/Decorators";
 import { PrefabManager } from "../ECS/PrefabManager";
@@ -3492,6 +3493,575 @@ export function testWorld() {
     assert.strictEqual(maskEvents.length, 1);
     assert.strictEqual(maskEvents[0].oldMask, 1n << BigInt(O_A));
     assert.strictEqual(maskEvents[0].newMask, 1n << BigInt(O_B));
+  }
+
+  // ==========================================
+  // Task 17: TagManager and GroupManager Integrity Tests
+  // ==========================================
+
+  // 17.1 Tag Semantics and Unique 1-to-1 Mapping (TAG-001 - TAG-004)
+  {
+    const tagWorld = new World();
+    const e1 = tagWorld.createEntity();
+    const e2 = tagWorld.createEntity();
+
+    // 1. Assigning a tag and retrieving it
+    tagWorld.tags.register("HERO", e1);
+    assert.strictEqual(tagWorld.tags.has("HERO"), true);
+    assert.strictEqual(tagWorld.tags.isTagged(e1), true);
+    assert.strictEqual(tagWorld.tags.isTagged(e2), false);
+    assert.strictEqual(tagWorld.tags.getTag(e1), "HERO");
+    assert.strictEqual(tagWorld.tags.getTag(e2), undefined);
+    assert.strictEqual(tagWorld.tags.getEntity("HERO"), e1);
+    assert.strictEqual(tagWorld.tags.get("HERO"), e1);
+
+    // 2. Querying by tag
+    assert.deepStrictEqual(tagWorld.getEntitiesByTag("HERO"), [e1]);
+    assert.deepStrictEqual(Array.from(tagWorld.viewTag("HERO")), [e1]);
+    assert.strictEqual(tagWorld.findFirstWithTag("HERO"), e1);
+    assert.strictEqual(tagWorld.countTag("HERO"), 1);
+
+    // 3. Repeated registration of the same tag to the same entity is an idempotent no-op
+    tagWorld.tags.register("HERO", e1);
+    assert.strictEqual(tagWorld.tags.get("HERO"), e1);
+    assert.strictEqual(tagWorld.tags.getTag(e1), "HERO");
+    assert.strictEqual(tagWorld.countTag("HERO"), 1);
+
+    // 4. Tag collision: assigning an existing tag to a DIFFERENT entity must throw
+    assert.throws(
+      () => tagWorld.tags.register("HERO", e2),
+      /Tag Collision/
+    );
+    // State remains uncorrupted after collision
+    assert.strictEqual(tagWorld.tags.get("HERO"), e1);
+    assert.strictEqual(tagWorld.tags.getTag(e1), "HERO");
+    assert.strictEqual(tagWorld.tags.getTag(e2), undefined);
+    assert.strictEqual(tagWorld.tags.isTagged(e2), false);
+
+    // 5. Replacing an entity's tag: registering a NEW tag on e1 unregisters old tag
+    tagWorld.tags.register("CHAMPION", e1);
+    assert.strictEqual(tagWorld.tags.has("HERO"), false);
+    assert.strictEqual(tagWorld.tags.get("HERO"), undefined);
+    assert.strictEqual(tagWorld.tags.has("CHAMPION"), true);
+    assert.strictEqual(tagWorld.tags.get("CHAMPION"), e1);
+    assert.strictEqual(tagWorld.tags.getTag(e1), "CHAMPION");
+    assert.deepStrictEqual(tagWorld.getEntitiesByTag("HERO"), []);
+    assert.deepStrictEqual(tagWorld.getEntitiesByTag("CHAMPION"), [e1]);
+    assert.strictEqual(tagWorld.countTag("HERO"), 0);
+    assert.strictEqual(tagWorld.countTag("CHAMPION"), 1);
+
+    // 6. Unregistering a tag
+    tagWorld.tags.unregister(e1);
+    assert.strictEqual(tagWorld.tags.has("CHAMPION"), false);
+    assert.strictEqual(tagWorld.tags.get("CHAMPION"), undefined);
+    assert.strictEqual(tagWorld.tags.getTag(e1), undefined);
+    assert.strictEqual(tagWorld.tags.isTagged(e1), false);
+    assert.deepStrictEqual(tagWorld.getEntitiesByTag("CHAMPION"), []);
+    assert.strictEqual(tagWorld.findFirstWithTag("CHAMPION"), undefined);
+    assert.strictEqual(tagWorld.countTag("CHAMPION"), 0);
+    assert.deepStrictEqual(Array.from(tagWorld.viewTag("CHAMPION")), []);
+
+    // 7. Repeated unregister on untagged entity is a safe no-op
+    tagWorld.tags.unregister(e1);
+    tagWorld.tags.unregister(e2);
+    tagWorld.tags.unregister(999999);
+
+    // 8. Unknown tags and entities
+    assert.strictEqual(tagWorld.tags.has("NON_EXISTENT"), false);
+    assert.strictEqual(tagWorld.tags.get("NON_EXISTENT"), undefined);
+    assert.strictEqual(tagWorld.tags.getTag(999999), undefined);
+    assert.strictEqual(tagWorld.tags.isTagged(999999), false);
+    assert.deepStrictEqual(tagWorld.getEntitiesByTag("NON_EXISTENT"), []);
+    assert.strictEqual(tagWorld.findFirstWithTag("NON_EXISTENT"), undefined);
+    assert.strictEqual(tagWorld.countTag("NON_EXISTENT"), 0);
+    assert.deepStrictEqual(Array.from(tagWorld.viewTag("NON_EXISTENT")), []);
+
+    // 9. getTags() list
+    tagWorld.tags.register("TAG_A", e1);
+    tagWorld.tags.register("TAG_B", e2);
+    const allTags = tagWorld.tags.getTags();
+    assert.ok(allTags.includes("TAG_A"));
+    assert.ok(allTags.includes("TAG_B"));
+    assert.ok(allTags.includes("__world_singletons__"));
+  }
+
+  // 17.2 Group Semantics and 1-to-Many Categorization (GRP-001 - GRP-004)
+  {
+    const grpWorld = new World();
+    const g1 = grpWorld.createEntity();
+    const g2 = grpWorld.createEntity();
+    const g3 = grpWorld.createEntity();
+
+    // 1. Adding membership and querying
+    grpWorld.groups.add("ENEMIES", g1);
+    grpWorld.groups.add("ENEMIES", g2);
+    assert.strictEqual(grpWorld.groups.has("ENEMIES", g1), true);
+    assert.strictEqual(grpWorld.groups.has("ENEMIES", g2), true);
+    assert.strictEqual(grpWorld.groups.has("ENEMIES", g3), false);
+
+    const enemyList = grpWorld.getEntitiesByGroup("ENEMIES");
+    assert.strictEqual(enemyList.length, 2);
+    assert.ok(enemyList.includes(g1));
+    assert.ok(enemyList.includes(g2));
+    assert.strictEqual(grpWorld.countGroup("ENEMIES"), 2);
+    const viewList = Array.from(grpWorld.viewGroup("ENEMIES"));
+    assert.strictEqual(viewList.length, 2);
+    assert.ok(viewList.includes(g1));
+    assert.ok(viewList.includes(g2));
+    const firstEnemy = grpWorld.findFirstInGroup("ENEMIES");
+    assert.ok(firstEnemy === g1 || firstEnemy === g2);
+
+    // 2. Repeated addition is idempotent (Set semantics)
+    grpWorld.groups.add("ENEMIES", g1);
+    grpWorld.groups.add("ENEMIES", g1);
+    assert.strictEqual(grpWorld.countGroup("ENEMIES"), 2);
+    assert.strictEqual(grpWorld.getEntitiesByGroup("ENEMIES").length, 2);
+
+    // 3. Membership in multiple groups simultaneously
+    grpWorld.groups.add("FLYING", g1);
+    grpWorld.groups.add("FLYING", g3);
+    grpWorld.groups.add("UNDEAD", g1);
+
+    const g1Groups = grpWorld.groups.getGroups(g1);
+    assert.strictEqual(g1Groups.length, 3);
+    assert.ok(g1Groups.includes("ENEMIES"));
+    assert.ok(g1Groups.includes("FLYING"));
+    assert.ok(g1Groups.includes("UNDEAD"));
+
+    const allGroupNames = grpWorld.groups.getGroupNames();
+    assert.ok(allGroupNames.includes("ENEMIES"));
+    assert.ok(allGroupNames.includes("FLYING"));
+    assert.ok(allGroupNames.includes("UNDEAD"));
+
+    // 4. Removing from one specific group
+    grpWorld.groups.removeFromGroup("FLYING", g1);
+    assert.strictEqual(grpWorld.groups.has("FLYING", g1), false);
+    assert.strictEqual(grpWorld.groups.has("ENEMIES", g1), true);
+    assert.strictEqual(grpWorld.groups.has("UNDEAD", g1), true);
+    assert.strictEqual(grpWorld.groups.has("FLYING", g3), true);
+    assert.strictEqual(grpWorld.countGroup("FLYING"), 1);
+    assert.deepStrictEqual(grpWorld.getEntitiesByGroup("FLYING"), [g3]);
+
+    // 5. Removing an entity from all groups via remove(entity)
+    grpWorld.groups.remove(g1);
+    assert.strictEqual(grpWorld.groups.has("ENEMIES", g1), false);
+    assert.strictEqual(grpWorld.groups.has("UNDEAD", g1), false);
+    assert.strictEqual(grpWorld.groups.getGroups(g1).length, 0);
+    assert.deepStrictEqual(grpWorld.getEntitiesByGroup("ENEMIES"), [g2]);
+    assert.strictEqual(grpWorld.countGroup("ENEMIES"), 1);
+
+    // 6. Unknown / Empty group queries
+    assert.strictEqual(grpWorld.groups.has("UNKNOWN_GROUP", g1), false);
+    assert.strictEqual(grpWorld.countGroup("UNKNOWN_GROUP"), 0);
+    assert.deepStrictEqual(grpWorld.getEntitiesByGroup("UNKNOWN_GROUP"), []);
+    assert.strictEqual(grpWorld.findFirstInGroup("UNKNOWN_GROUP"), undefined);
+    assert.deepStrictEqual(Array.from(grpWorld.viewGroup("UNKNOWN_GROUP")), []);
+
+    // 7. Removing from unknown group or untracked entity is safe no-op
+    grpWorld.groups.removeFromGroup("UNKNOWN_GROUP", g1);
+    grpWorld.groups.removeFromGroup("ENEMIES", 999999);
+    grpWorld.groups.remove(999999);
+  }
+
+  // 17.3 Entity Lifecycle: Deletion and ID Recycling
+  {
+    const lcWorld = new World();
+    const l1 = lcWorld.createEntity();
+    const l2 = lcWorld.createEntity();
+    const l3 = lcWorld.createEntity();
+
+    lcWorld.tags.register("LEADER", l1);
+    lcWorld.tags.register("MINION", l2);
+    lcWorld.groups.add("SQUAD", l1);
+    lcWorld.groups.add("SQUAD", l2);
+    lcWorld.groups.add("SOLO_GROUP", l3);
+
+    // 1. Deleting tagged and grouped entity (l1: one of several squad members)
+    lcWorld.deleteEntity(l1);
+    assert.strictEqual(lcWorld.isValid(l1), false);
+    assert.strictEqual(lcWorld.tags.has("LEADER"), false);
+    assert.strictEqual(lcWorld.tags.get("LEADER"), undefined);
+    assert.strictEqual(lcWorld.tags.getTag(l1), undefined);
+    assert.strictEqual(lcWorld.tags.isTagged(l1), false);
+    assert.strictEqual(lcWorld.countTag("LEADER"), 0);
+    assert.deepStrictEqual(lcWorld.getEntitiesByTag("LEADER"), []);
+
+    assert.strictEqual(lcWorld.groups.has("SQUAD", l1), false);
+    assert.strictEqual(lcWorld.groups.has("SQUAD", l2), true);
+    assert.strictEqual(lcWorld.countGroup("SQUAD"), 1);
+    assert.deepStrictEqual(lcWorld.getEntitiesByGroup("SQUAD"), [l2]);
+
+    // 2. Deleting entity that is the ONLY member of a group (l3)
+    lcWorld.deleteEntity(l3);
+    assert.strictEqual(lcWorld.isValid(l3), false);
+    assert.strictEqual(lcWorld.groups.has("SOLO_GROUP", l3), false);
+    assert.strictEqual(lcWorld.countGroup("SOLO_GROUP"), 0);
+    assert.deepStrictEqual(lcWorld.getEntitiesByGroup("SOLO_GROUP"), []);
+    assert.strictEqual(lcWorld.findFirstInGroup("SOLO_GROUP"), undefined);
+    assert.deepStrictEqual(Array.from(lcWorld.viewGroup("SOLO_GROUP")), []);
+
+    // 3. ID recycling: newly created entity reusing index slot does NOT inherit old tags or groups
+    const recycledEnt = lcWorld.createEntity();
+    assert.notStrictEqual(recycledEnt, l1);
+    assert.strictEqual(lcWorld.isValid(recycledEnt), true);
+    assert.strictEqual(lcWorld.isValid(l1), false);
+
+    assert.strictEqual(lcWorld.tags.isTagged(recycledEnt), false);
+    assert.strictEqual(lcWorld.tags.getTag(recycledEnt), undefined);
+    assert.strictEqual(lcWorld.groups.has("SQUAD", recycledEnt), false);
+    assert.strictEqual(lcWorld.groups.has("SOLO_GROUP", recycledEnt), false);
+    assert.strictEqual(lcWorld.groups.getGroups(recycledEnt).length, 0);
+
+    // Stale entity ID cannot access or mutate tags/groups
+    assert.strictEqual(lcWorld.tags.getTag(l1), undefined);
+    lcWorld.tags.unregister(l1); // Safe no-op, doesn't affect recycledEnt
+    assert.strictEqual(lcWorld.tags.isTagged(recycledEnt), false);
+    lcWorld.groups.remove(l1); // Safe no-op, doesn't affect recycledEnt
+    assert.strictEqual(lcWorld.groups.getGroups(recycledEnt).length, 0);
+  }
+
+  // 17.4 Reset and Persistence Lifecycle (World.clear and Snapshots)
+  {
+    const rWorld = new World();
+    const R_COMP = 250;
+    rWorld.registerComponent(R_COMP);
+
+    // Run 3 consecutive clear cycles to verify reset integrity
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const eA = rWorld.buildEntity().with(R_COMP, { cycle, name: "A" }).tag(`TAG_${cycle}`).group("ACTIVE").commit();
+      const eB = rWorld.buildEntity().with(R_COMP, { cycle, name: "B" }).group("ACTIVE").group("EXTRA").commit();
+
+      assert.strictEqual(rWorld.tags.get(`TAG_${cycle}`), eA);
+      assert.strictEqual(rWorld.countTag(`TAG_${cycle}`), 1);
+      assert.strictEqual(rWorld.countGroup("ACTIVE"), 2);
+      assert.strictEqual(rWorld.countGroup("EXTRA"), 1);
+
+      rWorld.clear();
+
+      // Post-clear: user tags and groups are completely cleared
+      assert.strictEqual(rWorld.tags.has(`TAG_${cycle}`), false);
+      assert.strictEqual(rWorld.tags.get(`TAG_${cycle}`), undefined);
+      assert.strictEqual(rWorld.countTag(`TAG_${cycle}`), 0);
+      assert.deepStrictEqual(rWorld.getEntitiesByTag(`TAG_${cycle}`), []);
+
+      assert.strictEqual(rWorld.groups.has("ACTIVE", eA), false);
+      assert.strictEqual(rWorld.groups.has("ACTIVE", eB), false);
+      assert.strictEqual(rWorld.countGroup("ACTIVE"), 0);
+      assert.strictEqual(rWorld.countGroup("EXTRA"), 0);
+      assert.deepStrictEqual(rWorld.getEntitiesByGroup("ACTIVE"), []);
+
+      // Singleton entity is preserved/recreated with __world_singletons__ tag
+      const singletonId = rWorld.tags.get("__world_singletons__");
+      assert.ok(singletonId !== undefined);
+      assert.strictEqual(rWorld.isValid(singletonId), true);
+      assert.strictEqual(rWorld.countTag("__world_singletons__"), 1);
+    }
+
+    // Snapshot Persistence Test
+    const snapWorld = new World();
+    snapWorld.registerComponent(R_COMP);
+
+    const s1 = snapWorld.buildEntity().with(R_COMP, { val: 100 }).tag("SAVED_HERO").group("PARTY").commit();
+    const s2 = snapWorld.buildEntity().with(R_COMP, { val: 200 }).group("PARTY").group("BACKUP").commit();
+
+    const snapshot = snapWorld.saveSnapshot();
+    assert.strictEqual(snapshot.tags["SAVED_HERO"], s1);
+    assert.ok(snapshot.groups["PARTY"].includes(s1));
+    assert.ok(snapshot.groups["PARTY"].includes(s2));
+    assert.ok(snapshot.groups["BACKUP"].includes(s2));
+
+    // Restore into a fresh world
+    const restoreWorld = new World();
+    restoreWorld.registerComponent(R_COMP);
+    restoreWorld.loadSnapshot(snapshot);
+
+    assert.strictEqual(restoreWorld.isValid(s1), true);
+    assert.strictEqual(restoreWorld.isValid(s2), true);
+    assert.strictEqual(restoreWorld.tags.get("SAVED_HERO"), s1);
+    assert.strictEqual(restoreWorld.tags.getTag(s1), "SAVED_HERO");
+    assert.strictEqual(restoreWorld.countTag("SAVED_HERO"), 1);
+
+    assert.strictEqual(restoreWorld.groups.has("PARTY", s1), true);
+    assert.strictEqual(restoreWorld.groups.has("PARTY", s2), true);
+    assert.strictEqual(restoreWorld.groups.has("BACKUP", s2), true);
+    assert.strictEqual(restoreWorld.countGroup("PARTY"), 2);
+    assert.strictEqual(restoreWorld.countGroup("BACKUP"), 1);
+
+    const restoredParty = restoreWorld.getEntitiesByGroup("PARTY");
+    assert.strictEqual(restoredParty.length, 2);
+    assert.ok(restoredParty.includes(s1));
+    assert.ok(restoredParty.includes(s2));
+  }
+
+  // 17.5 Entity Operations: Duplication/Cloning, EntityEditor, and Prefabs
+  {
+    const opWorld = new World();
+    const OP_COMP = 251;
+    opWorld.registerComponent(OP_COMP);
+
+    // 1. EntityEditor fluent tag and group methods
+    const built = opWorld
+      .buildEntity()
+      .with(OP_COMP, { power: 50 })
+      .tag("ORIGINAL")
+      .group("SQUAD_A")
+      .group("SQUAD_B")
+      .commit();
+
+    assert.strictEqual(opWorld.tags.get("ORIGINAL"), built);
+    assert.strictEqual(opWorld.groups.has("SQUAD_A", built), true);
+    assert.strictEqual(opWorld.groups.has("SQUAD_B", built), true);
+
+    // EntityEditor untag and ungroup
+    opWorld.edit(built).ungroup("SQUAD_B").untag().commit();
+    assert.strictEqual(opWorld.tags.has("ORIGINAL"), false);
+    assert.strictEqual(opWorld.groups.has("SQUAD_B", built), false);
+    assert.strictEqual(opWorld.groups.has("SQUAD_A", built), true);
+
+    // Re-tagging for duplicateEntity test
+    opWorld.tags.register("ORIGINAL", built);
+
+    // 2. duplicateEntity: Groups are duplicated, Tags are NOT duplicated (unique 1-to-1)
+    const clone = opWorld.duplicateEntity(built);
+    assert.notStrictEqual(clone, built);
+    assert.strictEqual(opWorld.isValid(clone), true);
+    assert.deepStrictEqual(opWorld.getComponent(clone, OP_COMP), { power: 50 });
+
+    // Verify tag was NOT copied to clone (must remain uniquely on built)
+    assert.strictEqual(opWorld.tags.get("ORIGINAL"), built);
+    assert.strictEqual(opWorld.tags.getTag(clone), undefined);
+    assert.strictEqual(opWorld.tags.isTagged(clone), false);
+    assert.strictEqual(opWorld.countTag("ORIGINAL"), 1);
+
+    // Verify groups WERE copied to clone
+    assert.strictEqual(opWorld.groups.has("SQUAD_A", clone), true);
+    assert.strictEqual(opWorld.countGroup("SQUAD_A"), 2);
+    const squadAEntities = opWorld.getEntitiesByGroup("SQUAD_A");
+    assert.ok(squadAEntities.includes(built));
+    assert.ok(squadAEntities.includes(clone));
+
+    // 3. PrefabManager spawnWithTag and relationship resolution by tag
+    const prefabMgr = opWorld.prefabs;
+    const REL_GUARD = 252;
+    opWorld.registerComponent(REL_GUARD);
+
+    prefabMgr.register("GuardPost", {
+      name: "GuardPost",
+      components: [{ id: OP_COMP, value: { post: "NorthGate" } }]
+    });
+
+    const guardPost = prefabMgr.spawnWithTag("GuardPost", "NORTH_GATE");
+    assert.strictEqual(opWorld.tags.get("NORTH_GATE"), guardPost);
+    assert.strictEqual(opWorld.countTag("NORTH_GATE"), 1);
+
+    prefabMgr.register("Sentry", {
+      name: "Sentry",
+      components: [{ id: OP_COMP, value: { role: "Watchman" } }],
+      relationships: [{ id: REL_GUARD, targetTag: "NORTH_GATE" }]
+    });
+
+    const sentry = prefabMgr.spawn("Sentry");
+    assert.strictEqual(opWorld.relationships.getTargets(sentry, REL_GUARD), guardPost);
+  }
+
+  // 17.6 Query Consistency and Failure Paths
+  {
+    const qcWorld = new World();
+    const q1 = qcWorld.createEntity();
+    const q2 = qcWorld.createEntity();
+    const q3 = qcWorld.createEntity();
+
+    qcWorld.tags.register("TAG_Q1", q1);
+    qcWorld.groups.add("GRP_ALPHA", q1);
+    qcWorld.groups.add("GRP_ALPHA", q2);
+    qcWorld.groups.add("GRP_ALPHA", q3);
+
+    // Verification helper for query consistency
+    function assertGroupQueryConsistency(w: World, groupName: string): void {
+      const arr = w.getEntitiesByGroup(groupName);
+      const stream = Array.from(w.viewGroup(groupName));
+      const cnt = w.countGroup(groupName);
+      const first = w.findFirstInGroup(groupName);
+
+      assert.strictEqual(arr.length, cnt, `Array length must match countGroup for '${groupName}'`);
+      assert.strictEqual(stream.length, cnt, `Stream length must match countGroup for '${groupName}'`);
+
+      // Set comparison for uniqueness and membership
+      const arrSet = new Set(arr);
+      const streamSet = new Set(stream);
+      assert.strictEqual(arrSet.size, arr.length, "getEntitiesByGroup must not contain duplicate entities");
+      assert.strictEqual(streamSet.size, stream.length, "viewGroup must not contain duplicate entities");
+      assert.deepStrictEqual(arrSet, streamSet, "getEntitiesByGroup and viewGroup must contain the same entities");
+
+      if (cnt === 0) {
+        assert.strictEqual(first, undefined, "findFirstInGroup must return undefined for empty group");
+      } else {
+        assert.ok(first !== undefined, "findFirstInGroup must return an entity when count > 0");
+        assert.ok(arrSet.has(first!), "findFirstInGroup must return a valid member of the group");
+      }
+
+      for (const id of arr) {
+        assert.strictEqual(w.isValid(id), true, `Group member ${id} must be valid`);
+        assert.strictEqual(w.groups.has(groupName, id), true, `GroupManager.has must return true for member ${id}`);
+      }
+    }
+
+    function assertTagQueryConsistency(w: World, tagName: string): void {
+      const arr = w.getEntitiesByTag(tagName);
+      const stream = Array.from(w.viewTag(tagName));
+      const cnt = w.countTag(tagName);
+      const first = w.findFirstWithTag(tagName);
+      const managerEnt = w.tags.get(tagName);
+
+      if (managerEnt !== undefined && w.isValid(managerEnt)) {
+        assert.strictEqual(cnt, 1, `countTag must be 1 for valid tag '${tagName}'`);
+        assert.deepStrictEqual(arr, [managerEnt]);
+        assert.deepStrictEqual(stream, [managerEnt]);
+        assert.strictEqual(first, managerEnt);
+        assert.strictEqual(w.tags.has(tagName), true);
+        assert.strictEqual(w.tags.getTag(managerEnt), tagName);
+      } else {
+        assert.strictEqual(cnt, 0, `countTag must be 0 for absent/invalid tag '${tagName}'`);
+        assert.deepStrictEqual(arr, []);
+        assert.deepStrictEqual(stream, []);
+        assert.strictEqual(first, undefined);
+      }
+    }
+
+    assertGroupQueryConsistency(qcWorld, "GRP_ALPHA");
+    assertTagQueryConsistency(qcWorld, "TAG_Q1");
+    assertGroupQueryConsistency(qcWorld, "NON_EXISTENT_GROUP");
+    assertTagQueryConsistency(qcWorld, "NON_EXISTENT_TAG");
+
+    // Mutation: remove q2 from group
+    qcWorld.groups.removeFromGroup("GRP_ALPHA", q2);
+    assertGroupQueryConsistency(qcWorld, "GRP_ALPHA");
+
+    // Mutation: delete q1 (tagged and grouped)
+    qcWorld.deleteEntity(q1);
+    assertGroupQueryConsistency(qcWorld, "GRP_ALPHA");
+    assertTagQueryConsistency(qcWorld, "TAG_Q1");
+
+    // Mutation: delete remaining q3
+    qcWorld.deleteEntity(q3);
+    assertGroupQueryConsistency(qcWorld, "GRP_ALPHA");
+
+    // Stale entity ID in tag/group query methods
+    const staleId = q1;
+    assert.strictEqual(qcWorld.isValid(staleId), false);
+    // If a stale ID was somehow left in a raw manager collection, World query methods filter by isValid
+    assert.strictEqual(qcWorld.countTag("TAG_Q1"), 0);
+    assert.deepStrictEqual(qcWorld.getEntitiesByTag("TAG_Q1"), []);
+    assert.strictEqual(qcWorld.findFirstWithTag("TAG_Q1"), undefined);
+    assert.deepStrictEqual(Array.from(qcWorld.viewTag("TAG_Q1")), []);
+  }
+
+  // 17.7 Dedicated Index Recycling Verification (ENT-007, ENT-008, TAG-001, GRP-001)
+  {
+    const recycleWorld = new World();
+    const origEntity = recycleWorld.createEntity();
+    const origIndex = Math.floor(origEntity / GENERATION_SHIFT);
+    const origGen = origEntity % GENERATION_SHIFT;
+
+    recycleWorld.tags.register("PLAYER_TAG", origEntity);
+    recycleWorld.groups.add("PLAYERS_GROUP", origEntity);
+
+    assert.strictEqual(recycleWorld.tags.get("PLAYER_TAG"), origEntity);
+    assert.strictEqual(recycleWorld.groups.has("PLAYERS_GROUP", origEntity), true);
+
+    // Delete original entity
+    recycleWorld.deleteEntity(origEntity);
+    assert.strictEqual(recycleWorld.isValid(origEntity), false);
+    assert.strictEqual(recycleWorld.tags.has("PLAYER_TAG"), false);
+    assert.strictEqual(recycleWorld.groups.has("PLAYERS_GROUP", origEntity), false);
+
+    // Immediately allocate replacement
+    const replacementEntity = recycleWorld.createEntity();
+    const replacementIndex = Math.floor(replacementEntity / GENERATION_SHIFT);
+    const replacementGen = replacementEntity % GENERATION_SHIFT;
+
+    // Assert that the replacement reuses the exact same index slot but has incremented generation and different full ID
+    assert.strictEqual(replacementIndex, origIndex, "Replacement must reuse the exact same index slot");
+    assert.strictEqual(replacementGen, origGen + 1, "Replacement must have incremented generation");
+    assert.notStrictEqual(replacementEntity, origEntity, "Replacement entity ID must differ from original entity ID");
+
+    // Verify replacement does NOT inherit old tag or group membership
+    assert.strictEqual(recycleWorld.tags.isTagged(replacementEntity), false);
+    assert.strictEqual(recycleWorld.tags.getTag(replacementEntity), undefined);
+    assert.strictEqual(recycleWorld.tags.has("PLAYER_TAG"), false);
+    assert.strictEqual(recycleWorld.tags.get("PLAYER_TAG"), undefined);
+    assert.strictEqual(recycleWorld.groups.has("PLAYERS_GROUP", replacementEntity), false);
+    assert.strictEqual(recycleWorld.groups.getGroups(replacementEntity).length, 0);
+    assert.strictEqual(recycleWorld.countGroup("PLAYERS_GROUP"), 0);
+
+    // Assign new tag and group membership to replacement
+    recycleWorld.tags.register("NEW_TAG", replacementEntity);
+    recycleWorld.groups.add("NEW_GROUP", replacementEntity);
+    assert.strictEqual(recycleWorld.tags.get("NEW_TAG"), replacementEntity);
+    assert.strictEqual(recycleWorld.groups.has("NEW_GROUP", replacementEntity), true);
+
+    // Verify stale ID cannot unregister or remove membership belonging to the replacement
+    recycleWorld.tags.unregister(origEntity);
+    assert.strictEqual(recycleWorld.tags.get("NEW_TAG"), replacementEntity, "Unregistering stale ID must not remove replacement's tag");
+    assert.strictEqual(recycleWorld.tags.getTag(replacementEntity), "NEW_TAG");
+
+    recycleWorld.groups.removeFromGroup("NEW_GROUP", origEntity);
+    assert.strictEqual(recycleWorld.groups.has("NEW_GROUP", replacementEntity), true, "Removing stale ID from group must not affect replacement");
+    recycleWorld.groups.remove(origEntity);
+    assert.strictEqual(recycleWorld.groups.has("NEW_GROUP", replacementEntity), true, "Removing stale ID from all groups must not affect replacement");
+    assert.strictEqual(recycleWorld.countGroup("NEW_GROUP"), 1);
+  }
+
+  // 17.8 Valid-Only Group Queries Against Stale Tracked Membership
+  {
+    const staleWorld = new World();
+    const validEnt1 = staleWorld.createEntity();
+    const validEnt2 = staleWorld.createEntity();
+    const staleEnt = staleWorld.createEntity();
+    staleWorld.deleteEntity(staleEnt); // Intentionally stale entity ID
+    assert.strictEqual(staleWorld.isValid(staleEnt), false);
+
+    // Populate group using public GroupManager API with both valid entities and an intentionally stale entity ID
+    staleWorld.groups.add("MIXED_GROUP", validEnt1);
+    staleWorld.groups.add("MIXED_GROUP", staleEnt);
+    staleWorld.groups.add("MIXED_GROUP", validEnt2);
+
+    // 1. GroupManager.count(group) returns raw tracked membership count when called without World
+    assert.strictEqual(staleWorld.groups.count("MIXED_GROUP"), 3, "GroupManager.count without world must return raw tracked count (3)");
+
+    // 2. World.countGroup(group) and GroupManager.count(group, world) count only valid entities
+    assert.strictEqual(staleWorld.countGroup("MIXED_GROUP"), 2, "World.countGroup must count only valid entities (2)");
+    assert.strictEqual(staleWorld.groups.count("MIXED_GROUP", staleWorld), 2, "GroupManager.count with world must count only valid entities (2)");
+
+    // 3. getEntitiesByGroup(group) and viewGroup(group) return the same valid membership set with no duplicates
+    const validList = staleWorld.getEntitiesByGroup("MIXED_GROUP");
+    const validView = Array.from(staleWorld.viewGroup("MIXED_GROUP"));
+    assert.strictEqual(validList.length, 2);
+    assert.strictEqual(validView.length, 2);
+    assert.ok(validList.includes(validEnt1) && validList.includes(validEnt2));
+    assert.ok(!validList.includes(staleEnt));
+    assert.deepStrictEqual(new Set(validList), new Set(validView));
+    assert.strictEqual(new Set(validList).size, 2, "No duplicate entities in getEntitiesByGroup");
+    assert.strictEqual(new Set(validView).size, 2, "No duplicate entities in viewGroup");
+
+    // 4. findFirstInGroup(group) returns a valid member or undefined if no valid members exist
+    const firstFound = staleWorld.findFirstInGroup("MIXED_GROUP");
+    assert.ok(firstFound === validEnt1 || firstFound === validEnt2);
+
+    // Stale-only group scenario
+    staleWorld.groups.add("STALE_ONLY_GROUP", staleEnt);
+    assert.strictEqual(staleWorld.groups.count("STALE_ONLY_GROUP"), 1, "Raw count for stale-only group is 1");
+    assert.strictEqual(staleWorld.countGroup("STALE_ONLY_GROUP"), 0, "Valid count for stale-only group is 0");
+    assert.deepStrictEqual(staleWorld.getEntitiesByGroup("STALE_ONLY_GROUP"), []);
+    assert.deepStrictEqual(Array.from(staleWorld.viewGroup("STALE_ONLY_GROUP")), []);
+    assert.strictEqual(staleWorld.findFirstInGroup("STALE_ONLY_GROUP"), undefined, "findFirstInGroup returns undefined when no valid members exist");
+
+    // 5. The stale member does not affect other entities' memberships
+    assert.strictEqual(staleWorld.groups.has("MIXED_GROUP", validEnt1), true);
+    assert.strictEqual(staleWorld.groups.has("MIXED_GROUP", validEnt2), true);
+    assert.strictEqual(staleWorld.groups.has("MIXED_GROUP", staleEnt), true);
+    assert.strictEqual(staleWorld.groups.getGroups(validEnt1).includes("MIXED_GROUP"), true);
+    assert.strictEqual(staleWorld.groups.getGroups(validEnt2).includes("MIXED_GROUP"), true);
   }
 
   console.log("World tests completed!");
