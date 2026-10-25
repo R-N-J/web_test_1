@@ -627,6 +627,27 @@ A major advantage of using the `RelationshipManager` is **automatic referential 
 
 This prevents "Ghost ID" bugs where a system tries to process a target entity that no longer exists in the world.
 
+### Custom Relationships, Snapshots, and Reverse Index Rebuilding
+When world state is saved and restored via `world.saveSnapshot()` / `world.loadSnapshot()`, the `RelationshipManager` reconstructs its internal reverse index (`targetToSubjects`) by scanning component columns in restored archetypes.
+
+To ensure referential safety and prevent accidental data corruption:
+
+1. **Explicit Relationship Registration**:
+   `RelationshipManager.registerRelation(componentId)` explicitly marks a component ID as an active relationship type so the reverse relationship index can be reconstructed safely.
+   ```typescript
+   const REL_FOLLOWS = 150;
+   world.registerComponent(REL_FOLLOWS);
+   world.relationships.registerRelation(REL_FOLLOWS);
+   ```
+2. **Built-in Relationship IDs**:
+   Built-in relationship IDs (e.g. `REL_MEMBER_OF`, `REL_TARGETS`) are automatically registered through the existing component-registry setup (`ComponentRegistry.ts`).
+3. **Restoring Snapshots in Fresh Worlds**:
+   Custom relationship component IDs must be registered in a fresh World instance (via `world.relationships.registerRelation(id)`) **before** calling `world.loadSnapshot(data)` or `world.relationships.rebuild()`.
+4. **Data Isolation (No Heuristic Type Inference)**:
+   Ordinary numeric and `Set`-valued components (such as an inventory `Set<EntityId>`, numeric counters, or flags) are **never** inferred to be relationships from their stored values alone. This strict boundary prevents accidental data corruption or unwanted deletions from non-relationship components when entities are destroyed.
+5. **Serializers for 1-to-Many Sets**:
+   Because 1-to-Many relationships store targets in a `Set<EntityId>`, remember to register appropriate serializers (e.g., via `registerEcsSerializers` or `world.registerComponentSerializer`) so `Set` values round-trip properly through JSON snapshots.
+
 ---
 
 ### Comparison: Tags vs. Groups vs. Relationships
@@ -1896,6 +1917,7 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | `world.groups.getEntities(g)`| Returns all entities in a group. |
 | `world.prefabs.spawn(name)` | Creates an entity from a template. |
 | `world.relationships.add(s,r,t)`| Links two entities. |
+| `world.relationships.registerRelation(id)`| Registers a relationship type for reverse indexing/snapshots. |
 | `world.scenes.switchTo(scene)` | Teardowns current scene and enters the next. |
 | `world.turns.nextTurn()` | Advances the tactical game loop. |
 | `world.assets.get<T>(key)` | Retrieves a loaded asset from cache. |

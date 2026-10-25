@@ -4064,6 +4064,554 @@ export function testWorld() {
     assert.strictEqual(staleWorld.groups.getGroups(validEnt2).includes("MIXED_GROUP"), true);
   }
 
+  // =========================================================================
+  // TASK 18 — RelationshipManager Integrity and Lifecycle Safety
+  // =========================================================================
+
+  // 18.1 Relationship Creation and Queries (1-to-1, 1-to-Many, Symmetric, Multiple Relations)
+  {
+    const rWorld = new World();
+    const REL_TARGETING = 201;
+    const REL_MEMBER_OF = 202;
+    const REL_PARENT = 203;
+    const REL_BOND = 204;
+
+    const hero = rWorld.createEntity();
+    const monster1 = rWorld.createEntity();
+    const monster2 = rWorld.createEntity();
+    const guildA = rWorld.createEntity();
+    const guildB = rWorld.createEntity();
+
+    // 1-to-1 Exclusive: monster1 -> targeting -> hero
+    rWorld.relationships.add(monster1, REL_TARGETING, hero, true);
+    assert.strictEqual(rWorld.relationships.getTargets(monster1, REL_TARGETING), hero);
+    assert.deepStrictEqual(rWorld.relationships.getTargetsArray(monster1, REL_TARGETING), [hero]);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGETING, hero), 1);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_TARGETING, hero)), [monster1]);
+
+    // Multiple subjects pointing to same target
+    rWorld.relationships.add(monster2, REL_TARGETING, hero, true);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGETING, hero), 2);
+    const targetingSubjects = Array.from(rWorld.relationships.getRelated(REL_TARGETING, hero));
+    assert.strictEqual(targetingSubjects.length, 2);
+    assert.ok(targetingSubjects.includes(monster1) && targetingSubjects.includes(monster2));
+
+    // 1-to-Many Non-Exclusive: hero -> memberOf -> guildA, guildB
+    rWorld.relationships.add(hero, REL_MEMBER_OF, guildA, false);
+    rWorld.relationships.add(hero, REL_MEMBER_OF, guildB, false);
+    const heroGuilds = rWorld.relationships.getTargets(hero, REL_MEMBER_OF);
+    assert.ok(heroGuilds instanceof Set);
+    assert.strictEqual(heroGuilds.size, 2);
+    assert.ok(heroGuilds.has(guildA) && heroGuilds.has(guildB));
+    const heroGuildsArr = rWorld.relationships.getTargetsArray(hero, REL_MEMBER_OF);
+    assert.strictEqual(heroGuildsArr.length, 2);
+    assert.ok(heroGuildsArr.includes(guildA) && heroGuildsArr.includes(guildB));
+
+    // Reverse lookups for 1-to-Many
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBER_OF, guildA), 1);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_MEMBER_OF, guildA)), [hero]);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBER_OF, guildB), 1);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_MEMBER_OF, guildB)), [hero]);
+
+    // Symmetric relationship: monster1 <-> monster2 (REL_BOND)
+    rWorld.relationships.addSymmetric(monster1, monster2, REL_BOND);
+    assert.strictEqual(rWorld.relationships.getTargets(monster1, REL_BOND), monster2);
+    assert.strictEqual(rWorld.relationships.getTargets(monster2, REL_BOND), monster1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_BOND, monster1), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_BOND, monster2), 1);
+
+    // Idempotent duplicate additions
+    rWorld.relationships.add(monster1, REL_TARGETING, hero, true);
+    assert.strictEqual(rWorld.relationships.getTargets(monster1, REL_TARGETING), hero);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGETING, hero), 2);
+
+    rWorld.relationships.add(hero, REL_MEMBER_OF, guildA, false);
+    assert.strictEqual(rWorld.relationships.getTargetsArray(hero, REL_MEMBER_OF).length, 2);
+
+    // Missing relation queries
+    assert.strictEqual(rWorld.relationships.getTargets(hero, REL_PARENT), undefined);
+    assert.deepStrictEqual(rWorld.relationships.getTargetsArray(hero, REL_PARENT), []);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, hero), 0);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_PARENT, hero)), []);
+
+    // Agreement between countRelated and getRelated on non-existent / invalid targets
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGETING, 999999), 0);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_TARGETING, 999999)), []);
+  }
+
+  // 18.2 Referential Integrity on Entity Deletion
+  {
+    const rWorld = new World();
+    const REL_TARGETING = 210;
+    const REL_MEMBER_OF = 211;
+
+    const hero = rWorld.createEntity();
+    const monster1 = rWorld.createEntity();
+    const monster2 = rWorld.createEntity();
+    const guildA = rWorld.createEntity();
+    const guildB = rWorld.createEntity();
+
+    rWorld.relationships.add(monster1, REL_TARGETING, hero, true);
+    rWorld.relationships.add(monster2, REL_TARGETING, hero, true);
+    rWorld.relationships.add(hero, REL_MEMBER_OF, guildA, false);
+    rWorld.relationships.add(hero, REL_MEMBER_OF, guildB, false);
+
+    // 1. Delete target entity (hero): must remove incoming targeting from monster1 and monster2
+    rWorld.deleteEntity(hero);
+    assert.strictEqual(rWorld.isValid(hero), false);
+
+    assert.strictEqual(rWorld.relationships.getTargets(monster1, REL_TARGETING), undefined, "Deleted target must be removed from 1-to-1 relation");
+    assert.deepStrictEqual(rWorld.relationships.getTargetsArray(monster1, REL_TARGETING), []);
+    assert.strictEqual(rWorld.relationships.getTargets(monster2, REL_TARGETING), undefined, "Deleted target must be removed from 1-to-1 relation");
+    assert.deepStrictEqual(rWorld.relationships.getTargetsArray(monster2, REL_TARGETING), []);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGETING, hero), 0);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_TARGETING, hero)), []);
+
+    // Also hero's outgoing relations to guildA and guildB must be cleaned up from reverse index
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBER_OF, guildA), 0);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_MEMBER_OF, guildA)), []);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBER_OF, guildB), 0);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_MEMBER_OF, guildB)), []);
+
+    // 2. Delete one target from a multi-target Set
+    const player = rWorld.createEntity();
+    const faction1 = rWorld.createEntity();
+    const faction2 = rWorld.createEntity();
+    rWorld.relationships.add(player, REL_MEMBER_OF, faction1, false);
+    rWorld.relationships.add(player, REL_MEMBER_OF, faction2, false);
+
+    rWorld.deleteEntity(faction1);
+    assert.strictEqual(rWorld.isValid(faction1), false);
+
+    const remainingFactions = rWorld.relationships.getTargetsArray(player, REL_MEMBER_OF);
+    assert.deepStrictEqual(remainingFactions, [faction2], "Deleting faction1 must leave faction2 in player's memberships");
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBER_OF, faction1), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBER_OF, faction2), 1);
+
+    // Delete faction2 -> player's relation becomes completely empty and component is removed
+    rWorld.deleteEntity(faction2);
+    assert.strictEqual(rWorld.relationships.getTargets(player, REL_MEMBER_OF), undefined);
+    assert.deepStrictEqual(rWorld.relationships.getTargetsArray(player, REL_MEMBER_OF), []);
+    assert.strictEqual(rWorld.hasComponent(player, REL_MEMBER_OF), false, "Empty relationship set must remove component");
+  }
+
+  // 18.3 Entity ID Recycling Isolation
+  {
+    const rWorld = new World();
+    const REL_MASTER = 215;
+
+    const originalTarget = rWorld.createEntity();
+    const origIndex = Math.floor(originalTarget / GENERATION_SHIFT);
+    const origGen = originalTarget % GENERATION_SHIFT;
+
+    const minion = rWorld.createEntity();
+    rWorld.relationships.add(minion, REL_MASTER, originalTarget, true);
+    assert.strictEqual(rWorld.relationships.getTargets(minion, REL_MASTER), originalTarget);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MASTER, originalTarget), 1);
+
+    // Delete originalTarget
+    rWorld.deleteEntity(originalTarget);
+    assert.strictEqual(rWorld.relationships.getTargets(minion, REL_MASTER), undefined);
+
+    // Allocate replacement entity reusing the same index
+    const replacementTarget = rWorld.createEntity();
+    assert.strictEqual(Math.floor(replacementTarget / GENERATION_SHIFT), origIndex);
+    assert.strictEqual(replacementTarget % GENERATION_SHIFT, origGen + 1);
+
+    // Verify replacement does NOT inherit relationship from minion
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MASTER, replacementTarget), 0);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_MASTER, replacementTarget)), []);
+    assert.strictEqual(rWorld.relationships.getTargets(minion, REL_MASTER), undefined);
+
+    // Verify stale ID cannot remove or mutate replacement's relationships
+    const pet = rWorld.createEntity();
+    rWorld.relationships.add(pet, REL_MASTER, replacementTarget, true);
+    assert.strictEqual(rWorld.relationships.getTargets(pet, REL_MASTER), replacementTarget);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MASTER, replacementTarget), 1);
+
+    // Stale ID operation
+    rWorld.relationships.remove(pet, REL_MASTER, originalTarget);
+    assert.strictEqual(rWorld.relationships.getTargets(pet, REL_MASTER), replacementTarget, "Stale ID remove must not affect replacement");
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MASTER, replacementTarget), 1);
+  }
+
+  // 18.4 Relationship Mutation (1-to-1 <-> 1-to-Many, Partial Removal, Clear, Self-relations, Cycles)
+  {
+    const rWorld = new World();
+    const REL_LINKS = 220;
+
+    const nodeA = rWorld.createEntity();
+    const nodeB = rWorld.createEntity();
+    const nodeC = rWorld.createEntity();
+    const nodeD = rWorld.createEntity();
+
+    // 1. Transition 1-to-Many -> 1-to-1 (exclusive replacement of Set)
+    rWorld.relationships.add(nodeA, REL_LINKS, nodeB, false);
+    rWorld.relationships.add(nodeA, REL_LINKS, nodeC, false);
+    assert.strictEqual(rWorld.relationships.getTargetsArray(nodeA, REL_LINKS).length, 2);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, nodeB), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, nodeC), 1);
+
+    // Replace with exclusive target nodeD
+    rWorld.relationships.add(nodeA, REL_LINKS, nodeD, true);
+    assert.strictEqual(rWorld.relationships.getTargets(nodeA, REL_LINKS), nodeD);
+    assert.deepStrictEqual(rWorld.relationships.getTargetsArray(nodeA, REL_LINKS), [nodeD]);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, nodeB), 0, "Old target nodeB must be untracked");
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, nodeC), 0, "Old target nodeC must be untracked");
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, nodeD), 1, "New target nodeD must be tracked");
+
+    // Deleting nodeB or nodeC must NOT affect nodeA's relation to nodeD
+    rWorld.deleteEntity(nodeB);
+    assert.strictEqual(rWorld.relationships.getTargets(nodeA, REL_LINKS), nodeD, "Deleting unlinked nodeB must not remove nodeD from nodeA");
+
+    // 2. Transition 1-to-1 -> 1-to-Many
+    const freshB = rWorld.createEntity();
+    rWorld.relationships.add(nodeA, REL_LINKS, freshB, false);
+    const targetsA = rWorld.relationships.getTargetsArray(nodeA, REL_LINKS);
+    assert.strictEqual(targetsA.length, 2);
+    assert.ok(targetsA.includes(nodeD) && targetsA.includes(freshB));
+
+    // 3. Partial removal: removing with non-matching target on 1-to-1 relation is safe no-op
+    const singleSubject = rWorld.createEntity();
+    const singleTarget1 = rWorld.createEntity();
+    const singleTarget2 = rWorld.createEntity();
+    rWorld.relationships.add(singleSubject, REL_LINKS, singleTarget1, true);
+
+    // Remove singleTarget2 (which is NOT the current target)
+    rWorld.relationships.remove(singleSubject, REL_LINKS, singleTarget2);
+    assert.strictEqual(rWorld.relationships.getTargets(singleSubject, REL_LINKS), singleTarget1, "Removing non-matching target must not remove current target");
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, singleTarget1), 1);
+
+    // Remove singleTarget1 (matching target)
+    rWorld.relationships.remove(singleSubject, REL_LINKS, singleTarget1);
+    assert.strictEqual(rWorld.relationships.getTargets(singleSubject, REL_LINKS), undefined);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, singleTarget1), 0);
+
+    // 4. clearRelations(subject, relationId)
+    rWorld.relationships.add(singleSubject, REL_LINKS, singleTarget1, false);
+    rWorld.relationships.add(singleSubject, REL_LINKS, singleTarget2, false);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, singleTarget1), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, singleTarget2), 1);
+
+    rWorld.relationships.clearRelations(singleSubject, REL_LINKS);
+    assert.strictEqual(rWorld.relationships.getTargets(singleSubject, REL_LINKS), undefined);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, singleTarget1), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, singleTarget2), 0);
+
+    // 5. Self-relations and Cycles
+    const selfNode = rWorld.createEntity();
+    rWorld.relationships.add(selfNode, REL_LINKS, selfNode, true);
+    assert.strictEqual(rWorld.relationships.getTargets(selfNode, REL_LINKS), selfNode);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, selfNode), 1);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_LINKS, selfNode)), [selfNode]);
+
+    // Deleting self-related entity cleans up cleanly
+    rWorld.deleteEntity(selfNode);
+    assert.strictEqual(rWorld.isValid(selfNode), false);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, selfNode), 0);
+
+    // Cycle: c1 -> c2 -> c3 -> c1
+    const c1 = rWorld.createEntity();
+    const c2 = rWorld.createEntity();
+    const c3 = rWorld.createEntity();
+    rWorld.relationships.add(c1, REL_LINKS, c2, true);
+    rWorld.relationships.add(c2, REL_LINKS, c3, true);
+    rWorld.relationships.add(c3, REL_LINKS, c1, true);
+
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, c1), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, c2), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, c3), 1);
+
+    // Delete c2 in the cycle
+    rWorld.deleteEntity(c2);
+    assert.strictEqual(rWorld.relationships.getTargets(c1, REL_LINKS), undefined, "c1's target c2 was deleted");
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, c3), 0, "c2 was deleted so no one points to c3");
+    assert.strictEqual(rWorld.relationships.getTargets(c3, REL_LINKS), c1, "c3 still points to c1");
+    assert.strictEqual(rWorld.relationships.countRelated(REL_LINKS, c1), 1);
+  }
+
+  // 18.5 Immediate and Deferred Operations
+  {
+    const dWorld = new World();
+    const REL_SQUAD = 225;
+
+    const leader = dWorld.createEntity();
+    const grunt1 = dWorld.createEntity();
+    const grunt2 = dWorld.createEntity();
+
+    dWorld.relationships.add(grunt1, REL_SQUAD, leader, true);
+    dWorld.relationships.add(grunt2, REL_SQUAD, leader, true);
+
+    // Enter deferred mode
+    dWorld.setDeferred(true);
+    assert.strictEqual(dWorld.isDeferred, true);
+
+    // Queue deletion of leader
+    dWorld.deleteEntity(leader);
+
+    // Before flush: leader is still valid, relationships still intact
+    assert.strictEqual(dWorld.isValid(leader), true);
+    assert.strictEqual(dWorld.relationships.getTargets(grunt1, REL_SQUAD), leader);
+    assert.strictEqual(dWorld.relationships.countRelated(REL_SQUAD, leader), 2);
+
+    // Flush deferred operations
+    dWorld.setDeferred(false);
+    assert.strictEqual(dWorld.isValid(leader), false);
+    assert.strictEqual(dWorld.relationships.getTargets(grunt1, REL_SQUAD), undefined);
+    assert.strictEqual(dWorld.relationships.getTargets(grunt2, REL_SQUAD), undefined);
+    assert.strictEqual(dWorld.relationships.countRelated(REL_SQUAD, leader), 0);
+  }
+
+  // 18.6 Reset and Persistence Lifecycle (World.clear, Snapshot Save/Restore, Rebuild, No Numeric Column Pollution)
+  {
+    const sWorld = new World();
+    const REL_TEAM = 230;
+    const HP_COMP = 231; // Regular numeric component (HP)
+
+    sWorld.registerComponent(REL_TEAM);
+    sWorld.registerComponent(HP_COMP);
+    sWorld.relationships.registerRelation(REL_TEAM);
+
+    const captain = sWorld.createEntity();
+    const soldier1 = sWorld.createEntity();
+    const soldier2 = sWorld.createEntity();
+
+    // Assign regular numeric values to soldiers that happen to equal captain's entity ID (e.g. 0 or captain)
+    sWorld.addComponent(soldier1, HP_COMP, captain);
+    sWorld.addComponent(soldier2, HP_COMP, 0);
+
+    // Assign relationship
+    sWorld.relationships.add(soldier1, REL_TEAM, captain, false);
+    sWorld.relationships.add(soldier2, REL_TEAM, captain, false);
+
+    assert.strictEqual(sWorld.relationships.countRelated(REL_TEAM, captain), 2);
+
+    // Save snapshot
+    const snap = sWorld.saveSnapshot();
+
+    // Clear world
+    sWorld.clear();
+    assert.strictEqual(sWorld.relationships.countRelated(REL_TEAM, captain), 0);
+
+    // Load snapshot
+    sWorld.loadSnapshot(snap);
+
+    // Verify relations restored accurately
+    assert.strictEqual(sWorld.relationships.countRelated(REL_TEAM, captain), 2);
+    const restoredMembers = Array.from(sWorld.relationships.getRelated(REL_TEAM, captain));
+    assert.strictEqual(restoredMembers.length, 2);
+    assert.ok(restoredMembers.includes(soldier1) && restoredMembers.includes(soldier2));
+
+    // Verify regular numeric component HP was NOT polluted into targetToSubjects
+    // Delete captain: should remove REL_TEAM from soldier1 and soldier2, but leave HP_COMP completely untouched!
+    sWorld.deleteEntity(captain);
+    assert.strictEqual(sWorld.relationships.getTargets(soldier1, REL_TEAM), undefined);
+    assert.strictEqual(sWorld.getComponent(soldier1, HP_COMP), captain, "HP component must not be removed when captain is deleted");
+    assert.strictEqual(sWorld.getComponent(soldier2, HP_COMP), 0, "HP component must not be removed when entity 0 is deleted");
+
+    // Regression test: Ordinary Set-valued component and registered 1-to-Many relationship during snapshot/rebuild
+    const regWorld = new World();
+    const ORDINARY_SET_COMP = 232;
+    const CUSTOM_REL_1_TO_MANY = 233;
+    const ORDINARY_NUM_COMP = 234;
+
+    regWorld.registerComponent(ORDINARY_SET_COMP);
+    regWorld.registerComponent(CUSTOM_REL_1_TO_MANY);
+    regWorld.registerComponent(ORDINARY_NUM_COMP);
+    regWorld.relationships.registerRelation(CUSTOM_REL_1_TO_MANY);
+
+    // Register Set serializer for snapshot save/load support
+    regWorld.registerComponentSerializer(ORDINARY_SET_COMP, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: number[] }).items);
+        }
+        return val;
+      }
+    });
+    regWorld.registerComponentSerializer(CUSTOM_REL_1_TO_MANY, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: number[] }).items);
+        }
+        return val;
+      }
+    });
+
+    const subEnt = regWorld.createEntity();
+    const tgtEnt1 = regWorld.createEntity();
+    const tgtEnt2 = regWorld.createEntity();
+
+    // Subject has an ordinary Set component containing tgtEnt1 and other numbers
+    const ordinarySet = new Set<number>([tgtEnt1, 42]);
+    regWorld.addComponent(subEnt, ORDINARY_SET_COMP, ordinarySet);
+    regWorld.addComponent(subEnt, ORDINARY_NUM_COMP, tgtEnt1);
+
+    // Subject also has a registered 1-to-Many relationship linking to tgtEnt1 and tgtEnt2
+    regWorld.relationships.add(subEnt, CUSTOM_REL_1_TO_MANY, tgtEnt1, false);
+    regWorld.relationships.add(subEnt, CUSTOM_REL_1_TO_MANY, tgtEnt2, false);
+
+    assert.strictEqual(regWorld.relationships.countRelated(CUSTOM_REL_1_TO_MANY, tgtEnt1), 1);
+    assert.strictEqual(regWorld.relationships.countRelated(CUSTOM_REL_1_TO_MANY, tgtEnt2), 1);
+
+    // Save snapshot and restore
+    const snapSet = regWorld.saveSnapshot();
+
+    const freshWorld = new World();
+    freshWorld.registerComponent(ORDINARY_SET_COMP);
+    freshWorld.registerComponent(CUSTOM_REL_1_TO_MANY);
+    freshWorld.registerComponent(ORDINARY_NUM_COMP);
+    freshWorld.relationships.registerRelation(CUSTOM_REL_1_TO_MANY);
+
+    freshWorld.registerComponentSerializer(ORDINARY_SET_COMP, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: number[] }).items);
+        }
+        return val;
+      }
+    });
+    freshWorld.registerComponentSerializer(CUSTOM_REL_1_TO_MANY, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: number[] }).items);
+        }
+        return val;
+      }
+    });
+
+    freshWorld.loadSnapshot(snapSet);
+
+    // Rebuild verified reverse index for registered relationship
+    assert.strictEqual(freshWorld.relationships.countRelated(CUSTOM_REL_1_TO_MANY, tgtEnt1), 1);
+    assert.strictEqual(freshWorld.relationships.countRelated(CUSTOM_REL_1_TO_MANY, tgtEnt2), 1);
+
+    // Delete tgtEnt1:
+    // 1. Registered relationship CUSTOM_REL_1_TO_MANY must untrack tgtEnt1 and retain only tgtEnt2
+    // 2. Ordinary component ORDINARY_SET_COMP must remain completely untouched (still containing tgtEnt1 and 42)
+    // 3. Ordinary component ORDINARY_NUM_COMP must remain untouched
+    freshWorld.deleteEntity(tgtEnt1);
+
+    assert.strictEqual(freshWorld.relationships.countRelated(CUSTOM_REL_1_TO_MANY, tgtEnt1), 0);
+    assert.strictEqual(freshWorld.relationships.countRelated(CUSTOM_REL_1_TO_MANY, tgtEnt2), 1);
+    const remainingTargets = freshWorld.relationships.getTargetsArray(subEnt, CUSTOM_REL_1_TO_MANY);
+    assert.deepStrictEqual(remainingTargets, [tgtEnt2]);
+
+    const retrievedSet = freshWorld.getComponent<Set<number>>(subEnt, ORDINARY_SET_COMP);
+    assert.ok(retrievedSet instanceof Set, "Ordinary Set component must still exist on subject");
+    assert.strictEqual(retrievedSet.has(tgtEnt1), true, "Target ID in ordinary Set must not be removed by relationship cleanup");
+    assert.strictEqual(retrievedSet.size, 2, "Ordinary Set size must remain unchanged");
+    assert.strictEqual(freshWorld.getComponent(subEnt, ORDINARY_NUM_COMP), tgtEnt1, "Ordinary numeric component must remain unchanged");
+
+    // Also delete tgtEnt2: CUSTOM_REL_1_TO_MANY becomes empty and is removed, ORDINARY_SET_COMP stays
+    freshWorld.deleteEntity(tgtEnt2);
+    assert.strictEqual(freshWorld.hasComponent(subEnt, CUSTOM_REL_1_TO_MANY), false, "Empty relationship set must be removed");
+    assert.strictEqual(freshWorld.hasComponent(subEnt, ORDINARY_SET_COMP), true, "Ordinary Set component must still exist");
+    assert.strictEqual(freshWorld.getComponent<Set<number>>(subEnt, ORDINARY_SET_COMP)?.size, 2);
+
+    // Repeated reset cycles
+    for (let cycle = 0; cycle < 3; cycle++) {
+      sWorld.clear();
+      assert.strictEqual(sWorld.relationships.countRelated(REL_TEAM, captain), 0);
+      const eA = sWorld.createEntity();
+      const eB = sWorld.createEntity();
+      sWorld.relationships.add(eA, REL_TEAM, eB, true);
+      assert.strictEqual(sWorld.relationships.getTargets(eA, REL_TEAM), eB);
+      assert.strictEqual(sWorld.relationships.countRelated(REL_TEAM, eB), 1);
+    }
+  }
+
+  // 18.7 Prefab Integration (Relationship resolution with targetTag, missing tag, failure handling)
+  {
+    const pWorld = new World();
+    const STATS_REL = 240;
+    const STATS_COMP = 241;
+
+    pWorld.registerComponent(STATS_REL);
+    pWorld.registerComponent(STATS_COMP);
+
+    const sword = pWorld.createEntity();
+    pWorld.tags.register("holy_blade", sword);
+
+    pWorld.prefabs.register("Paladin", {
+      name: "Paladin",
+      components: [{ id: STATS_COMP, value: { str: 20 } }],
+      relationships: [{ id: STATS_REL, targetTag: "holy_blade" }]
+    });
+
+    pWorld.prefabs.register("MissingRelPrefab", {
+      name: "MissingRelPrefab",
+      components: [{ id: STATS_COMP, value: { str: 10 } }],
+      relationships: [{ id: STATS_REL, targetTag: "non_existent_tag" }]
+    });
+
+    // Spawn Paladin: targetTag 'holy_blade' exists -> relationship is linked
+    const paladin = pWorld.prefabs.spawn("Paladin");
+    assert.strictEqual(pWorld.relationships.getTargets(paladin, STATS_REL), sword);
+    assert.deepStrictEqual(pWorld.relationships.getTargetsArray(paladin, STATS_REL), [sword]);
+    assert.strictEqual(pWorld.relationships.countRelated(STATS_REL, sword), 1);
+
+    // Spawn MissingRelPrefab: targetTag does not exist -> relation is omitted safely, component still added
+    const missingEnt = pWorld.prefabs.spawn("MissingRelPrefab");
+    assert.strictEqual(pWorld.isValid(missingEnt), true);
+    assert.deepStrictEqual(pWorld.getComponent(missingEnt, STATS_COMP), { str: 10 });
+    assert.strictEqual(pWorld.relationships.getTargets(missingEnt, STATS_REL), undefined);
+    assert.deepStrictEqual(pWorld.relationships.getTargetsArray(missingEnt, STATS_REL), []);
+  }
+
+  // 18.8 Query Consistency and Failure Atomicity (Input validation & Error handling)
+  {
+    const valWorld = new World();
+    const VALID_REL = 250;
+    const UNREGISTERED_RESERVED = 50;
+
+    valWorld.registerComponent(VALID_REL);
+
+    const sEnt = valWorld.createEntity();
+    const tEnt = valWorld.createEntity();
+    valWorld.relationships.add(sEnt, VALID_REL, tEnt, true);
+
+    // Invalid Component IDs
+    const invalidIds = [-1, 1.5, NaN, Infinity, 65536];
+    for (const invId of invalidIds) {
+      assert.throws(() => valWorld.relationships.add(sEnt, invId, tEnt), /\[ECS\] Invalid Component ID/);
+      assert.throws(() => valWorld.relationships.remove(sEnt, invId, tEnt), /\[ECS\] Invalid Component ID/);
+      assert.throws(() => valWorld.relationships.getTargets(sEnt, invId), /\[ECS\] Invalid Component ID/);
+      assert.throws(() => valWorld.relationships.getTargetsArray(sEnt, invId), /\[ECS\] Invalid Component ID/);
+      assert.throws(() => Array.from(valWorld.relationships.getRelated(invId, tEnt)), /\[ECS\] Invalid Component ID/);
+      assert.throws(() => valWorld.relationships.countRelated(invId, tEnt), /\[ECS\] Invalid Component ID/);
+      assert.throws(() => valWorld.relationships.clearRelations(sEnt, invId), /\[ECS\] Invalid Component ID/);
+      assert.throws(() => valWorld.relationships.registerRelation(invId), /\[ECS\] Invalid Component ID/);
+    }
+
+    // Unregistered reserved ID rejection
+    assert.throws(
+      () => valWorld.relationships.add(sEnt, UNREGISTERED_RESERVED, tEnt),
+      /\[ECS\] Cannot add unregistered reserved component ID: 50/
+    );
+    assert.throws(
+      () => valWorld.relationships.registerRelation(UNREGISTERED_RESERVED),
+      /\[ECS\] Cannot register unregistered reserved component ID: 50/
+    );
+
+    // Verify rejected operations left existing relationship intact
+    assert.strictEqual(valWorld.relationships.getTargets(sEnt, VALID_REL), tEnt);
+    assert.strictEqual(valWorld.relationships.countRelated(VALID_REL, tEnt), 1);
+    assert.deepStrictEqual(Array.from(valWorld.relationships.getRelated(VALID_REL, tEnt)), [sEnt]);
+  }
+
   console.log("World tests completed!");
 }
 

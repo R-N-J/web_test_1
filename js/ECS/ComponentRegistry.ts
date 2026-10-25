@@ -43,9 +43,11 @@ export function registerEcsSerializers(world: World, userComponents: Record<stri
 
   if (relMemberOf !== undefined) {
     world.registerComponentSerializer(relMemberOf, RelationshipSetSerializer);
+    world.relationships.registerRelation(relMemberOf);
   }
   if (relTargets !== undefined) {
     world.registerComponentSerializer(relTargets, RelationshipSetSerializer);
+    world.relationships.registerRelation(relTargets);
   }
 }
 

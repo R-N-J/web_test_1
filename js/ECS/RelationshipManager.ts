@@ -10,12 +10,30 @@ export class RelationshipManager {
    */
   private targetToSubjects = new Map<EntityId, Map<ComponentId, Set<EntityId>>>();
 
-
+  /**
+   * Set of component IDs explicitly registered or used as relationships.
+   * Prevents rebuild() from mistaking regular numeric components (e.g. HP: 0) for relationship targets.
+   */
+  private registeredRelations = new Set<ComponentId>();
 
   constructor(
     private entities: EntityManager,
     private components: ComponentManager
   ) {}
+
+  /**
+   * Explicitly registers a component ID as a relationship type.
+   */
+  public registerRelation(relationId: ComponentId): void {
+    if (!isValidComponentId(relationId)) {
+      throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
+    }
+    if (relationId < USER_COMPONENT_ID_START && !this.components.isRegistered(relationId)) {
+      throw new Error(`[ECS] Cannot register unregistered reserved component ID: ${relationId}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
+    }
+    this.registeredRelations.add(relationId);
+    this.components.addRegisteredComponent(relationId);
+  }
 
   /**
    * Links a subject to a target.
@@ -30,15 +48,22 @@ export class RelationshipManager {
     }
     if (!this.entities.isValid(target) || !this.entities.isValid(subject)) return;
 
+    this.registeredRelations.add(relationId);
     this.components.addRegisteredComponent(relationId);
 
     const hasRelation = this.entities.hasComponent(subject, relationId);
 
     if (exclusive) {
-      // If component already exists, we must untrack the old target first
+      // If component already exists, we must untrack the old target(s) first
       if (hasRelation) {
-        const oldTarget = this.entities.getComponentValue<EntityId>(subject, relationId);
-        if (oldTarget !== undefined) this.untrackTarget(oldTarget, relationId, subject);
+        const oldTarget = this.entities.getComponentValue<EntityId | Set<EntityId>>(subject, relationId);
+        if (oldTarget !== undefined) {
+          if (oldTarget instanceof Set) {
+            for (const t of oldTarget) this.untrackTarget(t, relationId, subject);
+          } else if (typeof oldTarget === "number") {
+            this.untrackTarget(oldTarget, relationId, subject);
+          }
+        }
 
         this.entities.setComponentValue(subject, relationId, target);
         this.trackTarget(target, relationId, subject);
@@ -57,8 +82,10 @@ export class RelationshipManager {
     const existing = this.getTargets(subject, relationId);
 
     if (existing instanceof Set) {
-      existing.add(target);
-      this.trackTarget(target, relationId, subject);
+      if (!existing.has(target)) {
+        existing.add(target);
+        this.trackTarget(target, relationId, subject);
+      }
       return;
     }
 
@@ -108,6 +135,7 @@ export class RelationshipManager {
 
   /**
    * Removes a specific target from a relationship.
+   * If target is omitted, removes all targets for that relation on subject.
    */
   public remove(subject: EntityId, relationId: ComponentId, target?: EntityId): void {
     if (!isValidComponentId(relationId)) {
@@ -117,15 +145,26 @@ export class RelationshipManager {
     if (!loc) return;
 
     const val = loc.arch.columns.get(relationId)?.[loc.row];
+    if (val === undefined) return;
 
     if (val instanceof Set && target !== undefined) {
-      val.delete(target);
-      this.untrackTarget(target, relationId, subject);
+      if (val.has(target)) {
+        val.delete(target);
+        this.untrackTarget(target, relationId, subject);
+      }
       if (val.size === 0) {
         this.removeComponent(subject, relationId);
       }
+    } else if (target !== undefined) {
+      // 1-to-1 relationship: only remove if the current target matches the requested target
+      if (val === target) {
+        if (typeof val === "number") {
+          this.untrackTarget(val, relationId, subject);
+        }
+        this.removeComponent(subject, relationId);
+      }
     } else {
-      // If no target specified or it's a single value, remove the whole component
+      // If no target specified, remove the whole component and untrack all its targets
       if (typeof val === "number") {
         this.untrackTarget(val, relationId, subject);
       } else if (val instanceof Set) {
@@ -177,6 +216,8 @@ export class RelationshipManager {
 
     for (const arch of this.components.getArchetypes()) {
       for (const [compId, column] of arch.columns) {
+        if (!this.registeredRelations.has(compId)) continue;
+
         for (let i = 0; i < arch.entities.length; i++) {
           const val = column[i];
           const subject = arch.entities[i];
@@ -253,6 +294,8 @@ export class RelationshipManager {
     if (!isValidComponentId(relationId)) {
       throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
+    if (!this.entities.isValid(target)) return 0;
+
     let count = 0;
     for (const arch of this.components.getArchetypes()) {
       const column = arch.columns.get(relationId);
@@ -260,6 +303,9 @@ export class RelationshipManager {
 
       for (let i = 0; i < arch.entities.length; i++) {
         const val = column[i];
+        const subject = arch.entities[i];
+        if (!this.entities.isValid(subject)) continue;
+
         if (val === target || (val instanceof Set && val.has(target))) {
           count++;
         }
@@ -276,7 +322,7 @@ export class RelationshipManager {
     if (!isValidComponentId(relationId)) {
       throw new Error(`[ECS] Invalid Component ID: ${relationId}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
-    this.removeComponent(subject, relationId);
+    this.remove(subject, relationId);
   }
 
   /**
@@ -289,20 +335,40 @@ export class RelationshipManager {
 
 
   public cleanup(deletedEntity: EntityId): void {
+    // 1. Clean up incoming relations (entities pointing TO deletedEntity)
     const relations = this.targetToSubjects.get(deletedEntity);
-    if (!relations) return;
+    if (relations) {
+      // Use a copy of the relations to avoid concurrent modification issues during removal
+      const relationEntries = Array.from(relations.entries());
 
-    // Use a copy of the relations to avoid concurrent modification issues during removal
-    const relationEntries = Array.from(relations.entries());
-
-    for (const [relationId, subjects] of relationEntries) {
-      const subjectArray = Array.from(subjects);
-      for (const subject of subjectArray) {
-        this.remove(subject, relationId, deletedEntity);
+      for (const [relationId, subjects] of relationEntries) {
+        const subjectArray = Array.from(subjects);
+        for (const subject of subjectArray) {
+          this.remove(subject, relationId, deletedEntity);
+        }
       }
+
+      this.targetToSubjects.delete(deletedEntity);
     }
 
-    this.targetToSubjects.delete(deletedEntity);
+    // 2. Clean up outgoing relations (targets that deletedEntity was pointing to)
+    const loc = this.entities.getLocation(deletedEntity);
+    if (loc) {
+      for (const [compId, column] of loc.arch.columns) {
+        if (this.registeredRelations.has(compId)) {
+          const val = column[loc.row];
+          if (typeof val === "number") {
+            this.untrackTarget(val, compId, deletedEntity);
+          } else if (val instanceof Set) {
+            for (const t of val) {
+              if (typeof t === "number") {
+                this.untrackTarget(t, compId, deletedEntity);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
 

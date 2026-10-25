@@ -320,6 +320,10 @@ These are supporting features, not prerequisites for core archetype correctness.
 - Deleting either endpoint must not leave unusable reverse indexes or dangling references.
 - Forward and reverse relationship queries must agree.
 - The behavior of relationships when an entity is deleted must be explicitly specified.
+- **REL-001:** `RelationshipManager.registerRelation(componentId)` explicitly designates a component ID as a relationship type so reverse indexes can be accurately maintained and reconstructed.
+- **REL-002:** Built-in relationship IDs (e.g. `REL_MEMBER_OF`, `REL_TARGETS`) are registered during component bootstrap.
+- **REL-003:** Custom relationship IDs must be registered before `world.loadSnapshot()` or `RelationshipManager.rebuild()` restores state in a fresh world instance.
+- **REL-004:** Reverse index reconstruction and entity deletion cleanup strictly target registered relationship component IDs. Non-relationship numeric and `Set`-valued components are never inferred to be relationships from data types alone, preventing accidental corruption or deletion of unrelated entity component data.
 
 ## 12. Prefabs, assets, and dependency injection
 
@@ -356,7 +360,7 @@ Snapshots are a framework feature and must be validated separately from basic en
 - **SAV-003:** Snapshot versions are checked and incompatible formats are rejected or migrated according to a documented policy.
 - **SAV-004:** Invalid snapshots produce clear errors.
 - **SAV-005:** A failed load must not leave the world in an undocumented partially restored state.
-- **SAV-006:** Entity IDs, internal entities, relationships, tags, groups, and singleton state must follow explicit persistence rules.
+- **SAV-006:** Entity IDs, internal entities, relationships, tags, groups, and singleton state must follow explicit persistence rules. Custom relationship component IDs must be registered on `RelationshipManager.registerRelation()` prior to snapshot restoration to allow safe reverse-index rebuilding.
 - **SAV-007:** Components containing `Map`, `Set`, or other non-JSON-native data require appropriate serializers or documented restrictions.
 
 Round-trip tests must compare meaningful world state rather than requiring identical internal archetype row positions.
