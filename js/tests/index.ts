@@ -6,6 +6,7 @@ import { testPrefabManager } from "./Prefabs.test";
 import { testTurnManager } from "./TurnManager.test";
 import { testSystems } from "./Systems.test";
 import { testSceneManager } from "./SceneManager.test";
+import { testEventBus } from "./EventBus.test";
 
 /**
  * Main entry point for ECS tests.
@@ -21,6 +22,7 @@ export function runAllTests() {
     testTurnManager();
     testSystems();
     testSceneManager();
+    testEventBus();
     console.log("=== All Tests Passed Successfully ===");
   } catch (err) {
     console.error("!!! Test Failed !!!");

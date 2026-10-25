@@ -28,6 +28,10 @@ export class EventBus {
   private subscriberHandlers = new Map<object, Array<{ type: string; handler: BaseHandler }>>();
 
   public register(subscriber: object): void {
+    if (!subscriber || typeof subscriber !== 'object') {
+      throw new Error('[EventBus] Subscriber must be a non-null object.');
+    }
+
     if (this.subscriberHandlers.has(subscriber)) {
       this.unregister(subscriber);
     }
@@ -55,6 +59,10 @@ export class EventBus {
   }
 
   public unregister(subscriber: object): void {
+    if (!subscriber || typeof subscriber !== 'object') {
+      return;
+    }
+
     const list = this.subscriberHandlers.get(subscriber);
     if (list) {
       for (const { type, handler } of list) {
@@ -65,6 +73,13 @@ export class EventBus {
   }
 
   public subscribe<T extends string>(type: T, handler: Handler<T>): void {
+    if (typeof type !== 'string' || type.trim().length === 0) {
+      throw new Error('[EventBus] Event type must be a non-empty string.');
+    }
+    if (typeof handler !== 'function') {
+      throw new Error('[EventBus] Event handler must be a function.');
+    }
+
     if (!this.handlers.has(type)) {
       this.handlers.set(type, new Set());
     }
@@ -76,11 +91,21 @@ export class EventBus {
   }
 
   public publish<T extends AnyEvent>(event: T): void {
-    const typeHandlers = this.handlers.get(event.type);
-    if (!typeHandlers) return;
+    if (!event || typeof event !== 'object' || typeof event.type !== 'string' || event.type.trim().length === 0) {
+      throw new Error("[EventBus] Invalid event object. An event must be an object with a non-empty string 'type' property.");
+    }
 
-    for (const handler of typeHandlers) {
+    const typeHandlers = this.handlers.get(event.type);
+    if (!typeHandlers || typeHandlers.size === 0) return;
+
+    // Snapshot handlers to prevent newly subscribed handlers from running in current dispatch
+    const handlersToRun = Array.from(typeHandlers);
+
+    for (const handler of handlersToRun) {
       if ((event as BaseEvent).cancelled) break;
+
+      // Skip handler if it was unsubscribed during this dispatch pass or if handlers were cleared
+      if (!this.handlers.get(event.type)?.has(handler)) continue;
 
       // Since handler expects BaseEvent and event matches BaseEvent,
       // this is now a strictly typed call.
@@ -89,6 +114,10 @@ export class EventBus {
   }
 
   public unsubscribe<T extends string>(type: T, handler: Handler<T>): void {
+    if (typeof type !== 'string' || typeof handler !== 'function') {
+      return;
+    }
+
     const typeHandlers = this.handlers.get(type);
     if (typeHandlers) {
       // Single cast to the storage signature for the Set lookup.
@@ -96,7 +125,20 @@ export class EventBus {
     }
   }
 
+  public hasListeners(type: string): boolean {
+    return (this.handlers.get(type)?.size ?? 0) > 0;
+  }
+
+  public listenerCount(type: string): number {
+    return this.handlers.get(type)?.size ?? 0;
+  }
+
+  public hasSubscriber(subscriber: object): boolean {
+    return this.subscriberHandlers.has(subscriber);
+  }
+
   public clear(): void {
     this.handlers.clear();
+    this.subscriberHandlers.clear();
   }
 }

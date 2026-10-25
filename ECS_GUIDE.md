@@ -1273,10 +1273,12 @@ class AudioSystem extends BaseSystem {
 | Feature | Description |
 | :--- | :--- |
 | **Decoupled** | Systems don't need to know about each other; they only need to know about event types. |
-| **Auto-Registration** | The `Scheduler` automatically calls `world.events.register(system)` when a system is added. |
-| **Decorator Support** | Use `@Subscribe('EVENT_TYPE')` on any system method. |
+| **Auto-Registration** | The `Scheduler` automatically calls `world.events.register(system)` when a system is added and `unregister(system)` when removed. |
+| **Decorator Support** | Use `@Subscribe('EVENT_TYPE')` on any system method. Validates non-empty string event types. |
+| **Snapshot Dispatch** | `publish()` iterates a snapshot of listeners, isolating in-flight dispatch from mid-event subscriptions and skipping mid-event unsubscriptions immediately. |
 | **Cancellation** | If an event has a `cancelled` property, handlers can set it to `true` to stop the event from reaching further subscribers. |
 | **Synchronous** | Events are processed immediately when `publish()` is called. |
+| **Lifecycle Rebinding** | Ephemeral event handlers are cleared on `world.clear()`, while persistent scheduler systems are automatically rebound without duplicate listener accumulation. |
 
 #### Event Bus Examples
 
@@ -1939,8 +1941,12 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 ### Managers (World Properties)
 | Method | Description |
 | :--- | :--- |
-| `world.events.publish(ev)` | Dispatches an event. |
+| `world.events.publish(ev)` | Dispatches an event synchronously to registered listeners. |
 | `world.events.subscribe(t, cb)`| Manually subscribe to an event. |
+| `world.events.unsubscribe(t, cb)`| Unsubscribe a handler from an event. |
+| `world.events.hasListeners(t)`| Checks if an event type has registered listeners. |
+| `world.events.listenerCount(t)`| Returns the number of registered listeners for an event type. |
+| `world.events.clear()` | Removes all event handlers and subscriber bindings. |
 | `world.tags.getEntity(tag)` | Finds an entity by its unique tag. |
 | `world.groups.getEntities(g)`| Returns all entities in a group. |
 | `world.prefabs.spawn(name)` | Creates an entity from a template. |

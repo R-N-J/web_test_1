@@ -174,6 +174,10 @@ export interface SubscriptionMetadata {
  * Uses 'object' and index signatures to avoid 'any'.
  */
 export function Subscribe(eventType: string) {
+  if (typeof eventType !== "string" || eventType.trim().length === 0) {
+    throw new Error(`[ECS] @Subscribe requires a non-empty string event type.`);
+  }
+
   return function(_value: unknown, context: unknown): void {
     const metadata = getMetadata(_value, context);
 

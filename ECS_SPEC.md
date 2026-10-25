@@ -361,6 +361,14 @@ Asset loading and caching must not undermine world initialization or leave the e
 - Invalid component IDs, unresolved dependencies, and invalid decorator configurations must produce clear errors.
 - Decorators that filter systems must agree with the corresponding `Aspect`, group, or tag semantics.
 
+### 12.4 EventBus and decoupled communication
+
+- **EVT-001:** `EventBus.subscribe(type, handler)` validates that `type` is a non-empty string and `handler` is a function; duplicate subscriptions with the same handler function reference are idempotent and register once.
+- **EVT-002:** `EventBus.publish(event)` validates that `event` is an object with a non-empty string `type` property; dispatches to a snapshot of registered handlers, ensuring handlers subscribed during dispatch do not execute for the in-flight event while handlers unsubscribed or cleared mid-dispatch are skipped immediately; setting `event.cancelled = true` halts subsequent listeners.
+- **EVT-003:** Exceptions thrown within an event handler propagate immediately to the caller of `publish()`, halting remaining handlers for that dispatch while leaving the `EventBus` in a valid, uncorrupted state for subsequent operations.
+- **EVT-004:** `@Subscribe(eventType)` validates that `eventType` is a non-empty string; system instances added to `Scheduler` are automatically registered to the world's `EventBus`, unregistered upon system removal or scheduler clearing, and support multiple distinct system instances without cross-instance collision.
+- **EVT-005:** `World.clear()` wipes ephemeral event handlers while persistent scheduler systems have their `@Subscribe` event listeners automatically rebound via `scheduler.rebind()`, receiving exactly one delivery per published event across repeated world reset and scene transition cycles.
+
 ## 13. Snapshots and persistence
 
 **Related code:** `World.ts`, component serialization and storage support
