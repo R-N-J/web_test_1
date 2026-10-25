@@ -6,7 +6,7 @@ import { EntityId, Archetype, MAX_COMPONENT_ID } from "../ECS/Archetype";
 import { GENERATION_SHIFT } from "../ECS/EntityManager";
 import { registerAllComponents } from "../ECS/ComponentRegistry";
 import { All, And, One, AnyOf, Exclude, NoneOf, ButNot, Inject, Singleton, SingletonComponent } from "../ECS/Decorators";
-import { PrefabManager } from "../ECS/PrefabManager";
+import { PrefabManager, PrefabDefinition } from "../ECS/PrefabManager";
 import { ENGINE_COMPONENT_ID_START, USER_COMPONENT_ID_START, InternalComponents } from "../ECS/InternalComponents";
 
 /**
@@ -4610,6 +4610,330 @@ export function testWorld() {
     assert.strictEqual(valWorld.relationships.getTargets(sEnt, VALID_REL), tEnt);
     assert.strictEqual(valWorld.relationships.countRelated(VALID_REL, tEnt), 1);
     assert.deepStrictEqual(Array.from(valWorld.relationships.getRelated(VALID_REL, tEnt)), [sEnt]);
+  }
+
+  // =========================================================================
+  // 19. Task 19 — PrefabManager Integrity and Spawn Safety Regression Suite
+  // =========================================================================
+
+  // 19.1 Registration, Definition Isolation, and Validation
+  {
+    const pfWorld = new World();
+    const CMP_POS = 310;
+    const CMP_HP = 311;
+    const CMP_NAME = 312;
+    const CMP_SKILLS = 313;
+    const REL_SUMMON = 314;
+
+    pfWorld.registerComponent(CMP_POS);
+    pfWorld.registerComponent(CMP_HP);
+    pfWorld.registerComponent(CMP_NAME);
+    pfWorld.registerComponent(CMP_SKILLS);
+    pfWorld.registerComponent(REL_SUMMON);
+    pfWorld.relationships.registerRelation(REL_SUMMON);
+
+    pfWorld.registerComponentSerializer(CMP_SKILLS, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: unknown[] }).items);
+        }
+        return val;
+      }
+    });
+
+    const rogueDef: PrefabDefinition = {
+      name: "Rogue",
+      components: [
+        { id: CMP_NAME, value: { title: "Shadow Rogue" } },
+        { id: CMP_HP, value: { current: 75, max: 75 } },
+        { id: CMP_SKILLS, value: new Set(["stealth", "backstab"]) }
+      ],
+      groups: ["STEALTH_UNITS", "AGILE"]
+    };
+
+    pfWorld.prefabs.register("Rogue", rogueDef);
+    assert.strictEqual(pfWorld.prefabs.has("Rogue"), true);
+
+    // Caller mutation of definition object must NOT corrupt stored template
+    rogueDef.components[1].value = { current: 9999, max: 9999 };
+    rogueDef.components.push({ id: CMP_POS, value: { x: 99, y: 99 } });
+
+    const spawnedRogue = pfWorld.prefabs.spawn("Rogue");
+    assert.deepStrictEqual(pfWorld.getComponent(spawnedRogue, CMP_HP), { current: 75, max: 75 });
+    assert.strictEqual(pfWorld.hasComponent(spawnedRogue, CMP_POS), false);
+
+    // Invalid registration error paths
+    assert.throws(() => pfWorld.prefabs.register("", rogueDef), /\[ECS\] Invalid prefab name/);
+    // @ts-expect-error testing invalid input
+    assert.throws(() => pfWorld.prefabs.register("Bad", null), /\[ECS\] Invalid prefab definition/);
+    // @ts-expect-error testing invalid input
+    assert.throws(() => pfWorld.prefabs.register("Bad", { name: "Bad", components: "not-arr" }), /\[ECS\] Invalid prefab definition/);
+    assert.throws(
+      () => pfWorld.prefabs.register("BadComp", { name: "BadComp", components: [{ id: -1, value: {} }] }),
+      /\[ECS\] Invalid Component ID/
+    );
+    assert.throws(
+      () => pfWorld.prefabs.register("UnregRes", { name: "UnregRes", components: [{ id: 50, value: {} }] }),
+      /\[ECS\] Cannot use unregistered reserved component ID/
+    );
+  }
+
+  // 19.2 Basic Spawning, Component Isolation, and Overrides
+  {
+    const pfWorld = new World();
+    const CMP_HP = 320;
+    const CMP_POS = 321;
+    const CMP_NAME = 322;
+    const CMP_EXTRA = 323;
+
+    pfWorld.registerComponent(CMP_HP);
+    pfWorld.registerComponent(CMP_POS);
+    pfWorld.registerComponent(CMP_NAME);
+    pfWorld.registerComponent(CMP_EXTRA);
+
+    pfWorld.prefabs.register("Warrior", {
+      name: "Warrior",
+      components: [
+        { id: CMP_NAME, value: { name: "Fighter" } },
+        { id: CMP_HP, value: { current: 100, max: 100 } },
+        { id: CMP_POS, value: { x: 10, y: 10 } }
+      ]
+    });
+
+    const w1 = pfWorld.prefabs.spawn("Warrior");
+    const w2 = pfWorld.prefabs.spawn("Warrior");
+    assert.notStrictEqual(w1, w2);
+    assert.strictEqual(pfWorld.isValid(w1), true);
+    assert.strictEqual(pfWorld.isValid(w2), true);
+
+    // Verify component instances are independent
+    const hp1 = pfWorld.getComponent<{ current: number }>(w1, CMP_HP)!;
+    const hp2 = pfWorld.getComponent<{ current: number }>(w2, CMP_HP)!;
+    assert.notStrictEqual(hp1, hp2);
+    hp1.current = 40;
+    assert.strictEqual(hp1.current, 40);
+    assert.strictEqual(hp2.current, 100);
+
+    // Spawning with overrides (both existing and extra components)
+    const overrides = new Map<number, unknown>([
+      [CMP_NAME, { name: "Champion" }],
+      [CMP_POS, { x: 50, y: 50 }],
+      [CMP_EXTRA, { armor: 15 }]
+    ]);
+
+    const champ = pfWorld.prefabs.spawn("Warrior", overrides);
+    assert.deepStrictEqual(pfWorld.getComponent(champ, CMP_NAME), { name: "Champion" });
+    assert.deepStrictEqual(pfWorld.getComponent(champ, CMP_POS), { x: 50, y: 50 });
+    assert.deepStrictEqual(pfWorld.getComponent(champ, CMP_EXTRA), { armor: 15 });
+    assert.deepStrictEqual(pfWorld.getComponent(champ, CMP_HP), { current: 100, max: 100 });
+
+    // Mutating override map source object must not corrupt spawned entity
+    (overrides.get(CMP_POS) as { x: number; y: number }).x = 999;
+    assert.strictEqual(pfWorld.getComponent<{ x: number }>(champ, CMP_POS)?.x, 50);
+  }
+
+  // 19.3 Metadata (Tags, Groups) and Failure Atomicity
+  {
+    const pfWorld = new World();
+    const CMP_HP = 330;
+    pfWorld.registerComponent(CMP_HP);
+
+    pfWorld.prefabs.register("Leader", {
+      name: "Leader",
+      components: [{ id: CMP_HP, value: { current: 200 } }],
+      groups: ["COMMANDERS", "ELITE"]
+    });
+
+    const leader1 = pfWorld.prefabs.spawnWithTag("Leader", "COMMANDER_TAG");
+    assert.strictEqual(pfWorld.tags.get("COMMANDER_TAG"), leader1);
+    assert.strictEqual(pfWorld.groups.has("COMMANDERS", leader1), true);
+    assert.strictEqual(pfWorld.groups.has("ELITE", leader1), true);
+
+    // Tag collision on spawnWithTag must fail atomically without leaking entity
+    const countBefore = pfWorld.getEntities(Aspect.EMPTY).length;
+    assert.throws(
+      () => pfWorld.prefabs.spawnWithTag("Leader", "COMMANDER_TAG"),
+      /Tag Collision! Tag 'COMMANDER_TAG'/i
+    );
+    const countAfter = pfWorld.getEntities(Aspect.EMPTY).length;
+    assert.strictEqual(countAfter, countBefore, "Failed spawnWithTag must not leave orphaned entities in world");
+    assert.strictEqual(pfWorld.tags.get("COMMANDER_TAG"), leader1);
+  }
+
+  // 19.4 Relationships, Forward Tag References, and Omission
+  {
+    const pfWorld = new World();
+    const CMP_NAME = 340;
+    const REL_TARGET = 341;
+    const REL_GUARD = 342;
+
+    pfWorld.registerComponent(CMP_NAME);
+    pfWorld.registerComponent(REL_TARGET);
+    pfWorld.registerComponent(REL_GUARD);
+    pfWorld.relationships.registerRelation(REL_TARGET);
+    pfWorld.relationships.registerRelation(REL_GUARD);
+
+    const castle = pfWorld.createEntity();
+    pfWorld.tags.register("castle", castle);
+
+    const boss = pfWorld.createEntity();
+    pfWorld.tags.register("boss", boss);
+
+    pfWorld.prefabs.register("Minion", {
+      name: "Minion",
+      components: [{ id: CMP_NAME, value: { name: "Goblin Minion" } }],
+      relationships: [
+        { id: REL_GUARD, targetTag: "castle" },
+        { id: REL_TARGET, targetTag: "boss" },
+        { id: REL_TARGET, targetTag: "missing_beacon" } // Safely omitted
+      ]
+    });
+
+    const minion = pfWorld.prefabs.spawn("Minion");
+    assert.strictEqual(pfWorld.relationships.getTargets(minion, REL_GUARD), castle);
+    assert.strictEqual(pfWorld.relationships.getTargets(minion, REL_TARGET), boss);
+    assert.strictEqual(pfWorld.relationships.countRelated(REL_GUARD, castle), 1);
+    assert.strictEqual(pfWorld.relationships.countRelated(REL_TARGET, boss), 1);
+  }
+
+  // 19.5 Interaction with duplicateEntity, Deletion, and ID Recycling
+  {
+    const pfWorld = new World();
+    const CMP_HP = 350;
+    const CMP_NAME = 351;
+    const REL_LINK = 352;
+
+    pfWorld.registerComponent(CMP_HP);
+    pfWorld.registerComponent(CMP_NAME);
+    pfWorld.registerComponent(REL_LINK);
+    pfWorld.relationships.registerRelation(REL_LINK);
+
+    const anchor = pfWorld.createEntity();
+    pfWorld.tags.register("anchor", anchor);
+
+    pfWorld.prefabs.register("Sentinel", {
+      name: "Sentinel",
+      components: [
+        { id: CMP_HP, value: { current: 150 } },
+        { id: CMP_NAME, value: { title: "Guardian" } }
+      ],
+      relationships: [{ id: REL_LINK, targetTag: "anchor" }],
+      groups: ["DEFENDERS"]
+    });
+
+    const s1 = pfWorld.prefabs.spawnWithTag("Sentinel", "SENTINEL_ALPHA");
+    assert.strictEqual(pfWorld.tags.get("SENTINEL_ALPHA"), s1);
+    assert.strictEqual(pfWorld.groups.has("DEFENDERS", s1), true);
+
+    // duplicateEntity vs Prefab spawning
+    const sClone = pfWorld.duplicateEntity(s1);
+    assert.notStrictEqual(sClone, s1);
+    assert.strictEqual(pfWorld.groups.has("DEFENDERS", sClone), true, "Clone inherits groups");
+    assert.strictEqual(pfWorld.tags.getTag(sClone), undefined, "Clone does NOT inherit unique tag");
+    assert.strictEqual(pfWorld.tags.get("SENTINEL_ALPHA"), s1, "Tag remains with original");
+
+    // Deleting spawned instance cleans up tags, groups, and relationships for s1
+    const s1Index = s1 >> 16;
+    pfWorld.deleteEntity(s1);
+    assert.strictEqual(pfWorld.isValid(s1), false);
+    assert.strictEqual(pfWorld.tags.get("SENTINEL_ALPHA"), undefined);
+    assert.strictEqual(pfWorld.groups.has("DEFENDERS", s1), false);
+    assert.strictEqual(pfWorld.relationships.countRelated(REL_LINK, anchor), 1, "sClone still links to anchor");
+
+    // Deleting sClone removes the remaining relationship
+    pfWorld.deleteEntity(sClone);
+    assert.strictEqual(pfWorld.relationships.countRelated(REL_LINK, anchor), 0);
+
+    // Recycling entity index slot with incremented generation does NOT inherit old prefab tags/groups
+    const recycledClone = pfWorld.createEntity();
+    assert.strictEqual(recycledClone >> 16, sClone >> 16);
+    assert.notStrictEqual(recycledClone, sClone);
+    assert.strictEqual(pfWorld.tags.getTag(recycledClone), undefined);
+    assert.strictEqual(pfWorld.groups.has("DEFENDERS", recycledClone), false);
+
+    const recycledS1 = pfWorld.createEntity();
+    assert.strictEqual(recycledS1 >> 16, s1Index);
+    assert.notStrictEqual(recycledS1, s1);
+    assert.strictEqual(pfWorld.tags.getTag(recycledS1), undefined);
+    assert.strictEqual(pfWorld.groups.has("DEFENDERS", recycledS1), false);
+  }
+
+  // 19.6 Persistence & Query Consistency
+  {
+    const pfWorld = new World();
+    const CMP_POS = 360;
+    const CMP_HP = 361;
+    const CMP_ITEMS = 362;
+
+    pfWorld.registerComponent(CMP_POS);
+    pfWorld.registerComponent(CMP_HP);
+    pfWorld.registerComponent(CMP_ITEMS);
+
+    pfWorld.registerComponentSerializer(CMP_ITEMS, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: unknown[] }).items);
+        }
+        return val;
+      }
+    });
+
+    pfWorld.prefabs.register("Gorgon", {
+      name: "Gorgon",
+      components: [
+        { id: CMP_HP, value: { current: 300 } },
+        { id: CMP_POS, value: { x: 5, y: 5 } },
+        { id: CMP_ITEMS, value: new Set(["gorgon_eye", "snake_fang"]) }
+      ],
+      groups: ["MYTHICAL", "BOSSES"]
+    });
+
+    const g1 = pfWorld.prefabs.spawnWithTag("Gorgon", "GORGON_BOSS");
+
+    // Query consistency before snapshot
+    const aspect = Aspect.all(CMP_HP, CMP_POS);
+    assert.ok(pfWorld.getEntities(aspect).includes(g1));
+    assert.ok(pfWorld.getEntitiesByGroup("MYTHICAL").includes(g1));
+    assert.strictEqual(pfWorld.tags.get("GORGON_BOSS"), g1);
+
+    // Save and load snapshot
+    const snapshot = pfWorld.saveSnapshot();
+
+    const loadWorld = new World();
+    loadWorld.registerComponent(CMP_POS);
+    loadWorld.registerComponent(CMP_HP);
+    loadWorld.registerComponent(CMP_ITEMS);
+    loadWorld.registerComponentSerializer(CMP_ITEMS, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: unknown[] }).items);
+        }
+        return val;
+      }
+    });
+
+    loadWorld.loadSnapshot(snapshot);
+
+    const restoredG1 = loadWorld.tags.get("GORGON_BOSS");
+    assert.strictEqual(restoredG1, g1);
+    assert.strictEqual(loadWorld.isValid(restoredG1!), true);
+    assert.deepStrictEqual(loadWorld.getComponent(restoredG1!, CMP_HP), { current: 300 });
+    assert.deepStrictEqual(loadWorld.getComponent(restoredG1!, CMP_POS), { x: 5, y: 5 });
+    const items = loadWorld.getComponent<Set<string>>(restoredG1!, CMP_ITEMS);
+    assert.ok(items instanceof Set);
+    assert.strictEqual(items.has("gorgon_eye"), true);
+    assert.strictEqual(items.has("snake_fang"), true);
+    assert.ok(loadWorld.getEntitiesByGroup("MYTHICAL").includes(restoredG1!));
+    assert.ok(loadWorld.getEntities(aspect).includes(restoredG1!));
   }
 
   console.log("World tests completed!");

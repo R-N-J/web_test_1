@@ -172,6 +172,13 @@ export class World {
   }
 
   /**
+   * Creates a deep clone of a component value using registered serializers or the default deep-clone policy.
+   */
+  public cloneValue(id: ComponentId, value: unknown): unknown {
+    return this.components.cloneValue(id, value);
+  }
+
+  /**
    * Subscribes a callback to be called when a component is added to an entity.
    */
   public subscribeOnAdd(id: ComponentId, observer: ComponentObserver): void {

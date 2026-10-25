@@ -682,10 +682,10 @@ While they might seem similar at first glance, each serves a specific purpose. C
 
 ## 7. Prefabs
 
-Prefabs are templates used to spawn complex entities with predefined components and relationships.
+Prefabs are templates used to spawn complex entities with predefined components, groups, and relationships.
 
 ### Defining a Prefab
-Prefabs are defined as objects containing component IDs and their initial values.
+Prefabs are defined as objects containing component IDs and their initial values, with optional `groups` and `relationships`.
 
 ```typescript
 const ORC_PREFAB = {
@@ -694,7 +694,8 @@ const ORC_PREFAB = {
     { id: Components.POSITION, value: { x: 0, y: 0 } },
     { id: Components.HEALTH, value: { current: 20, max: 20 } },
     { id: Components.RENDER, value: { char: 'O', color: 'green' } }
-  ]
+  ],
+  groups: ['ENEMIES', 'LIVING']
 };
 
 world.prefabs.register('orc', ORC_PREFAB);
@@ -705,11 +706,21 @@ world.prefabs.register('orc', ORC_PREFAB);
 // Spawn with default values
 const orc = world.prefabs.spawn('orc');
 
+// Spawn and assign a unique tag atomically
+const hero = world.prefabs.spawnWithTag('hero', 'PLAYER');
+
 // Spawn with overrides
 const spawnedOrc = world.prefabs.spawn('orc', new Map([
   [Components.POSITION, { x: 5, y: 5 }]
 ]));
 ```
+
+### Key Guarantees:
+1. **Template & Instance Isolation**: Registered definitions are cloned during registration so external caller mutations cannot corrupt stored templates. Furthermore, component values are deep-cloned when spawning each entity, ensuring multiple instances spawned from the same prefab never share mutable object references.
+2. **Metadata & Groups**: Prefab definitions support optional `groups?: string[]` to automatically assign spawned entities to specified groups upon creation.
+3. **Failure Atomicity**: If `spawnWithTag()` encounters a tag collision, the newly instantiated entity is cleaned up immediately, ensuring failed spawn calls do not leak orphaned entities into the world.
+4. **Relationship Resolution**: When prefabs declare `relationships` with `targetTag`, the relationship is linked if the target tag exists in the world, or safely omitted if the target is not present.
+5. **Lifecycle & Reset**: Prefab templates survive `world.clear()`, allowing immediate re-spawning into fresh world state. Call `world.prefabs.clear()` to remove all registered blueprints.
 
 ### Loading Prefabs Externally
 
@@ -1916,6 +1927,9 @@ While the `RelationshipManager` solves the "Ghost ID" problem, it maintains an i
 | `world.tags.getEntity(tag)` | Finds an entity by its unique tag. |
 | `world.groups.getEntities(g)`| Returns all entities in a group. |
 | `world.prefabs.spawn(name)` | Creates an entity from a template. |
+| `world.prefabs.spawnWithTag(n, t)`| Spawns entity and assigns tag atomically. |
+| `world.prefabs.has(name)` | Checks if a prefab template is registered. |
+| `world.prefabs.clear()` | Clears all registered prefab templates. |
 | `world.relationships.add(s,r,t)`| Links two entities. |
 | `world.relationships.registerRelation(id)`| Registers a relationship type for reverse indexing/snapshots. |
 | `world.scenes.switchTo(scene)` | Teardowns current scene and enters the next. |

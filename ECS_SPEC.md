@@ -335,6 +335,12 @@ These features belong to the framework layer.
 - Spawning a prefab creates a new entity with the configured components.
 - Spawning multiple instances must not accidentally share mutable component objects when independent instances are expected.
 - Invalid prefab definitions must produce actionable errors.
+- **PFB-001:** `PrefabManager.register(name, definition)` validates prefab names, component IDs, relationship IDs/target tags, and group metadata, storing an isolated clone of the definition to protect template storage from caller mutations.
+- **PFB-002:** `PrefabManager.spawn(name, overrides)` instantiates an entity, clones all component values using registered serializers or deep cloning, applies component overrides, assigns groups, and resolves targetTag relationships.
+- **PFB-003:** Spawning multiple instances from the same prefab produces completely independent mutable component instances with no shared object references.
+- **PFB-004:** `PrefabManager.spawnWithTag(name, tag, overrides)` creates the entity and registers the tag. If tag registration fails (e.g., tag collision), the newly created entity is cleaned up immediately to ensure failure atomicity without leaking orphaned entities.
+- **PFB-005:** Relationship resolution via `targetTag` resolves the target entity if present and valid in the world, or safely omits the link without throwing if the target tag does not exist.
+- **PFB-006:** Prefab templates remain registered across `World.clear()`, allowing immediate re-spawning into the reset world. `PrefabManager.clear()` explicitly removes all templates.
 
 ### 12.2 Assets
 
