@@ -1421,14 +1421,31 @@ Use Scenes to separate distinct logical phases of your game:
 The `SceneManager` (accessible via `world.scenes`) handles the transitions between scenes.
 
 ```typescript
-// Initializing and switching to the first scene
-world.scenes?.switchTo(new MainMenuScene());
+// Registering scenes for named switching
+world.scenes?.register(new MainMenuScene());
+world.scenes?.register(new DungeonScene('ICE'));
+
+// Switching by name or by direct Scene instance
+world.scenes?.switchTo('MainMenu');
+// or
+world.scenes?.switchTo(new DungeonScene('FIRE'));
 ```
 
 When `switchTo(nextScene)` is called:
-1.  **onExit**: The current scene's `onExit` method is called.
-2.  **world.clear()**: The World is completely reset. All entities, tags, and groups are deleted, and entity generations are advanced so pre-reset IDs cannot collide with new entities.
-3.  **onEnter**: The new scene's `onEnter` method is called.
+1.  **Validation**: Validates that `nextScene` is a valid `Scene` object or registered scene name before modifying world or active scene state.
+2.  **onExit**: The current scene's `onExit` method is called.
+3.  **world.clear()**: The World is completely reset. All entities, tags, and groups are deleted, and entity generations are advanced so pre-reset IDs cannot collide with new entities. Persistent systems in Scheduler are automatically rebound.
+4.  **onEnter**: The new scene's `onEnter` method is called.
+
+**SceneManager Helper Methods:**
+- `world.scenes.register(scene)`: Registers a scene template by name.
+- `world.scenes.registerAll(scenes)`: Registers an array of scenes.
+- `world.scenes.has(name)`: Checks if a scene name is registered.
+- `world.scenes.get(name)`: Retrieves a registered scene by name.
+- `world.scenes.unregister(name)`: Removes a registered scene definition from the registry. Unregistering does not deactivate or alter a currently active scene with that name; the active scene remains running, though future name-based switching to that name requires re-registration.
+- `world.scenes.clear()`: Clears registered scene definitions only. It does not invoke `onExit()`, does not clear the `World`, and does not deactivate the currently active scene. The active scene remains running, though subsequent name-based switches require registered scene names.
+- `world.scenes.getCurrentScene()`: Returns the active `Scene` instance.
+- `world.scenes.getCurrentSceneName()`: Returns the name of the active scene.
 
 ### Tutorial: Implementing Scenes
 

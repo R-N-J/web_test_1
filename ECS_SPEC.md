@@ -296,6 +296,12 @@ The framework's `Scheduler` and `TurnManager` must have clearly separated respon
 
 A scene transition must define which data belongs to the outgoing scene, which data survives, and which objects are reinitialized. The lifecycle must not depend on an undocumented assumption that clearing entities also resets every other subsystem.
 
+- **SCN-001:** `SceneManager.switchTo(nextScene)` validates that `nextScene` provides `name` (non-empty string), `onEnter` (function), and `onExit` (function) or resolves a registered scene name, throwing actionable errors early before teardown or reset on invalid input.
+- **SCN-002:** Scene transition executes lifecycle hooks in strict order: `currentScene.onExit(world)` -> `world.clear()` -> `currentScene = nextScene` -> `nextScene.onEnter(world)`. On initial switch, `onExit` is omitted.
+- **SCN-003:** When `onExit` throws, the manager propagates the exception, retains the previous `currentScene` reference, and does not proceed to its own `world.clear()` or switch to the target. Any callback side effects that occurred before the exception are not rolled back. When `onEnter` throws, the world has already been cleared, `currentScene` is assigned to the target scene, and the error propagates, leaving the manager ready for subsequent fallback transitions.
+- **SCN-004:** `SceneManager.register(scene)`, `registerAll(scenes)`, `unregister(name)`, `get(name)`, `has(name)`, and `clear()` provide scene template registry management, allowing named transitions via `switchTo(name)`.
+- **SCN-005:** All pre-switch entity IDs are invalidated upon scene transition via generation advancement; persistent scheduler systems are automatically rebound; and registered prefabs and custom relationships persist across scene transitions.
+
 ## 11. Tags, groups, and relationships
 
 These are supporting features, not prerequisites for core archetype correctness.
