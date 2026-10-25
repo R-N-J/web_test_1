@@ -2308,6 +2308,509 @@ export function testWorld() {
     );
   }
 
+  // ==========================================
+  // Task 15: Query Iteration and Structural Mutation Safety
+  // ==========================================
+
+  // 15.1 Query API agreement across aspects, groups, and tags
+  {
+    const qWorld = new World();
+    const C_A = 160;
+    const C_B = 161;
+    const C_C = 162;
+    const C_D = 163;
+    qWorld.registerComponent(C_A);
+    qWorld.registerComponent(C_B);
+    qWorld.registerComponent(C_C);
+    qWorld.registerComponent(C_D);
+
+    const e1 = qWorld.buildEntity().with(C_A, { val: 1 }).with(C_B, { val: 10 }).tag("hero").group("party").commit();
+    const e2 = qWorld.buildEntity().with(C_B, { val: 20 }).with(C_C, { val: 200 }).group("party").commit();
+    const e3 = qWorld.buildEntity().with(C_A, { val: 3 }).with(C_C, { val: 300 }).group("monsters").commit();
+    const e4 = qWorld.buildEntity().with(C_A, { val: 4 }).with(C_B, { val: 40 }).with(C_C, { val: 400 }).with(C_D, { val: 4000 }).tag("boss").group("monsters").commit();
+
+    assert.ok(qWorld.isValid(e1) && qWorld.isValid(e2) && qWorld.isValid(e3) && qWorld.isValid(e4));
+
+    const testAspects = [
+      Aspect.all(C_A),
+      Aspect.all(C_A, C_B),
+      Aspect.one(C_B, C_C),
+      Aspect.exclude(C_D),
+      Aspect.one(C_A, C_B).and(Aspect.one(C_C, C_D)),
+      Aspect.EMPTY,
+      Aspect.all(),
+      Aspect.exclude(),
+      Aspect.one(), // unsatisfiable
+    ];
+
+    for (const asp of testAspects) {
+      const arr = qWorld.getEntities(asp);
+      const iter = Array.from(qWorld.view(asp));
+      const cnt = qWorld.count(asp);
+      const first = qWorld.findFirst(asp);
+      const archs = qWorld.getArchetypes(asp);
+
+      // 1. Array and Iterator agreement (membership and length)
+      assert.deepStrictEqual(new Set(iter), new Set(arr), `Iterator and Array forms must yield identical entity membership for aspect ${asp.allMask}`);
+      assert.strictEqual(iter.length, arr.length, `Iterator and Array forms must yield same number of items`);
+
+      // 2. Count agreement
+      assert.strictEqual(cnt, arr.length, `world.count() must equal getEntities().length`);
+
+      // 3. No duplicate entity IDs
+      const uniqueSet = new Set(arr);
+      assert.strictEqual(uniqueSet.size, arr.length, `Query results must not contain duplicate entity IDs`);
+
+      // 4. findFirst contract
+      if (arr.length === 0) {
+        assert.strictEqual(first, undefined, `findFirst must return undefined when no entities match`);
+      } else {
+        assert.ok(first !== undefined && arr.includes(first), `findFirst must return an entity present in matching results`);
+        assert.ok(qWorld.matches(first!, asp), `findFirst entity must actually match the aspect`);
+      }
+
+      // 5. Archetype membership consistency
+      const entitiesFromArchs: number[] = [];
+      for (const arch of archs) {
+        assert.ok(asp.matches(arch.mask), `getArchetypes() must only return matching archetypes`);
+        entitiesFromArchs.push(...arch.entities);
+      }
+      assert.deepStrictEqual(new Set(entitiesFromArchs), new Set(arr), `Entities aggregated from matching archetypes must equal query result membership`);
+      assert.strictEqual(entitiesFromArchs.length, arr.length, `Entities aggregated from archetypes must match query result count`);
+    }
+
+    // Group API agreement
+    for (const grp of ["party", "monsters", "emptyGroup"]) {
+      const grpArr = qWorld.getEntitiesByGroup(grp);
+      const grpIter = Array.from(qWorld.viewGroup(grp));
+      const grpCnt = qWorld.countGroup(grp);
+      const grpFirst = qWorld.findFirstInGroup(grp);
+
+      assert.deepStrictEqual(new Set(grpIter), new Set(grpArr));
+      assert.strictEqual(grpIter.length, grpArr.length);
+      assert.strictEqual(grpCnt, grpArr.length);
+      if (grpArr.length === 0) {
+        assert.strictEqual(grpFirst, undefined);
+      } else {
+        assert.ok(grpFirst !== undefined && grpArr.includes(grpFirst));
+        assert.ok(qWorld.groups.has(grp, grpFirst!));
+      }
+    }
+
+    // Tag API agreement
+    for (const tag of ["hero", "boss", "nonExistent"]) {
+      const tagArr = qWorld.getEntitiesByTag(tag);
+      const tagIter = Array.from(qWorld.viewTag(tag));
+      const tagCnt = qWorld.countTag(tag);
+      const tagFirst = qWorld.findFirstWithTag(tag);
+
+      assert.deepStrictEqual(new Set(tagIter), new Set(tagArr));
+      assert.strictEqual(tagIter.length, tagArr.length);
+      assert.strictEqual(tagCnt, tagArr.length);
+      if (tagArr.length === 0) {
+        assert.strictEqual(tagFirst, undefined);
+      } else {
+        assert.ok(tagFirst !== undefined && tagArr.includes(tagFirst));
+        assert.strictEqual(qWorld.tags.getTag(tagFirst!), tag);
+      }
+    }
+  }
+
+  // 15.2 Component changes during iteration
+  {
+    const mutWorld = new World();
+    const CMP_POS = 170;
+    const CMP_VEL = 171;
+    const CMP_FLY = 172;
+    mutWorld.registerComponent(CMP_POS);
+    mutWorld.registerComponent(CMP_VEL);
+    mutWorld.registerComponent(CMP_FLY);
+
+    const ent1 = mutWorld.buildEntity().with(CMP_POS, { x: 1 }).with(CMP_VEL, { v: 1 }).commit();
+    const ent2 = mutWorld.buildEntity().with(CMP_POS, { x: 2 }).with(CMP_VEL, { v: 2 }).commit();
+    const ent3 = mutWorld.buildEntity().with(CMP_POS, { x: 3 }).with(CMP_VEL, { v: 3 }).commit();
+
+    const aspect = Aspect.all(CMP_POS, CMP_VEL);
+
+    // 1. Deferred mode: adding and removing components during world.view()
+    mutWorld.setDeferred(true);
+    const visitedEntities: number[] = [];
+
+    for (const entity of mutWorld.view(aspect)) {
+      visitedEntities.push(entity);
+      if (entity === ent1) {
+        // Transmute ent1 out of aspect (remove CMP_VEL)
+        mutWorld.removeComponent(entity, CMP_VEL);
+      } else if (entity === ent2) {
+        // Transmute ent2 to new archetype POS+VEL+FLY (still matches aspect)
+        mutWorld.addComponent(entity, CMP_FLY, { altitude: 100 });
+      }
+    }
+
+    // During deferred iteration, all 3 entities were visited exactly once
+    assert.strictEqual(visitedEntities.length, 3);
+    assert.deepStrictEqual(new Set(visitedEntities), new Set([ent1, ent2, ent3]));
+
+    // Pre-flush query still returns all 3 entities
+    assert.strictEqual(mutWorld.count(aspect), 3);
+
+    // Flush deferred operations
+    mutWorld.setDeferred(false);
+
+    // Post-flush: ent1 has POS only (does not match POS+VEL), ent2 has POS+VEL+FLY (matches), ent3 has POS+VEL (matches)
+    assert.strictEqual(mutWorld.hasComponent(ent1, CMP_VEL), false);
+    assert.strictEqual(mutWorld.hasComponent(ent2, CMP_FLY), true);
+    const postFlushEntities = mutWorld.getEntities(aspect);
+    assert.strictEqual(postFlushEntities.length, 2);
+    assert.deepStrictEqual(new Set(postFlushEntities), new Set([ent2, ent3]));
+    assert.ok(!postFlushEntities.includes(ent1));
+
+    // 2. Snapshot array iteration with immediate mutations
+    const visitedSnapshot: number[] = [];
+    for (const entity of mutWorld.getEntities(aspect)) {
+      visitedSnapshot.push(entity);
+      // Immediately add CMP_FLY specifically to ent3
+      if (entity === ent3) {
+        mutWorld.addComponent(entity, CMP_FLY, { altitude: 200 });
+      }
+    }
+    assert.strictEqual(visitedSnapshot.length, 2);
+    assert.deepStrictEqual(new Set(visitedSnapshot), new Set([ent2, ent3]));
+    assert.strictEqual(mutWorld.hasComponent(ent3, CMP_FLY), true);
+    assert.deepStrictEqual(mutWorld.getComponent(ent2, CMP_FLY), { altitude: 100 });
+    assert.deepStrictEqual(mutWorld.getComponent(ent3, CMP_FLY), { altitude: 200 });
+    const flyEntities = mutWorld.getEntities(Aspect.all(CMP_POS, CMP_VEL, CMP_FLY));
+    assert.strictEqual(flyEntities.length, 2);
+    assert.deepStrictEqual(new Set(flyEntities), new Set([ent2, ent3]));
+  }
+
+  // 15.3 Deletion during iteration and swap-and-pop relocation
+  {
+    const delWorld = new World();
+    const D_A = 180;
+    const D_B = 181;
+    delWorld.registerComponent(D_A);
+    delWorld.registerComponent(D_B);
+
+    const d1 = delWorld.buildEntity().with(D_A, { id: 1 }).with(D_B, { val: "one" }).commit();
+    const d2 = delWorld.buildEntity().with(D_A, { id: 2 }).with(D_B, { val: "two" }).commit();
+    const d3 = delWorld.buildEntity().with(D_A, { id: 3 }).with(D_B, { val: "three" }).commit();
+    const d4 = delWorld.buildEntity().with(D_A, { id: 4 }).with(D_B, { val: "four" }).commit();
+
+    const aspect = Aspect.all(D_A, D_B);
+
+    // 1. Deferred deletion during streaming iteration (deleting current entity and another non-last entity)
+    delWorld.setDeferred(true);
+    const visitedInDeferred: number[] = [];
+
+    for (const entity of delWorld.view(aspect)) {
+      visitedInDeferred.push(entity);
+      if (entity === d1) {
+        // Delete current entity
+        delWorld.deleteEntity(d1);
+      } else if (entity === d2) {
+        // Delete another entity (d3) that hasn't been visited yet
+        delWorld.deleteEntity(d3);
+      }
+    }
+
+    // Deferred iteration visited all 4 entities without skipping or crashing
+    assert.strictEqual(visitedInDeferred.length, 4);
+    assert.deepStrictEqual(new Set(visitedInDeferred), new Set([d1, d2, d3, d4]));
+
+    // Flush deletions
+    delWorld.setDeferred(false);
+
+    // Post-flush: d1 and d3 are deleted; d2 and d4 remain valid and matching
+    assert.strictEqual(delWorld.isValid(d1), false);
+    assert.strictEqual(delWorld.isValid(d3), false);
+    assert.strictEqual(delWorld.isValid(d2), true);
+    assert.strictEqual(delWorld.isValid(d4), true);
+    assert.deepStrictEqual(new Set(delWorld.getEntities(aspect)), new Set([d2, d4]));
+
+    // 2. Snapshot iteration with immediate deletion and swap-and-pop relocation
+    const d5 = delWorld.buildEntity().with(D_A, { id: 5 }).with(D_B, { val: "five" }).commit();
+    const d6 = delWorld.buildEntity().with(D_A, { id: 6 }).with(D_B, { val: "six" }).commit();
+    assert.ok(delWorld.isValid(d5) && delWorld.isValid(d6));
+
+    const snapshotList = delWorld.getEntities(aspect);
+    assert.strictEqual(snapshotList.length, 4);
+
+    // Select the second-to-last entry (an unvisited, non-last entity in the archetype) and the last entity
+    const targetToDelete = snapshotList[snapshotList.length - 2];
+    const lastEntity = snapshotList[snapshotList.length - 1];
+    const lastEntityVal = delWorld.getComponent(lastEntity, D_B);
+    const firstEntity = snapshotList[0];
+
+    const processedEntities: number[] = [];
+    for (const entity of snapshotList) {
+      if (!delWorld.isValid(entity)) continue;
+      processedEntities.push(entity);
+      if (entity === firstEntity) {
+        // Trigger deletion of the unvisited, non-last entity while processing the first entry
+        delWorld.deleteEntity(targetToDelete);
+      }
+    }
+
+    // Target entity is now invalid
+    assert.strictEqual(delWorld.isValid(targetToDelete), false);
+
+    // Last entity remains valid and its component values are preserved after swap-and-pop relocation
+    assert.strictEqual(delWorld.isValid(lastEntity), true);
+    assert.deepStrictEqual(delWorld.getComponent(lastEntity, D_B), lastEntityVal);
+
+    // Iteration skipped the invalidated entity and processed all valid remaining snapshot entries
+    const expectedRemaining = snapshotList.filter((e) => e !== targetToDelete);
+    assert.strictEqual(processedEntities.length, snapshotList.length - 1);
+    assert.deepStrictEqual(new Set(processedEntities), new Set(expectedRemaining));
+    assert.deepStrictEqual(new Set(delWorld.getEntities(aspect)), new Set(expectedRemaining));
+  }
+
+  // 15.4 Entity creation during iteration
+  {
+    const createWorld = new World();
+    const C_X = 190;
+    createWorld.registerComponent(C_X);
+
+    const eInit1 = createWorld.buildEntity().with(C_X, { v: 1 }).commit();
+    const eInit2 = createWorld.buildEntity().with(C_X, { v: 2 }).commit();
+
+    const aspect = Aspect.all(C_X);
+
+    // 1. Deferred creation during view()
+    createWorld.setDeferred(true);
+    const visited: number[] = [];
+    let spawnedInDeferred: number = -1;
+
+    for (const entity of createWorld.view(aspect)) {
+      visited.push(entity);
+      if (entity === eInit1) {
+        spawnedInDeferred = createWorld.buildEntity().with(C_X, { v: 99 }).commit();
+      }
+    }
+
+    // Active iteration yielded only pre-existing matching entities
+    assert.strictEqual(visited.length, 2);
+    assert.deepStrictEqual(new Set(visited), new Set([eInit1, eInit2]));
+    assert.strictEqual(createWorld.count(aspect), 2);
+
+    // Flush deferred operations
+    createWorld.setDeferred(false);
+
+    // Post-flush: newly created entity is now present in queries
+    assert.strictEqual(createWorld.count(aspect), 3);
+    assert.ok(createWorld.getEntities(aspect).includes(spawnedInDeferred));
+
+    // 2. Snapshot iteration with immediate creation
+    const snapshotVisited: number[] = [];
+    let spawnedInSnapshot: number = -1;
+
+    for (const entity of createWorld.getEntities(aspect)) {
+      snapshotVisited.push(entity);
+      if (entity === eInit1) {
+        spawnedInSnapshot = createWorld.buildEntity().with(C_X, { v: 100 }).commit();
+      }
+    }
+
+    // Snapshot iteration is fixed to snapshot length at time of query
+    assert.strictEqual(snapshotVisited.length, 3);
+    assert.ok(!snapshotVisited.includes(spawnedInSnapshot));
+
+    // Subsequent query includes newly created entity
+    assert.strictEqual(createWorld.count(aspect), 4);
+    assert.ok(createWorld.getEntities(aspect).includes(spawnedInSnapshot));
+  }
+
+  // 15.5 Deferred operations lifecycle and query consistency
+  {
+    const defWorld = new World();
+    const COMP_1 = 200;
+    const COMP_2 = 201;
+    const COMP_3 = 202;
+    defWorld.registerComponent(COMP_1);
+    defWorld.registerComponent(COMP_2);
+    defWorld.registerComponent(COMP_3);
+
+    const entA = defWorld.buildEntity().with(COMP_1, { name: "A" }).commit();
+    const entB = defWorld.buildEntity().with(COMP_1, { name: "B" }).with(COMP_2, { val: 2 }).commit();
+    const entC = defWorld.buildEntity().with(COMP_2, { val: 3 }).commit();
+
+    const asp1 = Aspect.all(COMP_1);
+    const asp2 = Aspect.all(COMP_2);
+    const asp12 = Aspect.all(COMP_1, COMP_2);
+
+    // Verify baseline query state
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp1)), new Set([entA, entB]));
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp2)), new Set([entB, entC]));
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp12)), new Set([entB]));
+
+    // Enter deferred mode
+    defWorld.setDeferred(true);
+
+    // Queue mutations:
+    // 1. Add COMP_2 to entA (will match asp12)
+    defWorld.addComponent(entA, COMP_2, { val: 1 });
+    // 2. Remove COMP_1 from entB (will no longer match asp1 or asp12)
+    defWorld.removeComponent(entB, COMP_1);
+    // 3. Delete entC
+    defWorld.deleteEntity(entC);
+    // 4. Batch edit: create entD with COMP_1 and COMP_3
+    const entD = defWorld.buildEntity().with(COMP_1, { name: "D" }).with(COMP_3, { tag: "extra" }).commit();
+
+    // While deferred mode is active, queries MUST reflect pre-flush state (STR-004, STR-005)
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp1)), new Set([entA, entB]));
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp2)), new Set([entB, entC]));
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp12)), new Set([entB]));
+    assert.strictEqual(defWorld.count(asp1), 2);
+    assert.strictEqual(defWorld.count(asp2), 2);
+    assert.strictEqual(defWorld.count(asp12), 1);
+    assert.strictEqual(defWorld.isValid(entC), true);
+
+    // Flush deferred operations
+    defWorld.flush();
+
+    // After flush, all queries immediately reflect the applied mutations (STR-007)
+    assert.strictEqual(defWorld.isValid(entC), false);
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp1)), new Set([entA, entD]));
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp2)), new Set([entA, entB]));
+    assert.deepStrictEqual(new Set(defWorld.getEntities(asp12)), new Set([entA]));
+    assert.deepStrictEqual(new Set(defWorld.getEntities(Aspect.all(COMP_1, COMP_3))), new Set([entD]));
+
+    // Exit deferred mode safely
+    defWorld.setDeferred(false);
+  }
+
+  // 15.6 Cache invalidation and empty archetypes
+  {
+    const cacheWorld = new World();
+    const T_A = 210;
+    const T_B = 211;
+    cacheWorld.registerComponent(T_A);
+    cacheWorld.registerComponent(T_B);
+
+    const aspectA = Aspect.all(T_A);
+    const aspectB = Aspect.all(T_B);
+    const aspectAB = Aspect.all(T_A, T_B);
+
+    // Populate query cache
+    assert.strictEqual(cacheWorld.count(aspectA), 0);
+    assert.strictEqual(cacheWorld.count(aspectB), 0);
+    assert.strictEqual(cacheWorld.count(aspectAB), 0);
+
+    // 1. Create entities introducing archetypes A, B, and AB
+    const entityA = cacheWorld.buildEntity().with(T_A, { val: "A" }).commit();
+    const entityB = cacheWorld.buildEntity().with(T_B, { val: "B" }).commit();
+    const entityAB = cacheWorld.buildEntity().with(T_A, { val: "AB_A" }).with(T_B, { val: "AB_B" }).commit();
+
+    // Cached queries must accurately return matches without manual cache invalidation
+    assert.deepStrictEqual(new Set(cacheWorld.getEntities(aspectA)), new Set([entityA, entityAB]));
+    assert.deepStrictEqual(new Set(cacheWorld.getEntities(aspectB)), new Set([entityB, entityAB]));
+    assert.deepStrictEqual(new Set(cacheWorld.getEntities(aspectAB)), new Set([entityAB]));
+
+    // 2. Empty out archetype A by deleting entityA
+    cacheWorld.deleteEntity(entityA);
+
+    assert.deepStrictEqual(new Set(cacheWorld.getEntities(aspectA)), new Set([entityAB]));
+    assert.strictEqual(cacheWorld.count(aspectA), 1);
+    assert.strictEqual(cacheWorld.findFirst(aspectA), entityAB);
+
+    // 3. Empty out archetype AB by removing T_B from entityAB (moves entityAB to archetype A)
+    cacheWorld.removeComponent(entityAB, T_B);
+
+    // Archetype AB is now completely empty (0 entities)
+    assert.strictEqual(cacheWorld.count(aspectAB), 0);
+    assert.deepStrictEqual(cacheWorld.getEntities(aspectAB), []);
+    assert.strictEqual(cacheWorld.findFirst(aspectAB), undefined);
+    assert.deepStrictEqual(Array.from(cacheWorld.view(aspectAB)), []);
+
+    // Archetype A now contains entityAB
+    assert.deepStrictEqual(new Set(cacheWorld.getEntities(aspectA)), new Set([entityAB]));
+    assert.strictEqual(cacheWorld.count(aspectA), 1);
+
+    // 4. Re-populate archetype AB
+    const entityAB2 = cacheWorld.buildEntity().with(T_A, { val: "new_A" }).with(T_B, { val: "new_B" }).commit();
+    assert.deepStrictEqual(new Set(cacheWorld.getEntities(aspectAB)), new Set([entityAB2]));
+    assert.strictEqual(cacheWorld.count(aspectAB), 1);
+    assert.strictEqual(cacheWorld.findFirst(aspectAB), entityAB2);
+  }
+
+  // 15.7 Nested / reentrant queries
+  {
+    const nestWorld = new World();
+    const N_A = 220;
+    const N_B = 221;
+    nestWorld.registerComponent(N_A);
+    nestWorld.registerComponent(N_B);
+
+    const nA1 = nestWorld.buildEntity().with(N_A, { id: "a1" }).commit();
+    const nA2 = nestWorld.buildEntity().with(N_A, { id: "a2" }).commit();
+    const nB1 = nestWorld.buildEntity().with(N_B, { id: "b1" }).commit();
+    const nB2 = nestWorld.buildEntity().with(N_B, { id: "b2" }).commit();
+    const nB3 = nestWorld.buildEntity().with(N_B, { id: "b3" }).commit();
+
+    assert.ok(nestWorld.isValid(nA1) && nestWorld.isValid(nA2) && nestWorld.isValid(nB1) && nestWorld.isValid(nB2) && nestWorld.isValid(nB3));
+
+    const aspA = Aspect.all(N_A);
+    const aspB = Aspect.all(N_B);
+
+    // 1. Nested queries on different aspects
+    const pairs: [number, number][] = [];
+    for (const a of nestWorld.view(aspA)) {
+      for (const b of nestWorld.view(aspB)) {
+        pairs.push([a, b]);
+      }
+    }
+    assert.strictEqual(pairs.length, 2 * 3, "Cartesian product of nested view() streams must yield 6 pairs");
+    const expectedPairs = new Set([
+      `${nA1},${nB1}`, `${nA1},${nB2}`, `${nA1},${nB3}`,
+      `${nA2},${nB1}`, `${nA2},${nB2}`, `${nA2},${nB3}`,
+    ]);
+    const actualPairs = new Set(pairs.map(([a, b]) => `${a},${b}`));
+    assert.deepStrictEqual(actualPairs, expectedPairs);
+
+    // 2. Nested queries on the exact same aspect (reentrant query caching)
+    const selfPairs: [number, number][] = [];
+    for (const a1 of nestWorld.view(aspA)) {
+      for (const a2 of nestWorld.view(aspA)) {
+        selfPairs.push([a1, a2]);
+      }
+    }
+    assert.strictEqual(selfPairs.length, 2 * 2, "Reentrant query on identical aspect must yield 4 pairs");
+    const expectedSelfPairs = new Set([
+      `${nA1},${nA1}`, `${nA1},${nA2}`,
+      `${nA2},${nA1}`, `${nA2},${nA2}`,
+    ]);
+    const actualSelfPairs = new Set(selfPairs.map(([a1, a2]) => `${a1},${a2}`));
+    assert.deepStrictEqual(actualSelfPairs, expectedSelfPairs);
+
+    // 3. Nested queries with deferred mutations queued in inner loop (without duplicate additions)
+    nestWorld.setDeferred(true);
+    let innerExecutions = 0;
+    const queuedB = new Set<number>();
+
+    for (const a of nestWorld.view(aspA)) {
+      for (const b of nestWorld.view(aspB)) {
+        innerExecutions++;
+        if (!queuedB.has(b)) {
+          queuedB.add(b);
+          // Queue deferred component addition once per B entity
+          nestWorld.addComponent(b, N_A, { id: `converted_${b}_from_${a}` });
+        }
+      }
+    }
+
+    assert.strictEqual(innerExecutions, 6);
+    assert.strictEqual(queuedB.size, 3);
+    nestWorld.setDeferred(false); // flush
+
+    // After flush, all B entities now also have N_A
+    assert.strictEqual(nestWorld.count(aspA), 2 + 3);
+    assert.deepStrictEqual(new Set(nestWorld.getEntities(aspA)), new Set([nA1, nA2, nB1, nB2, nB3]));
+    assert.strictEqual(nestWorld.hasComponent(nB1, N_A), true);
+    assert.strictEqual(nestWorld.hasComponent(nB2, N_A), true);
+    assert.strictEqual(nestWorld.hasComponent(nB3, N_A), true);
+  }
+
   console.log("World tests completed!");
 }
 
