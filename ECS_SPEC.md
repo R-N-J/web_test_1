@@ -1,6 +1,6 @@
 # ECS Specification — Rogue1
 
-**Status:** Draft — requirements proposed; implementation not yet verified
+**Status:** Audited — core, runtime, framework, and persistence requirements audited, with resolved design decisions verified against the automated regression test suite
 **Language:** TypeScript
 **Primary application:** Turn-based, text-based roguelike
 **Architecture:** Entity-Component-System (ECS), archetype-based storage, Struct-of-Arrays (SoA)
@@ -378,10 +378,10 @@ Snapshots are a framework feature and must be validated separately from basic en
 - **SAV-001:** A snapshot contains the state that the persistence contract declares saveable.
 - **SAV-002:** Loading a valid snapshot reconstructs equivalent live entities, component membership, and component values.
 - **SAV-003:** Snapshot versions are checked and incompatible formats are rejected or migrated according to a documented policy (`ECS_SNAPSHOT_VERSION = 2`).
-- **SAV-004:** Invalid snapshots produce clear errors before any world state mutation occurs.
-- **SAV-005:** Complete failure atomicity: `World.loadSnapshot()` operates via two-phase transactional restoration. Phase 1 validates the entire snapshot schema (version, nextEntityId, entityVersions bounds, freeEntities consistency, non-negative BigInt archetype masks, mask-to-column key correspondence, entity ID validity/uniqueness, reserved engine ID restrictions, column-to-entity length alignment, tag 1-to-1 mappings, and group entity lists), pre-deserializes all component columns, and validates staged registered relationship columns (verifying all single-target numbers and Set elements reference valid, allocated, non-free entity IDs and rejecting unsupported value types). If any schema validation, relationship check, or custom component deserializer throws, the restoration aborts immediately, leaving the existing live world completely intact and unmodified. Phase 2 executes destructive state clearing and commits the staged snapshot data.
+- **SAV-004:** Malformed snapshots detected during preflight produce clear errors before live world state is mutated.
+- **SAV-005:** Pre-commit failure atomicity: `World.loadSnapshot()` validates snapshot schema, bounds, entity validity and uniqueness, tags, groups, and registered relationship target references, and pre-deserializes all component columns before invoking `resetForLoad()`. If any schema validation check, relationship validation, or component deserializer throws during this preflight phase, restoration aborts immediately, leaving the existing live world completely intact and unmodified. Once preflight validation succeeds, the world state is cleared and the pre-validated snapshot data is committed.
 - **SAV-006:** Entity IDs, internal entities, relationships, tags, groups, and singleton state must follow explicit persistence rules. Entries in the supplied component mapping whose names begin with `"REL_"` are automatically registered for relationship tracking and snapshot serialization (`RelationshipSetSerializer`, supporting both scalar `EntityId` and `Set<EntityId>`). Custom relationship component IDs whose mapping names do not begin with `"REL_"` must be registered explicitly through `world.relationships.registerRelation(id)` and configured with appropriate serializers prior to snapshot restoration to allow safe reverse-index rebuilding.
-- **SAV-007:** Components containing `Map`, `Set`, or other non-JSON-native data require appropriate serializers or documented restrictions. Default deserialization deep-clones component values to guarantee complete memory isolation between snapshot data and restored live ECS storage. Ordinary numeric and `Set`-valued components are not relationships unless explicitly registered as such.
+- **SAV-007:** Components containing `Map`, `Set`, or other non-JSON-native data require appropriate serializers or documented restrictions. Default serialization and deserialization deep-clone component values to guarantee memory isolation between snapshot data and live ECS storage; custom component serializers must produce appropriately isolated values if they need the same memory-isolation guarantees. Ordinary numeric and `Set`-valued components are not relationships unless explicitly registered as such.
 
 Round-trip tests must compare meaningful world state rather than requiring identical internal archetype row positions.
 
@@ -476,22 +476,20 @@ Every implementation change must follow this sequence:
 
 Do not combine a large architectural rewrite with unrelated bug fixes. Do not mark a requirement as complete based solely on code inspection.
 
-## 18. Open decisions
+## 18. Resolved design decisions
 
-The following decisions must be confirmed during implementation review:
+The following decisions have been audited, resolved, and verified against automated regression suites:
 
-- The supported entity ID range and exact index/version encoding (Resolved: 16-bit generation (1..65,535), 37-bit index (0..2^37 - 1), arithmetic encoding `id = index * 65536 + generation`, permanent slot retirement at generation 65,535).
-- Whether adding an existing component replaces its value or throws.
-- Whether deleting an invalid entity is a no-op or an error.
-- The precise visibility of deferred creations and edits before commit.
-- The behavior of partially failed batches and flushes (Resolved: non-transactional; storage mutations precede observer emissions and are retained without rollback; observer exceptions abort subsequent callbacks for that change and propagate; throwing operations are shifted from the queue to prevent replay, while unprocessed operations remain queued for subsequent flushes).
-- The notification policy for component replacement and in-place mutation.
-- The guarantees, if any, about query ordering.
-- Which state survives `world.clear()` and scene transitions.
-- Which managers, tags, groups, relationships, and singleton values are persisted in snapshots.
-- Whether snapshots are restored atomically or use another explicit failure policy (Resolved: Two-phase transactional restoration guarantees complete failure atomicity; pre-validation and column deserialization must succeed before any live world state is cleared or mutated; invalid snapshots leave the previous world completely intact).
-
-Until these decisions are resolved, tests and documentation must not imply a stronger guarantee than the implementation provides.
+- **Entity ID range and encoding:** Resolved: 16-bit generation (1..65,535), 37-bit index (0..2^37 - 1), arithmetic encoding `id = index * 65536 + generation`, permanent slot retirement at generation 65,535 (`ENT-011`).
+- **Adding existing component:** Resolved: Replaces the stored value in place non-structurally without throwing, altering component membership, or firing component add observers (`CMP-007`, `CMP-008`).
+- **Deleting invalid or already deleted entity:** Resolved: Safe no-op, returns immediately without modifying state or throwing (`ENT-010`).
+- **Deferred mutation visibility:** Resolved: Deferred operations are queued in FIFO order in `deferredQueue` and applied at `world.flush()`; pre-flush queries reflect the unmutated world state (`STR-004`–`STR-007`).
+- **Partially failed batches and flushes:** Resolved: Non-transactional; storage mutations precede observer emissions and are retained without rollback; observer exceptions abort subsequent callbacks for that change and propagate; throwing operations are shifted from the queue to prevent replay, while unprocessed operations remain queued for subsequent flushes (`STR-008`, `BAT-005`, `OBS-007`).
+- **Component replacement and mutation notifications:** Resolved: In-place mutations (`mutateComponent`) and non-structural component value replacements (`setComponent`, `addComponent` on existing component) update column data directly and do not emit `onAdd`/`onRemove` observer events; structural additions and removals emit respective component and mask observers (`OBS-001`–`OBS-004`).
+- **Query ordering guarantees:** Resolved: No ordering guarantees are provided across `view()`, `getEntities()`, or `viewColumns()`; entity row order within archetypes is unspecified and swap-and-pop moves entities freely (`ARC-011`, `QRY-001`).
+- **State survival across `world.clear()` and scene transitions:** Resolved: Ephemeral entities, components, tags, groups, relationships, query caches, deferred queue, active editors, and ephemeral event/observer listeners are cleared; registered component IDs, singleton entities (recreated with fresh ID), persistent Scheduler systems (automatically rebound with `@Subscribe` listeners and mask observers restored), registered Prefab templates, registered Scene definitions, and registered Relationship IDs persist (`WLD-002`–`WLD-004`, `SCN-001`–`SCN-005`).
+- **Snapshot persistence boundaries:** Resolved: Entity IDs, entity versions, free entities pool, component SoA columns, singletons (tagged `__world_singletons__`), unique tags, multi-group memberships, and registered relationship components are persisted; ephemeral observers, scheduler systems, and prefab templates remain in memory and are not stored in snapshot data (`SAV-001`–`SAV-007`).
+- **Snapshot restoration failure policy:** Resolved: Two-phase restoration provides preflight failure atomicity; schema validation, relationship integrity checks, and column deserialization must succeed before live world state is cleared or mutated; preflight failures leave the previous world completely intact (`SAV-003`–`SAV-005`).
 
 ## 19. Coding standards and implementation guidelines
 
