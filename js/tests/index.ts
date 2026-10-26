@@ -8,6 +8,7 @@ import { testSystems } from "./Systems.test";
 import { testSceneManager } from "./SceneManager.test";
 import { testEventBus } from "./EventBus.test";
 import { testSnapshot } from "./Snapshot.test";
+import { testCrossSystemIntegration } from "./Integration.test";
 
 /**
  * Main entry point for ECS tests.
@@ -25,6 +26,7 @@ export function runAllTests() {
     testSceneManager();
     testEventBus();
     testSnapshot();
+    testCrossSystemIntegration();
     console.log("=== All Tests Passed Successfully ===");
   } catch (err) {
     console.error("!!! Test Failed !!!");
