@@ -330,6 +330,7 @@ These are supporting features, not prerequisites for core archetype correctness.
 - **REL-002:** `registerEcsSerializers(world, userComponents)` (or `bootstrapEcs`) automatically registers entries in the supplied component mapping whose names begin with `"REL_"` (such as `REL_MEMBER_OF`, `REL_TARGETS`) for relationship tracking (`world.relationships.registerRelation(id)`) and configures them with `RelationshipSetSerializer`. This built-in convention supports both scalar `EntityId` numbers (1-to-1 relationships) and `Set<EntityId>` collections (1-to-Many relationships).
 - **REL-003:** Custom relationship component IDs whose mapping names do not begin with `"REL_"` must be registered explicitly through `world.relationships.registerRelation(id)` before `world.loadSnapshot()` or `RelationshipManager.rebuild()` restores state in a fresh world instance, and require an appropriate serializer (e.g. `RelationshipSetSerializer` or a custom `ComponentSerializer`) registered via `world.registerComponentSerializer(id, serializer)` when their values need non-JSON serialization.
 - **REL-004:** Reverse index reconstruction and entity deletion cleanup strictly target registered relationship component IDs. Ordinary numeric and `Set`-valued components are not relationships unless explicitly registered as such, preventing accidental corruption or deletion of unrelated entity component data.
+- **REL-005:** Relationship reverse index synchronization: All supported component mutation pathways (`addComponent`, `setComponent`, `updateComponent`, `mutateComponent`, `removeComponent`, `EntityEditor` batch edits, deferred structural flushes, and entity duplication) automatically reconcile the reverse relationship index (`targetToSubjects`) for registered relationship component IDs. `getTargets()` and public read APIs return relationship target Sets as runtime-enforced read-only views; direct mutations (`add`, `delete`, `clear`) on the view throw runtime errors while the view reflects live updates made through supported APIs to that underlying Set instance. If a relationship component is completely replaced (e.g. via `setComponent` with a new Set or an exclusive 1-to-1 relationship), previous read-only views continue to reference the detached old Set, while new queries return views over the newly assigned component. Relationship modifications must be performed through `RelationshipManager` methods (`add`, `remove`, `clearRelations`) or supported `World` mutation APIs. Sets supplied by callers are cloned to isolate storage from external alias mutations. Non-relationship components (ordinary numeric and `Set`-valued components) remain mutable and completely ignored by relationship indexing.
 
 ## 12. Prefabs, assets, and dependency injection
 
@@ -449,9 +450,44 @@ Where practical, generate random sequences of entity creation, deletion, compone
 
 This can expose lifecycle bugs that are difficult to find with isolated examples.
 
-## 16. Performance policy
+## 16. Performance policy and verified benchmarks
 
-The framework uses archetype-based SoA storage to support efficient iteration. However, performance claims must be measured rather than assumed.
+The framework uses archetype-based SoA storage to support efficient iteration. Performance claims are backed by repeatable benchmarks executed via `npm run bench` (`js/benchmarks/index.ts`) using high-resolution timing (`performance.now()`) with multiple warmup passes, multiple timed sample runs reporting median durations, and explicit separation of setup from timed workloads.
+
+### 16.1 Verified benchmark results
+
+Workload measurements on representative hardware (median of 5 runs):
+
+1. **Entity Lifecycle & Recycling:**
+   - Entity Allocation (separated setup): ~157M–213M entities/s (4.7–6.4 ns/entity).
+   - Entity Deletion & ID Recycling: ~12.6M–19.0M ops/s (52.6–79.1 ns/op).
+2. **Component Transitions & Mutations:**
+   - Structural Additions (`transmute` across 3 archetypes): ~1.27M transmutes/s (787.1 ns/transmute).
+   - Non-structural In-Place Mutation (`mutateComponent`): ~20.70M mutations/s (48.3 ns/mutation).
+   - Batch Edits via `EntityEditor` (3 additions in a single structural move): ~537k entities/s (1.86 µs/entity).
+3. **Query Execution & Iteration:**
+   - Meta-queries (`count()` across 20,000 entities in mixed archetypes): ~4.23M queries/s (236.3 ns/query).
+   - Snapshot queries (`getEntities()` across matching entities): ~88k–163k snapshots/s (6.1–11.2 µs/snapshot).
+   - Query Generator Streaming (`view()`): ~52.1M entities/s (19.2 ns/entity).
+   - Column queries (`viewColumns()` SoA direct array processing): ~641M entities/s (1.6 ns/entity).
+4. **Relationships & Reverse-Index Maintenance:**
+   - 1-to-1 Relationship Creation: ~1.07M–1.15M relations/s (870–935 ns/relation).
+   - Reverse queries via index (`getRelated()` on sparse targets, 5 of 20,005 relationship rows across 20,007 entities): ~5.21M queries/s (192.1 ns/query), providing O(1) target bucket index lookup and O(k) iteration over matching subjects, compared to ~37.0k queries/s (27.0 µs/query) for linear table scan baseline across all 20,005 relationship rows.
+   - Reverse count queries via index (`countRelated()` on sparse targets): ~10.10M queries/s (99.0 ns/query), compared to ~37.3k queries/s (26.8 µs/query) for linear table scan baseline across all 20,005 relationship rows.
+   - Dense reverse queries (10,000 subjects): ~4.23k `getRelated` queries/s (236.7 µs/query) and ~9.46k `countRelated` queries/s (105.7 µs/query).
+   - Deletion Cleanup (automatic cleanup of all incoming and outgoing relations): ~766k deletions/s (1.30 µs/deletion).
+5. **Scheduler & Systems:**
+   - Multi-system update pass across 10,000 entities: ~1.23k passes/s (811.8 µs/pass).
+   - Deferred queue flushing (`flush()` across 10,000 queued additions): ~2.67M flushes/s (374.2 ns/flush).
+6. **EventBus Dispatch:**
+   - Dispatch across 10 to 1,000 subscribers: ~113M–139M handler deliveries/s (7.2–8.8 ns/delivery).
+7. **Prefab Spawning:**
+   - Template instantiation with deep component cloning and group setup: ~145k spawns/s (6.90 µs/spawn).
+8. **Snapshot Persistence:**
+   - Snapshot Serialization (`saveSnapshot()` for 5,000 entities with tags/groups/relations): ~120 saves/s (8.31 ms/save).
+   - Snapshot Restoration (`loadSnapshot()` with two-phase pre-validation): ~88 loads/s (11.40 ms/load).
+
+### 16.2 Optimization principles
 
 Before making optimization changes:
 

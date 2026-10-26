@@ -3,6 +3,77 @@ import { USER_COMPONENT_ID_START } from "./InternalComponents";
 import { EntityManager } from "./EntityManager";
 import { ComponentManager } from "./ComponentManager";
 
+const readOnlySetViews = new WeakMap<Set<unknown>, Set<unknown>>();
+const isReadOnlySetView = new WeakSet<Set<unknown>>();
+
+/**
+ * Wraps a live relationship target Set in a read-only Proxy view.
+ * Read operations (size, has, iteration, forEach) forward to the underlying Set,
+ * while direct mutations (add, delete, clear) throw clear runtime errors.
+ */
+export function createReadOnlySetView<T>(target: Set<T>): Set<T> {
+  if (isReadOnlySetView.has(target as Set<unknown>)) {
+    return target;
+  }
+  const existing = readOnlySetViews.get(target as Set<unknown>);
+  if (existing) return existing as Set<T>;
+
+  const view = new Proxy(target, {
+    get(t, prop) {
+      if (
+        prop === "add" ||
+        prop === "delete" ||
+        prop === "clear" ||
+        prop === "__defineGetter__" ||
+        prop === "__defineSetter__"
+      ) {
+        return () => {
+          throw new Error(
+            `[ECS] Cannot mutate read-only relationship Set view directly. Use RelationshipManager or World APIs.`
+          );
+        };
+      }
+      if (prop === "size") {
+        return t.size;
+      }
+      if (prop === "valueOf") {
+        return () => view;
+      }
+      if (prop === "forEach") {
+        return (callback: (val: T, key: T, set: Set<T>) => void, thisArg?: unknown) => {
+          if (typeof callback !== "function") {
+            throw new TypeError(`${callback} is not a function`);
+          }
+          t.forEach((val, key) => {
+            callback.call(thisArg, val, key, view);
+          });
+        };
+      }
+      const val = Reflect.get(t, prop, t);
+      if (typeof val === "function") {
+        return val.bind(t);
+      }
+      return val;
+    },
+    set() {
+      throw new Error(`[ECS] Cannot mutate read-only relationship Set view directly.`);
+    },
+    deleteProperty() {
+      throw new Error(`[ECS] Cannot mutate read-only relationship Set view directly.`);
+    },
+    defineProperty() {
+      throw new Error(`[ECS] Cannot mutate read-only relationship Set view directly.`);
+    },
+    setPrototypeOf() {
+      throw new Error(`[ECS] Cannot mutate read-only relationship Set view directly.`);
+    }
+  });
+
+  readOnlySetViews.set(target as Set<unknown>, view as Set<unknown>);
+  isReadOnlySetView.add(view as Set<unknown>);
+  return view;
+}
+
 export class RelationshipManager {
   /**
    * Index for fast cleanup: TargetEntityId -> Map<RelationId, Set<SubjectEntityId>>
@@ -59,59 +130,47 @@ export class RelationshipManager {
     this.components.addRegisteredComponent(relationId);
 
     const hasRelation = this.entities.hasComponent(subject, relationId);
+    let oldTarget: unknown;
+    if (hasRelation) {
+      const val = this.entities.getComponentValue(subject, relationId);
+      oldTarget = val instanceof Set ? new Set(val) : val;
+    }
 
     if (exclusive) {
-      // If component already exists, we must untrack the old target(s) first
       if (hasRelation) {
-        const oldTarget = this.entities.getComponentValue<EntityId | Set<EntityId>>(subject, relationId);
-        if (oldTarget !== undefined) {
-          if (oldTarget instanceof Set) {
-            for (const t of oldTarget) this.untrackTarget(t, relationId, subject);
-          } else if (typeof oldTarget === "number") {
-            this.untrackTarget(oldTarget, relationId, subject);
-          }
-        }
-
         this.entities.setComponentValue(subject, relationId, target);
-        this.trackTarget(target, relationId, subject);
-        return;
+      } else {
+        const loc = this.entities.getLocation(subject);
+        const oldMask = loc?.arch.mask ?? 0n;
+        this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, target);
       }
-
-      // Otherwise, structural add
-      const loc = this.entities.getLocation(subject);
-      const oldMask = loc?.arch.mask ?? 0n;
-      this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, target);
-      this.trackTarget(target, relationId, subject);
+      this.reconcile(subject, relationId, oldTarget, target);
       return;
     }
 
     // One-to-Many logic using a Set
-    const existing = this.getTargets(subject, relationId);
+    const existing = this.entities.getComponentValue<EntityId | Set<EntityId>>(subject, relationId);
+    let targetSet: Set<EntityId>;
 
     if (existing instanceof Set) {
-      if (!existing.has(target)) {
-        existing.add(target);
-        this.trackTarget(target, relationId, subject);
+      targetSet = existing;
+      targetSet.add(target);
+    } else {
+      targetSet = new Set<EntityId>();
+      if (existing !== undefined && typeof existing === "number" && this.entities.isValid(existing)) {
+        targetSet.add(existing);
       }
-      return;
+      targetSet.add(target);
     }
-
-    const newSet = new Set<EntityId>();
-    if (existing !== undefined) {
-      newSet.add(existing);
-      // existing was already tracked as a single value, no need to re-track
-    }
-    newSet.add(target);
-    this.trackTarget(target, relationId, subject);
 
     if (hasRelation) {
-      this.entities.setComponentValue(subject, relationId, newSet);
-      return;
+      this.entities.setComponentValue(subject, relationId, targetSet);
+    } else {
+      const loc = this.entities.getLocation(subject);
+      const oldMask = loc?.arch.mask ?? 0n;
+      this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, targetSet);
     }
-
-    const loc = this.entities.getLocation(subject);
-    const oldMask = loc?.arch.mask ?? 0n;
-    this.components.transmute(subject, oldMask | (1n << BigInt(relationId)), relationId, newSet);
+    this.reconcile(subject, relationId, oldTarget, targetSet);
   }
 
 
@@ -181,7 +240,7 @@ export class RelationshipManager {
     }
   }
 
-  private trackTarget(target: EntityId, relationId: ComponentId, subject: EntityId): void {
+  public trackTarget(target: EntityId, relationId: ComponentId, subject: EntityId): void {
     if (!this.targetToSubjects.has(target)) {
       this.targetToSubjects.set(target, new Map());
     }
@@ -201,6 +260,51 @@ export class RelationshipManager {
       if (subjects.size === 0) relations.delete(relationId);
     }
     if (relations.size === 0) this.targetToSubjects.delete(target);
+  }
+
+  /**
+   * Centralized reconciliation helper for relationship mutations.
+   * Compares the previous value and the new value of a relationship component on a subject
+   * and updates targetToSubjects reverse indexing accordingly.
+   */
+  public reconcile(
+    subject: EntityId,
+    relationId: ComponentId,
+    oldValue: unknown,
+    newValue: unknown
+  ): void {
+    if (!this.registeredRelations.has(relationId)) return;
+
+    const getTargetsFromVal = (val: unknown): Set<EntityId> => {
+      const targets = new Set<EntityId>();
+      if (typeof val === "number" && this.entities.isValid(val)) {
+        targets.add(val);
+      } else if (val instanceof Set) {
+        for (const t of val) {
+          if (typeof t === "number" && this.entities.isValid(t)) {
+            targets.add(t);
+          }
+        }
+      }
+      return targets;
+    };
+
+    const oldTargets = getTargetsFromVal(oldValue);
+    const newTargets = getTargetsFromVal(newValue);
+
+    for (const oldT of oldTargets) {
+      if (!newTargets.has(oldT)) {
+        this.untrackTarget(oldT, relationId, subject);
+      }
+    }
+
+    if (this.entities.isValid(subject)) {
+      for (const newT of newTargets) {
+        if (!oldTargets.has(newT)) {
+          this.trackTarget(newT, relationId, subject);
+        }
+      }
+    }
   }
 
 
@@ -261,7 +365,7 @@ export class RelationshipManager {
       for (const id of val) {
         if (!this.entities.isValid(id)) val.delete(id);
       }
-      return val.size > 0 ? val : undefined;
+      return val.size > 0 ? createReadOnlySetView(val) : undefined;
     }
 
     return this.entities.isValid(val) ? val : undefined;
@@ -270,7 +374,7 @@ export class RelationshipManager {
 
   /**
    * Finds all entities that point to a specific target.
-   * Now handles both raw IDs and Sets.
+   * Utilizes the reverse index for fast O(1) retrieval.
    */
   public *getRelated(relationId: ComponentId, target: EntityId): IterableIterator<EntityId> {
     if (!isValidComponentId(relationId)) {
@@ -278,24 +382,19 @@ export class RelationshipManager {
     }
     if (!this.entities.isValid(target)) return;
 
-    for (const arch of this.components.getArchetypes()) {
-      const column = arch.columns.get(relationId);
-      if (!column) continue;
+    const subjects = this.targetToSubjects.get(target)?.get(relationId);
+    if (!subjects) return;
 
-      for (let i = 0; i < arch.entities.length; i++) {
-        const val = column[i];
-        const subject = arch.entities[i];
-
-        if (!this.entities.isValid(subject)) continue;
-
-        if (val === target || (val instanceof Set && val.has(target))) {
-          yield subject;
-        }
+    for (const subject of subjects) {
+      if (this.entities.isValid(subject)) {
+        yield subject;
       }
     }
   }
+
   /**
    * Returns the number of entities that point to a specific target via a relation.
+   * Utilizes the reverse index for fast O(1) counting.
    */
   public countRelated(relationId: ComponentId, target: EntityId): number {
     if (!isValidComponentId(relationId)) {
@@ -303,19 +402,13 @@ export class RelationshipManager {
     }
     if (!this.entities.isValid(target)) return 0;
 
+    const subjects = this.targetToSubjects.get(target)?.get(relationId);
+    if (!subjects) return 0;
+
     let count = 0;
-    for (const arch of this.components.getArchetypes()) {
-      const column = arch.columns.get(relationId);
-      if (!column) continue;
-
-      for (let i = 0; i < arch.entities.length; i++) {
-        const val = column[i];
-        const subject = arch.entities[i];
-        if (!this.entities.isValid(subject)) continue;
-
-        if (val === target || (val instanceof Set && val.has(target))) {
-          count++;
-        }
+    for (const subject of subjects) {
+      if (this.entities.isValid(subject)) {
+        count++;
       }
     }
     return count;

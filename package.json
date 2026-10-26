@@ -10,6 +10,7 @@
   "author": "",
   "scripts": {
     "test": "jiti js/tests/index.ts",
+    "bench": "jiti js/benchmarks/index.ts",
     "dev": "webpack serve --open --config webpack.config.dev.js",
     "start": "webpack serve --open --config webpack.config.dev.js",
     "build": "webpack --config webpack.config.prod.js",

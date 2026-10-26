@@ -59,6 +59,18 @@ export class ComponentManager {
     // Primitives and null are safe as-is
     if (value === null || typeof value !== "object") return value;
 
+    if (value instanceof Set) {
+      const clonedSet = new Set();
+      for (const item of value) {
+        clonedSet.add(ComponentManager.deepCloneSnapshotValue(item));
+      }
+      return clonedSet;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map(item => ComponentManager.deepCloneSnapshotValue(item));
+    }
+
     // Use built-in structuredClone if available
     if (typeof globalThis.structuredClone === "function") {
       try {
@@ -203,7 +215,6 @@ export class ComponentManager {
       targetArch = new Archetype(newMask, componentIds);
       this.archetypes.set(newMask, targetArch);
       this.queryManager.registerArchetype(targetArch);
-      this.queryManager.invalidateCache(); // Re-sync existing queries
     }
 
     const newRow = targetArch.addEntity(entity, dataToMigrate);
@@ -279,7 +290,6 @@ export class ComponentManager {
       newMask,
       this.registeredComponents.filter((id: ComponentId) => (newMask & (1n << BigInt(id))) !== 0n)
     );
-    this.queryManager.invalidateCache(); // Ensure batch moves are reflected in queries
 
     const newRow = targetArch.addEntity(entity, dataToMigrate);
     this.entityManager.setLocation(entity, targetArch, newRow);

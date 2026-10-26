@@ -7,7 +7,7 @@ import { EntityEditor } from "./EntityEditor";
 import { EntityManager, GENERATION_SHIFT, MAX_GENERATION } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
 import { ComponentManager, ComponentObserver, MaskObserver } from "./ComponentManager";
-import { RelationshipManager } from "./RelationshipManager";
+import { RelationshipManager, createReadOnlySetView } from "./RelationshipManager";
 import { PrefabManager } from "./PrefabManager";
 import type { ComponentSerializer } from "./ComponentManager";
 import { Mapper } from "./Mapper";
@@ -243,9 +243,20 @@ export class World {
 
     this.components.addRegisteredComponent(componentId);
 
+    const isRel = this.relationships.isRegisteredRelation(componentId);
+    let oldVal: unknown;
+    if (isRel) {
+      const current = this.entities.getComponentValue(entity, componentId);
+      oldVal = current instanceof Set ? new Set(current) : current;
+    }
+    const valToStore = (isRel && value instanceof Set) ? new Set(value) : value;
+
     // If the entity already has this component, treat this as "replace value" (non-structural).
     if (this.entities.hasComponent(entity, componentId)) {
-      this.entities.setComponentValue(entity, componentId, value);
+      this.entities.setComponentValue(entity, componentId, valToStore);
+      if (isRel) {
+        this.relationships.reconcile(entity, componentId, oldVal, valToStore);
+      }
       return;
     }
 
@@ -254,7 +265,10 @@ export class World {
     const oldMask = loc?.arch.mask ?? 0n;
     const newMask = oldMask | (1n << BigInt(componentId));
 
-    this.components.transmute(entity, newMask, componentId, value);
+    this.components.transmute(entity, newMask, componentId, valToStore);
+    if (isRel) {
+      this.relationships.reconcile(entity, componentId, undefined, valToStore);
+    }
   }
 
   public removeComponent(entity: EntityId, componentId: ComponentId): void {
@@ -281,7 +295,17 @@ export class World {
 
     if (oldMask === newMask) return; // Didn't have it
 
+    const isRel = this.relationships.isRegisteredRelation(componentId);
+    let oldVal: unknown;
+    if (isRel) {
+      const current = this.entities.getComponentValue(entity, componentId);
+      oldVal = current instanceof Set ? new Set(current) : current;
+    }
+
     this.components.transmute(entity, newMask);
+    if (isRel) {
+      this.relationships.reconcile(entity, componentId, oldVal, undefined);
+    }
   }
 
   /**
@@ -455,7 +479,11 @@ export class World {
     if (!isValidComponentId(id)) {
       throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
-    return this.entities.getComponentValue<T>(entity, id);
+    const val = this.entities.getComponentValue<T>(entity, id);
+    if (val instanceof Set && this.relationships.isRegisteredRelation(id)) {
+      return createReadOnlySetView(val) as unknown as T;
+    }
+    return val;
   }
 
   /**
@@ -465,7 +493,18 @@ export class World {
     if (!isValidComponentId(id)) {
       throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
-    return this.entities.setComponentValue(entity, id, value);
+    const isRel = this.relationships.isRegisteredRelation(id);
+    let oldVal: unknown;
+    if (isRel) {
+      const current = this.entities.getComponentValue(entity, id);
+      oldVal = current instanceof Set ? new Set(current) : current;
+    }
+    const valToStore = (isRel && value instanceof Set) ? new Set(value) as unknown as T : value;
+    const success = this.entities.setComponentValue(entity, id, valToStore);
+    if (success && isRel) {
+      this.relationships.reconcile(entity, id, oldVal, valToStore);
+    }
+    return success;
   }
 
   /**
@@ -475,7 +514,22 @@ export class World {
     if (!isValidComponentId(id)) {
       throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
-    return this.entities.updateComponentValue(entity, id, updater);
+    const isRel = this.relationships.isRegisteredRelation(id);
+    let oldVal: unknown;
+    if (isRel) {
+      const current = this.entities.getComponentValue(entity, id);
+      oldVal = current instanceof Set ? new Set(current) : current;
+    }
+    const success = this.entities.updateComponentValue(entity, id, updater);
+    if (success && isRel) {
+      const currentVal = this.entities.getComponentValue(entity, id);
+      const valToStore = currentVal instanceof Set ? new Set(currentVal) : currentVal;
+      if (currentVal instanceof Set) {
+        this.entities.setComponentValue(entity, id, valToStore);
+      }
+      this.relationships.reconcile(entity, id, oldVal, valToStore);
+    }
+    return success;
   }
 
   /**
@@ -485,7 +539,18 @@ export class World {
     if (!isValidComponentId(id)) {
       throw new Error(`[ECS] Invalid Component ID: ${id}. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
     }
-    return this.entities.mutateComponent(entity, id, mutator);
+    const isRel = this.relationships.isRegisteredRelation(id);
+    let oldVal: unknown;
+    if (isRel) {
+      const current = this.entities.getComponentValue(entity, id);
+      oldVal = current instanceof Set ? new Set(current) : current;
+    }
+    const success = this.entities.mutateComponent(entity, id, mutator);
+    if (success && isRel) {
+      const newVal = this.entities.getComponentValue(entity, id);
+      this.relationships.reconcile(entity, id, oldVal, newVal);
+    }
+    return success;
   }
 
 
@@ -665,7 +730,7 @@ export class World {
     for (const compId of this.getRegisteredComponents()) {
       const bit = 1n << BigInt(compId);
       if ((sourceMask & bit) !== 0n) {
-        const val = this.getComponent(source, compId);
+        const val = this.entities.getComponentValue(source, compId);
         // Deep clone the value via ComponentManager logic
         editor.add(compId, this.components.cloneValue(compId, val));
       }
@@ -712,10 +777,43 @@ export class World {
       return;
     }
 
+    // Pre-record old values for relationship components in additions or removals
+    const relOldValues = new Map<ComponentId, unknown>();
+    for (const id of removals) {
+      if (this.relationships.isRegisteredRelation(id)) {
+        const current = this.entities.getComponentValue(entity, id);
+        relOldValues.set(id, current instanceof Set ? new Set(current) : current);
+      }
+    }
     for (const id of additions.keys()) {
+      if (this.relationships.isRegisteredRelation(id)) {
+        const current = this.entities.getComponentValue(entity, id);
+        relOldValues.set(id, current instanceof Set ? new Set(current) : current);
+      }
+    }
+
+    const processedAdditions = new Map<ComponentId, unknown>();
+    for (const [id, val] of additions) {
+      const isRel = this.relationships.isRegisteredRelation(id);
+      processedAdditions.set(id, (isRel && val instanceof Set) ? new Set(val) : val);
+    }
+
+    for (const id of processedAdditions.keys()) {
       this.components.addRegisteredComponent(id);
     }
-    this.components.applyBatchChanges(entity, newMask, additions, removals);
+    this.components.applyBatchChanges(entity, newMask, processedAdditions, removals);
+
+    // Reconcile relationship reverse index for all modified relationship components
+    for (const id of removals) {
+      if (this.relationships.isRegisteredRelation(id)) {
+        this.relationships.reconcile(entity, id, relOldValues.get(id), undefined);
+      }
+    }
+    for (const [id, val] of processedAdditions) {
+      if (this.relationships.isRegisteredRelation(id)) {
+        this.relationships.reconcile(entity, id, relOldValues.get(id), val);
+      }
+    }
   }
 
   /**

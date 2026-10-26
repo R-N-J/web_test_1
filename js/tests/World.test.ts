@@ -4936,6 +4936,523 @@ export function testWorld() {
     assert.ok(loadWorld.getEntities(aspect).includes(restoredG1!));
   }
 
+  // =========================================================================
+  // TASK 25 — Reverse-Index Correctness Across All Component Mutation Paths
+  // =========================================================================
+
+  // 25.1 addComponent, setComponent, updateComponent, mutateComponent, removeComponent
+  {
+    const rWorld = new World();
+    const REL_TARGET = 370;
+    const REL_FACTIONS = 371;
+    const CMP_HEALTH = 372;
+    const CMP_TAGS = 373;
+
+    rWorld.registerComponent(REL_TARGET);
+    rWorld.registerComponent(REL_FACTIONS);
+    rWorld.registerComponent(CMP_HEALTH);
+    rWorld.registerComponent(CMP_TAGS);
+
+    rWorld.relationships.registerRelation(REL_TARGET);
+    rWorld.relationships.registerRelation(REL_FACTIONS);
+
+    const t1 = rWorld.createEntity();
+    const t2 = rWorld.createEntity();
+    const t3 = rWorld.createEntity();
+    const s1 = rWorld.createEntity();
+
+    // 1. addComponent() scalar relationship
+    rWorld.addComponent(s1, REL_TARGET, t1);
+    assert.strictEqual(rWorld.getComponent(s1, REL_TARGET), t1);
+    assert.strictEqual(rWorld.relationships.getTargets(s1, REL_TARGET), t1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t1), 1);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_TARGET, t1)), [s1]);
+
+    // 2. addComponent() replacement (non-structural overwrite)
+    rWorld.addComponent(s1, REL_TARGET, t2);
+    assert.strictEqual(rWorld.getComponent(s1, REL_TARGET), t2);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t1), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t2), 1);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_TARGET, t2)), [s1]);
+
+    // 3. setComponent() replacement
+    rWorld.setComponent(s1, REL_TARGET, t3);
+    assert.strictEqual(rWorld.getComponent(s1, REL_TARGET), t3);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t2), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t3), 1);
+
+    // 4. removeComponent()
+    rWorld.removeComponent(s1, REL_TARGET);
+    assert.strictEqual(rWorld.getComponent(s1, REL_TARGET), undefined);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t3), 0);
+
+    // 5. Set-based relationship via addComponent, updateComponent, mutateComponent
+    const s2 = rWorld.createEntity();
+    rWorld.addComponent(s2, REL_FACTIONS, new Set([t1, t2]));
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t1), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t2), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t3), 0);
+
+    // updateComponent() replacing Set
+    rWorld.updateComponent<Set<EntityId>>(s2, REL_FACTIONS, (current) => {
+      const next = new Set(current);
+      next.delete(t1);
+      next.add(t3);
+      return next;
+    });
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t1), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t2), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t3), 1);
+
+    // mutateComponent() in-place Set mutation
+    rWorld.mutateComponent<Set<EntityId>>(s2, REL_FACTIONS, (set) => {
+      set.delete(t2);
+      set.add(t1);
+    });
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t1), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t2), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t3), 1);
+
+    // Mapper mutations
+    const targetMapper = rWorld.getMapper<EntityId>(REL_TARGET);
+    const factionsMapper = rWorld.getMapper<Set<EntityId>>(REL_FACTIONS);
+
+    rWorld.addComponent(s2, REL_TARGET, t1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t1), 1);
+
+    targetMapper.set(s2, t2);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t1), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t2), 1);
+
+    targetMapper.update(s2, () => t3);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t2), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t3), 1);
+
+    factionsMapper.mutate(s2, (set) => {
+      set.clear();
+      set.add(t2);
+    });
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t1), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t3), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_FACTIONS, t2), 1);
+
+    targetMapper.remove(s2);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_TARGET, t2), 0);
+
+    // 6. Ordinary numeric and Set-valued components are completely unaffected
+    const nonRelEntity = rWorld.createEntity();
+    rWorld.addComponent(nonRelEntity, CMP_HEALTH, t1); // numeric value matching an entity ID
+    rWorld.addComponent(nonRelEntity, CMP_TAGS, new Set(["tagA", "tagB"]));
+
+    assert.strictEqual(rWorld.relationships.countRelated(CMP_HEALTH, t1), 0, "Non-relationship component ignored");
+    rWorld.deleteEntity(t1);
+    assert.strictEqual(rWorld.getComponent(nonRelEntity, CMP_HEALTH), t1, "Non-rel numeric value untouched after deletion");
+    assert.deepStrictEqual(Array.from(rWorld.getComponent<Set<string>>(nonRelEntity, CMP_TAGS)!), ["tagA", "tagB"]);
+  }
+
+  // 25.2 EntityEditor batch changes, deferred structural changes, and duplication
+  {
+    const rWorld = new World();
+    const REL_PARENT = 380;
+    const REL_MEMBERS = 381;
+
+    rWorld.registerComponent(REL_PARENT);
+    rWorld.registerComponent(REL_MEMBERS);
+    rWorld.relationships.registerRelation(REL_PARENT);
+    rWorld.relationships.registerRelation(REL_MEMBERS);
+
+    const leader = rWorld.createEntity();
+    const parentA = rWorld.createEntity();
+    const parentB = rWorld.createEntity();
+    const memberA = rWorld.createEntity();
+    const memberB = rWorld.createEntity();
+
+    // Batch creation via buildEntity()
+    const child = rWorld.buildEntity()
+      .add(REL_PARENT, parentA)
+      .add(REL_MEMBERS, new Set([memberA, memberB]))
+      .commit();
+
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, parentA), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberA), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberB), 1);
+
+    // Batch edit via edit()
+    rWorld.edit(child)
+      .add(REL_PARENT, parentB)
+      .remove(REL_MEMBERS)
+      .commit();
+
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, parentA), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, parentB), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberA), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberB), 0);
+
+    // Deferred structural mutations
+    rWorld.setDeferred(true);
+    rWorld.addComponent(child, REL_PARENT, parentA);
+    rWorld.addComponent(leader, REL_MEMBERS, new Set([memberA]));
+
+    // Before flush: reverse index retains pre-deferred state
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, parentB), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, parentA), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberA), 0);
+
+    // After flush: changes committed and reverse index reconciled
+    rWorld.flush();
+    rWorld.setDeferred(false);
+
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, parentA), 1);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_PARENT, parentB), 0);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberA), 1);
+
+    // Duplicating entity with scalar and Set relationships
+    const clonedLeader = rWorld.duplicateEntity(leader);
+    assert.notStrictEqual(clonedLeader, leader);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberA), 2);
+    assert.deepStrictEqual(
+      new Set(rWorld.relationships.getRelated(REL_MEMBERS, memberA)),
+      new Set([leader, clonedLeader])
+    );
+
+    // Deleting original leader
+    rWorld.deleteEntity(leader);
+    assert.strictEqual(rWorld.relationships.countRelated(REL_MEMBERS, memberA), 1);
+    assert.deepStrictEqual(Array.from(rWorld.relationships.getRelated(REL_MEMBERS, memberA)), [clonedLeader]);
+
+    // Snapshot save & restore after relationship mutations
+    rWorld.registerComponentSerializer(REL_MEMBERS, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: unknown[] }).items);
+        }
+        return val;
+      }
+    });
+
+    const snapshot = rWorld.saveSnapshot();
+    const freshWorld = new World();
+    freshWorld.registerComponent(REL_PARENT);
+    freshWorld.registerComponent(REL_MEMBERS);
+    freshWorld.relationships.registerRelation(REL_PARENT);
+    freshWorld.relationships.registerRelation(REL_MEMBERS);
+    freshWorld.registerComponentSerializer(REL_MEMBERS, {
+      serialize(val: unknown) {
+        return val instanceof Set ? { __isSet: true, items: Array.from(val) } : val;
+      },
+      deserialize(val: unknown) {
+        if (val && typeof val === "object" && "__isSet" in val) {
+          return new Set((val as { __isSet: boolean; items: unknown[] }).items);
+        }
+        return val;
+      }
+    });
+
+    freshWorld.loadSnapshot(snapshot);
+    assert.strictEqual(freshWorld.relationships.countRelated(REL_PARENT, parentA), 1);
+    assert.strictEqual(freshWorld.relationships.countRelated(REL_MEMBERS, memberA), 1);
+    assert.deepStrictEqual(Array.from(freshWorld.relationships.getRelated(REL_MEMBERS, memberA)), [clonedLeader]);
+  }
+
+  // 25.3 PART A — updateComponent() with in-place Set mutation
+  {
+    const world = new World();
+    const REL_TARGETS = 390;
+    world.registerComponent(REL_TARGETS);
+    world.relationships.registerRelation(REL_TARGETS);
+
+    const targetA = world.createEntity();
+    const targetB = world.createEntity();
+    const subject = world.createEntity();
+
+    // 1. Create a registered Set-based relationship containing target A
+    world.relationships.add(subject, REL_TARGETS, targetA, false);
+    assert.strictEqual(world.relationships.countRelated(REL_TARGETS, targetA), 1);
+    assert.strictEqual(world.relationships.countRelated(REL_TARGETS, targetB), 0);
+
+    // 2. Call updateComponent() with an updater that deletes target A, adds target B, and returns the same Set instance
+    world.updateComponent<Set<EntityId>>(subject, REL_TARGETS, (set) => {
+      set.delete(targetA);
+      set.add(targetB);
+      return set;
+    });
+
+    // 3. Verify the forward component data, getRelated(), and countRelated() correctly show A removed and B added
+    const forwardTargets = world.relationships.getTargets(subject, REL_TARGETS) as Set<EntityId>;
+    assert.ok(forwardTargets instanceof Set);
+    assert.strictEqual(forwardTargets.has(targetA), false);
+    assert.strictEqual(forwardTargets.has(targetB), true);
+    assert.strictEqual(world.relationships.countRelated(REL_TARGETS, targetA), 0);
+    assert.strictEqual(world.relationships.countRelated(REL_TARGETS, targetB), 1);
+    assert.deepStrictEqual(Array.from(world.relationships.getRelated(REL_TARGETS, targetB)), [subject]);
+  }
+
+  // 25.4 PART B — Enforce getTargets() and public read-path read-only view contract
+  {
+    const world = new World();
+    const REL_FACTIONS = 391;
+    const CMP_USER_TAGS = 392; // Ordinary non-relationship Set component
+
+    world.registerComponent(REL_FACTIONS);
+    world.registerComponent(CMP_USER_TAGS);
+    world.relationships.registerRelation(REL_FACTIONS);
+
+    const f1 = world.createEntity();
+    const f2 = world.createEntity();
+    const f3 = world.createEntity();
+    const actor = world.createEntity();
+
+    // Initial setup
+    world.relationships.add(actor, REL_FACTIONS, f1, false);
+
+    // 1. getTargets() returns a read-only view that reflects live changes
+    const targetsView = world.relationships.getTargets(actor, REL_FACTIONS) as Set<EntityId>;
+    assert.ok(targetsView instanceof Set);
+    assert.strictEqual(targetsView.size, 1);
+    assert.strictEqual(targetsView.has(f1), true);
+    assert.strictEqual(targetsView.has(f2), false);
+
+    // Live reflection through supported APIs
+    world.relationships.add(actor, REL_FACTIONS, f2, false);
+    assert.strictEqual(targetsView.size, 2);
+    assert.strictEqual(targetsView.has(f1), true);
+    assert.strictEqual(targetsView.has(f2), true);
+
+    // 2. Direct mutation through returned view throws and prevents silent index corruption
+    assert.throws(
+      () => targetsView.add(f3),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => targetsView.delete(f1),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => targetsView.clear(),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    // Verify stored data and index remained untouched after rejected mutations
+    assert.strictEqual(targetsView.size, 2);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f3), 0);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f1), 1);
+
+    // 3. Existing callers can inspect membership and iterate targets
+    const iterated: EntityId[] = [];
+    for (const t of targetsView) {
+      iterated.push(t);
+    }
+    assert.deepStrictEqual(new Set(iterated), new Set([f1, f2]));
+    assert.strictEqual(Array.from(targetsView.values()).length, 2);
+
+    // forEach iteration and read-only protection on the 3rd callback argument
+    const forEachValues: EntityId[] = [];
+    const forEachKeys: EntityId[] = [];
+    const contextObj = { tag: "test-context" };
+    targetsView.forEach(function (this: typeof contextObj, val, key, setArg) {
+      assert.strictEqual(this.tag, "test-context");
+      assert.strictEqual(val, key);
+      forEachValues.push(val);
+      forEachKeys.push(key);
+      assert.strictEqual(setArg, targetsView);
+
+      // Mutating via 3rd argument must throw and be rejected
+      assert.throws(
+        () => setArg.add(f3),
+        /\[ECS\] Cannot mutate read-only relationship Set view directly/
+      );
+      assert.throws(
+        () => setArg.delete(val),
+        /\[ECS\] Cannot mutate read-only relationship Set view directly/
+      );
+      assert.throws(
+        () => setArg.clear(),
+        /\[ECS\] Cannot mutate read-only relationship Set view directly/
+      );
+    }, contextObj);
+    assert.deepStrictEqual(new Set(forEachValues), new Set([f1, f2]));
+    assert.deepStrictEqual(new Set(forEachKeys), new Set([f1, f2]));
+
+    // Invalid callback for forEach throws TypeError
+    assert.throws(
+      () => (targetsView.forEach as unknown as (cb: null) => void)(null),
+      TypeError
+    );
+
+    // valueOf() and prototype/descriptor escape path protection
+    const valueOfResult = targetsView.valueOf();
+    assert.strictEqual(valueOfResult, targetsView);
+    assert.throws(
+      () => valueOfResult.clear(),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => valueOfResult.add(f3),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => valueOfResult.delete(f1),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+
+    const rawValueOfResult = Object.prototype.valueOf.call(targetsView) as Set<EntityId>;
+    assert.strictEqual(rawValueOfResult, targetsView);
+    assert.throws(
+      () => rawValueOfResult.clear(),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+
+    // Property definition, prototype alteration, property setting, and deletion traps
+    assert.throws(
+      () => Object.defineProperty(targetsView, "add", { value: () => {} }),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => Object.setPrototypeOf(targetsView, {}),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => {
+        (targetsView as unknown as Record<string, unknown>).customProp = 123;
+      },
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => {
+        delete (targetsView as unknown as Record<string, unknown>).size;
+      },
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+
+    // Inherited accessor definitions (__defineGetter__, __defineSetter__) and escapes
+    const accessorTarget = targetsView as unknown as {
+      __defineGetter__?: (p: string, f: (this: unknown) => unknown) => void;
+      __defineSetter__?: (p: string, f: (this: unknown, v: unknown) => void) => void;
+    };
+    const protoWithAccessors = Object.prototype as unknown as {
+      __defineGetter__: (p: string, f: (this: unknown) => unknown) => void;
+      __defineSetter__: (p: string, f: (this: unknown, v: unknown) => void) => void;
+    };
+
+    assert.throws(
+      () => {
+        accessorTarget.__defineGetter__?.(
+          "escape",
+          function (this: unknown) {
+            return this;
+          }
+        );
+      },
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => {
+        accessorTarget.__defineSetter__?.(
+          "escape",
+          function (this: unknown) {}
+        );
+      },
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => {
+        protoWithAccessors.__defineGetter__.call(targetsView, "escape", function (this: unknown) {
+          return this;
+        });
+      },
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+    assert.throws(
+      () => {
+        protoWithAccessors.__defineSetter__.call(targetsView, "escape", function (this: unknown) {});
+      },
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+
+    // Verify stored relationship data and reverse index remain completely unchanged
+    assert.strictEqual(targetsView.size, 2);
+    assert.strictEqual(targetsView.has(f1), true);
+    assert.strictEqual(targetsView.has(f2), true);
+    assert.strictEqual((targetsView as unknown as Record<string, unknown>).escape, undefined);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f1), 1);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f2), 1);
+
+    // Component replacement semantics:
+    // When the relationship component is replaced with a new Set via setComponent,
+    // the previous view continues referencing the detached old Set, while new queries return views over the new Set.
+    const replacedTargets = new Set<EntityId>([f3]);
+    world.setComponent(actor, REL_FACTIONS, replacedTargets);
+    assert.strictEqual(targetsView.size, 2);
+    assert.strictEqual(targetsView.has(f1), true);
+    assert.strictEqual(targetsView.has(f3), false);
+
+    const newTargetsView = world.relationships.getTargets(actor, REL_FACTIONS) as Set<EntityId>;
+    assert.ok(newTargetsView instanceof Set);
+    assert.strictEqual(newTargetsView.size, 1);
+    assert.strictEqual(newTargetsView.has(f3), true);
+    assert.strictEqual(newTargetsView.has(f1), false);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f3), 1);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f1), 0);
+
+    // 4. Other public read paths return read-only views for registered relationships
+    const componentView = world.getComponent<Set<EntityId>>(actor, REL_FACTIONS)!;
+    assert.throws(
+      () => componentView.add(f3),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+
+    const mapper = world.getMapper<Set<EntityId>>(REL_FACTIONS);
+    const mapperView = mapper.get(actor)!;
+    assert.throws(
+      () => mapperView.add(f3),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+
+    const requiredView = mapper.require(actor);
+    assert.throws(
+      () => requiredView.add(f3),
+      /\[ECS\] Cannot mutate read-only relationship Set view directly/
+    );
+
+    // 5. External alias isolation: Sets supplied by callers cannot be mutated later to bypass reverse-index
+    const externalSet = new Set<EntityId>([f1]);
+    const aliasedActor = world.createEntity();
+    world.addComponent(aliasedActor, REL_FACTIONS, externalSet);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f1), 1);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f3), 1);
+
+    // Mutate the external alias directly
+    externalSet.add(f3);
+    externalSet.delete(f1);
+
+    // Internal stored relationship and reverse index must remain safe and unmutated
+    const storedAliasedTargets = world.relationships.getTargets(aliasedActor, REL_FACTIONS) as Set<EntityId>;
+    assert.strictEqual(storedAliasedTargets.has(f1), true);
+    assert.strictEqual(storedAliasedTargets.has(f3), false);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f1), 1);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f3), 1);
+
+    // Same alias isolation for setComponent and batch additions
+    const externalBatchSet = new Set<EntityId>([f2]);
+    world.buildEntity().add(REL_FACTIONS, externalBatchSet).commit();
+    externalBatchSet.add(f3);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f3), 1);
+    assert.strictEqual(world.relationships.countRelated(REL_FACTIONS, f2), 1);
+
+    // 6. Ordinary non-relationship Set components remain mutable and unaffected
+    const normalEntity = world.createEntity();
+    world.addComponent(normalEntity, CMP_USER_TAGS, new Set(["tag1"]));
+    const userTags = world.getComponent<Set<string>>(normalEntity, CMP_USER_TAGS)!;
+    assert.doesNotThrow(() => {
+      userTags.add("tag2");
+      userTags.delete("tag1");
+    });
+    assert.strictEqual(userTags.has("tag2"), true);
+    assert.strictEqual(userTags.has("tag1"), false);
+  }
+
   console.log("World tests completed!");
 }
 
