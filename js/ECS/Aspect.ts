@@ -10,33 +10,15 @@ export class Aspect {
 
   constructor(
     allMask: bigint = 0n,
-    oneMasks: bigint | readonly bigint[] = [],
+    oneMasks: readonly bigint[] = [],
     excludeMask: bigint = 0n
   ) {
     this.allMask = allMask;
     this.excludeMask = excludeMask;
-    if (typeof oneMasks === "bigint") {
-      this.oneMasks = oneMasks === 0n ? [] : [oneMasks];
-    } else {
-      const unique = Array.from(new Set(oneMasks)).sort((a, b) =>
-        a < b ? -1 : a > b ? 1 : 0
-      );
-      this.oneMasks = Object.freeze(unique);
-    }
-  }
-
-  /**
-   * Backward-compatibility accessor for combined oneMask.
-   * Returns a bitwise OR union of all disjunctive masks.
-   * Note: The combined bitmask cannot represent every composite query's full logical meaning
-   * when multiple independent disjunctive clauses are configured.
-   */
-  public get oneMask(): bigint {
-    let combined = 0n;
-    for (const mask of this.oneMasks) {
-      combined |= mask;
-    }
-    return combined;
+    const unique = Array.from(new Set(oneMasks)).sort((a, b) =>
+      a < b ? -1 : a > b ? 1 : 0
+    );
+    this.oneMasks = Object.freeze(unique);
   }
 
   /**

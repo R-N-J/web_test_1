@@ -177,9 +177,10 @@ Empty requirement semantics:
 - `Aspect.exclude()`: 0 excluded components; imposes no exclusion constraints (matches all entities).
 - `Aspect.one()`: requires at least one component from an empty set; unsatisfiable (matches 0 entities).
 
-Legacy compatibility:
-- The `Aspect` constructor accepts `(allMask, oneMask, excludeMask)` where `oneMask` can be a single `bigint` (legacy representation) or an array of disjunctive bitmasks `readonly bigint[]`.
-- The `oneMask` getter returns a bitwise OR union of all disjunctive masks in `oneMasks`. For composite aspects combining multiple independent `one()` groups, this bitwise union represents the candidate component pool but cannot express the multi-clause conjunction semantics.
+Canonical representation and constructor:
+- The canonical constructor is `new Aspect(allMask, oneMasks, excludeMask)`, where `oneMasks` is `readonly bigint[]` (defaulting to `[]`).
+- Each entry in `oneMasks` represents an independent disjunctive requirement; an entity must contain at least one component from each entry in `oneMasks`.
+- The `oneMasks` array is deduplicated, sorted in ascending order, and frozen upon construction.
 
 ### 6.2 Query APIs
 

@@ -168,21 +168,36 @@ export function testAspects() {
   assert.strictEqual(unionMatches.length, 4, "Aspect.one(A,B,C,D) should match all 4 entities with any of A,B,C,D");
   assert.strictEqual(world.getEntities(queryComposite).length, 2, "Aspect.one(A,B).and(Aspect.one(C,D)) must not collide with union query in cache");
 
-  // 8. Public API legacy constructor and oneMask getter compatibility
-  const legacyAspect = new Aspect(bA, bB, bC);
-  assert.strictEqual(legacyAspect.allMask, bA, "Legacy constructor allMask should match");
-  assert.strictEqual(legacyAspect.oneMask, bB, "Legacy constructor oneMask getter should return single mask");
-  assert.strictEqual(legacyAspect.excludeMask, bC, "Legacy constructor excludeMask should match");
-  assert.strictEqual(legacyAspect.matches(bA | bB), true, "Legacy aspect should match entity having all and one");
-  assert.strictEqual(legacyAspect.matches(bA), false, "Legacy aspect should not match entity missing one");
-  assert.strictEqual(legacyAspect.matches(bA | bB | bC), false, "Legacy aspect should exclude entity with excludeMask");
+  // 8. Canonical constructor with oneMasks array representation
+  const canonicalSingleOne = new Aspect(bA, [bB], bC);
+  assert.strictEqual(canonicalSingleOne.allMask, bA, "Canonical constructor allMask should match");
+  assert.deepStrictEqual(canonicalSingleOne.oneMasks, [bB], "Canonical constructor oneMasks should contain single mask");
+  assert.strictEqual(canonicalSingleOne.excludeMask, bC, "Canonical constructor excludeMask should match");
+  assert.strictEqual(canonicalSingleOne.matches(bA | bB), true, "Canonical aspect should match entity having all and one");
+  assert.strictEqual(canonicalSingleOne.matches(bA), false, "Canonical aspect should not match entity missing one");
+  assert.strictEqual(canonicalSingleOne.matches(bA | bB | bC), false, "Canonical aspect should exclude entity with excludeMask");
 
-  const legacyEmptyOne = new Aspect(bA, 0n, bC);
-  assert.strictEqual(legacyEmptyOne.oneMask, 0n, "Legacy constructor with 0n oneMask should return 0n");
-  assert.strictEqual(legacyEmptyOne.matches(bA), true, "Legacy constructor with 0n oneMask imposes no one requirement");
+  // Empty oneMasks array in canonical constructor imposes no disjunctive constraint
+  const canonicalEmptyOne = new Aspect(bA, [], bC);
+  assert.deepStrictEqual(canonicalEmptyOne.oneMasks, [], "Canonical constructor with [] oneMasks should have empty array");
+  assert.strictEqual(canonicalEmptyOne.matches(bA), true, "Canonical constructor with [] oneMasks imposes no one requirement");
+  assert.strictEqual(canonicalEmptyOne.matches(bA | bC), false, "Canonical constructor with [] oneMasks still excludes excludeMask");
 
-  // Composite aspect oneMask getter returns OR union of all one masks
-  assert.strictEqual(oneAB_and_oneCD.oneMask, bA | bB | bC | bD, "Composite aspect oneMask returns union of all one masks");
+  // Multiple independent oneMasks clauses in canonical constructor
+  const canonicalMultiOne = new Aspect(bA, [bB | bC, bD | bE], bF);
+  assert.strictEqual(canonicalMultiOne.allMask, bA, "Canonical multi-one allMask should match");
+  assert.deepStrictEqual(canonicalMultiOne.oneMasks, [bB | bC, bD | bE], "Canonical multi-one oneMasks should contain both clauses");
+  assert.strictEqual(canonicalMultiOne.excludeMask, bF, "Canonical multi-one excludeMask should match");
+  assert.strictEqual(canonicalMultiOne.matches(bA | bB | bD), true, "Matches entity with A, B, and D");
+  assert.strictEqual(canonicalMultiOne.matches(bA | bC | bE), true, "Matches entity with A, C, and E");
+  assert.strictEqual(canonicalMultiOne.matches(bA | bB), false, "Fails when missing second oneMask clause");
+  assert.strictEqual(canonicalMultiOne.matches(bA | bD), false, "Fails when missing first oneMask clause");
+  assert.strictEqual(canonicalMultiOne.matches(bA | bB | bD | bF), false, "Fails when excluded component F is present");
+
+  // Normalization, deduplication, sorting, and immutability of oneMasks
+  const unnormalizedAspect = new Aspect(0n, [bC, bB, bC, bA], 0n);
+  assert.deepStrictEqual(unnormalizedAspect.oneMasks, [bA, bB, bC], "oneMasks should be deduplicated and sorted in ascending order");
+  assert.strictEqual(Object.isFrozen(unnormalizedAspect.oneMasks), true, "oneMasks array must be frozen");
 
   // 9. Query caching invalidation and archetype registration safety
   world.registerComponent(COMP_E);

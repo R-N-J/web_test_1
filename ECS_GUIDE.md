@@ -84,7 +84,7 @@ Rogue1 ECS provides a suite of tools that work together to make coding feel "cle
   - [Batch Editing & Fluent API (create, edit)](#batch-editing--fluent-api-create-edit)
   - [Component Mappers](#component-mappers)
 - [14. Tutorial: Building a Game from Scratch](#14-tutorial-building-a-game-from-scratch)
-- [15. Performance Best Practices](#15-performance-best-practices)
+- [15. Performance Best Practices & Benchmarks](#15-performance-best-practices--benchmarks)
 - [16. Comparison with Other ECS Architectures](#16-comparison-with-other-ecs-architectures)
 - [17. Drawbacks and Considerations](#17-drawbacks-and-considerations)
 - [Method Cheat Sheet](#method-cheat-sheet)
@@ -395,9 +395,10 @@ const multiOne = Aspect.one(Components.FIRE_RESIST, Components.WATER_RESIST)
                        .and(Aspect.one(Components.SWORD, Components.BOW));
 ```
 
-#### Legacy Compatibility
-- **Direct Constructor**: `new Aspect(allMask, oneMask, excludeMask)` remains compatible with legacy code passing numeric/bigint masks.
-- **Combined `oneMask` Getter**: Returns a bitwise OR union of all disjunctive masks in `oneMasks`. Note that while this provides backwards compatibility, a single bitmask cannot represent the full semantics of multi-group queries (e.g. `(A or B) and (C or D)`). Use `aspect.oneMasks` for the full array of disjunctive clauses.
+#### Canonical Constructor and `oneMasks` Representation
+- **Direct Constructor**: `new Aspect(allMask = 0n, oneMasks: readonly bigint[] = [], excludeMask = 0n)` provides direct bitmask instantiation.
+- **Multi-Group Disjunction**: Multiple `oneMasks` entries represent independent requirements where an entity must match at least one component from each disjunctive group.
+- **Normalization**: The `oneMasks` array is automatically deduplicated, sorted in ascending order, and frozen upon construction.
 
 ### The Unified Query API
 The `World` provides a consistent set of methods for retrieving entities based on an `Aspect`, `Group`, or `Tag`. This symmetric API ensures that you use the same vocabulary regardless of how you are searching for entities.
