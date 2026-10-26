@@ -632,21 +632,22 @@ When world state is saved and restored via `world.saveSnapshot()` / `world.loadS
 
 To ensure referential safety and prevent accidental data corruption:
 
-1. **Explicit Relationship Registration**:
+1. **`registerEcsSerializers()` Naming Convention**:
+   When using `registerEcsSerializers(world, userComponents)` (or `bootstrapEcs`), entries in the supplied component mapping whose names begin with `"REL_"` (such as `REL_MEMBER_OF`, `REL_TARGETS`, `REL_LEADER_OF`) are automatically registered for relationship tracking (`world.relationships.registerRelation(id)`) and configured with `RelationshipSetSerializer`.
+   - **Supported Value Types**: This built-in serializer and tracking convention supports both scalar `EntityId` numbers (1-to-1 relationships) and `Set<EntityId>` collections (1-to-Many relationships).
+2. **Explicit Relationship Registration**:
    `RelationshipManager.registerRelation(componentId)` explicitly marks a component ID as an active relationship type so the reverse relationship index can be reconstructed safely.
    ```typescript
    const REL_FOLLOWS = 150;
    world.registerComponent(REL_FOLLOWS);
    world.relationships.registerRelation(REL_FOLLOWS);
    ```
-2. **Built-in Relationship IDs**:
-   Built-in relationship IDs (e.g. `REL_MEMBER_OF`, `REL_TARGETS`) are automatically registered through the existing component-registry setup (`ComponentRegistry.ts`).
-3. **Restoring Snapshots in Fresh Worlds**:
-   Custom relationship component IDs must be registered in a fresh World instance (via `world.relationships.registerRelation(id)`) **before** calling `world.loadSnapshot(data)` or `world.relationships.rebuild()`.
-4. **Data Isolation (No Heuristic Type Inference)**:
-   Ordinary numeric and `Set`-valued components (such as an inventory `Set<EntityId>`, numeric counters, or flags) are **never** inferred to be relationships from their stored values alone. This strict boundary prevents accidental data corruption or unwanted deletions from non-relationship components when entities are destroyed.
+3. **Custom Non-"REL_" Relationships**:
+   Custom relationship component IDs whose mapping names do not begin with `"REL_"` (e.g. `TARGET_ENTITY`, `FACTION_LINK`) must be registered explicitly through `world.relationships.registerRelation(id)` before calling `world.loadSnapshot()` or `world.relationships.rebuild()`. If their values need non-JSON serialization (such as `Set<EntityId>`), they also require an appropriate serializer (e.g. `RelationshipSetSerializer` or a custom `ComponentSerializer`) via `world.registerComponentSerializer(id, serializer)`.
+4. **Ordinary Components are Not Relationships**:
+   Ordinary numeric and `Set`-valued components (such as an inventory `Set<string>`, numeric counters, or flags) are **never** inferred to be relationships from their stored values alone. They are not treated as relationships unless explicitly registered as such. This strict boundary prevents accidental data corruption or unwanted deletions from non-relationship components when entities are destroyed.
 5. **Serializers for 1-to-Many Sets**:
-   Because 1-to-Many relationships store targets in a `Set<EntityId>`, remember to register appropriate serializers (e.g., via `registerEcsSerializers` or `world.registerComponentSerializer`) so `Set` values round-trip properly through JSON snapshots.
+   Because 1-to-Many relationships store targets in a `Set<EntityId>`, remember that relationships registered via the `"REL_"` convention automatically use `RelationshipSetSerializer`. Any custom relationship not using the `"REL_"` prefix must register `RelationshipSetSerializer` (or a custom serializer) manually.
 
 ---
 
@@ -1608,14 +1609,22 @@ const stats = world.getOrCreateSingleton<EngineStats>(InternalComponents.ENGINE_
 ```
 
 ### Snapshots (Saving/Loading)
-The World can be serialized to a JSON-compatible object.
+The World can be serialized to a JSON-compatible object via `world.saveSnapshot()` and restored via `world.loadSnapshot(data)`.
 
 ```typescript
 const saveGame = world.saveSnapshot();
 // ... later ...
 world.loadSnapshot(saveGame);
 ```
-*Note: Make sure to register Serializers if you use complex types like `Set` or `Map` in components.*
+
+#### Snapshot Guarantees and Rules:
+1. **Data Isolation**: Component values are deep-cloned during both `saveSnapshot()` and `loadSnapshot()`. Mutating live entities in the world after saving does not corrupt the snapshot in memory, and mutating restored entities does not affect the source snapshot.
+2. **Version Checking & Pre-Validation (Failure Atomicity)**: Snapshots are stamped with `ECS_SNAPSHOT_VERSION`. `loadSnapshot()` performs two-phase transactional restoration: Phase 1 validates the entire snapshot schema (version, `nextEntityId`, `entityVersions` bounds, `freeEntities` consistency, non-negative BigInt archetype masks, mask-to-column key correspondence, entity ID validity/uniqueness, reserved engine ID restrictions, column-to-entity length alignment, tag 1-to-1 mappings, group entity lists, and registered relationship target integrity) and pre-deserializes all component columns. If any validation check, relationship validation, or custom component deserializer throws, restoration aborts immediately, leaving the existing live world completely intact and unmodified. Phase 2 clears the world and applies the validated state.
+3. **Relationships & the `REL_` Convention**:
+   - Entries in the component mapping passed to `registerEcsSerializers(world, userComponents)` (or `bootstrapEcs`) whose names begin with `"REL_"` (such as `REL_MEMBER_OF`, `REL_TARGETS`) are automatically registered for relationship tracking (`world.relationships.registerRelation(id)`) and configured with `RelationshipSetSerializer` (supporting both scalar `EntityId` and `Set<EntityId>`).
+   - Custom relationship component IDs whose mapping names do not begin with `"REL_"` must be registered explicitly through `world.relationships.registerRelation(id)` before calling `loadSnapshot()`, and require an appropriate serializer when their values need non-JSON serialization.
+   - Ordinary numeric and `Set`-valued components are not relationships unless explicitly registered as such.
+4. **Complex Types & Serializers**: Register custom serializers with `world.registerComponentSerializer(id, serializer)` for components containing non-JSON types (such as `Map`, custom classes, etc.).
 
 ### Batch Editing & Fluent API (create, edit)
 When adding/removing many components at once, use `edit()` to avoid multiple archetype transitions. For creating new entities, `create()` and `buildEntity()` provide a clean, fluent API.

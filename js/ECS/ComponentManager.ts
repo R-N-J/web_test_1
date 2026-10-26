@@ -100,7 +100,10 @@ export class ComponentManager {
 
   public deserializeValue(id: ComponentId, value: unknown): unknown {
     const s = this.serializers.get(id);
-    return s ? s.deserialize(value) : value;
+    if (s) return s.deserialize(value);
+
+    // Default policy: deep clone to ensure restored live ECS data does not share references with snapshot.
+    return ComponentManager.deepCloneSnapshotValue(value);
   }
 
   /**

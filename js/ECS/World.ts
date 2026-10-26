@@ -4,7 +4,7 @@ import { USER_COMPONENT_ID_START } from "./InternalComponents";
 import { TagManager } from "./TagManager";
 import { GroupManager } from "./GroupManager";
 import { EntityEditor } from "./EntityEditor";
-import { EntityManager } from "./EntityManager";
+import { EntityManager, GENERATION_SHIFT, MAX_GENERATION } from "./EntityManager";
 import { QueryManager } from "./QueryManager";
 import { ComponentManager, ComponentObserver, MaskObserver } from "./ComponentManager";
 import { RelationshipManager } from "./RelationshipManager";
@@ -857,38 +857,283 @@ export class World {
    * Restores the world state from a snapshot.
    */
   public loadSnapshot(snapshot: WorldSnapshot): void {
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+      throw new Error(`[ECS] Invalid snapshot: snapshot must be a non-null object.`);
+    }
+
     if (snapshot.version !== ECS_SNAPSHOT_VERSION) {
       throw new Error(
         `Unsupported ECS snapshot version: ${snapshot.version}. Expected: ${ECS_SNAPSHOT_VERSION}`
       );
     }
-    //this.clear();
-    // If you want to enforce registration always happens before load,
-    // loadSnapshot can rely on resetForLoad() being called by the caller,
-    // OR you can call it here with no registrar.
+
+    const maxSafeIndex = Math.floor(Number.MAX_SAFE_INTEGER / GENERATION_SHIFT);
+
+    if (
+      typeof snapshot.nextEntityId !== "number" ||
+      !Number.isSafeInteger(snapshot.nextEntityId) ||
+      snapshot.nextEntityId < 0 ||
+      snapshot.nextEntityId > maxSafeIndex ||
+      !Array.isArray(snapshot.entityVersions) ||
+      !Array.isArray(snapshot.freeEntities) ||
+      !Array.isArray(snapshot.archetypes) ||
+      !snapshot.tags || typeof snapshot.tags !== "object" || Array.isArray(snapshot.tags) ||
+      !snapshot.groups || typeof snapshot.groups !== "object" || Array.isArray(snapshot.groups)
+    ) {
+      throw new Error(`[ECS] Malformed snapshot: invalid nextEntityId or missing required snapshot structures.`);
+    }
+
+    // 1. Validate entityVersions
+    if (snapshot.entityVersions.length < snapshot.nextEntityId) {
+      throw new Error(
+        `[ECS] Malformed snapshot: entityVersions length (${snapshot.entityVersions.length}) must be at least nextEntityId (${snapshot.nextEntityId}).`
+      );
+    }
+
+    for (let i = 0; i < snapshot.entityVersions.length; i++) {
+      const v = snapshot.entityVersions[i];
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0 || v > MAX_GENERATION) {
+        throw new Error(
+          `[ECS] Malformed snapshot: invalid entity version in entityVersions (${v} at index ${i}). Versions must be integers in range 0..${MAX_GENERATION}.`
+        );
+      }
+    }
+
+    // 2. Validate freeEntities
+    const freeEntitiesSet = new Set<EntityId>();
+    for (let i = 0; i < snapshot.freeEntities.length; i++) {
+      const freeId = snapshot.freeEntities[i];
+      if (typeof freeId !== "number" || !Number.isSafeInteger(freeId) || freeId <= 0) {
+        throw new Error(`[ECS] Malformed freeEntities ID at index ${i}: must be a positive safe integer.`);
+      }
+      const idx = Math.floor(freeId / GENERATION_SHIFT);
+      const gen = freeId % GENERATION_SHIFT;
+      if (idx < 0 || idx >= snapshot.nextEntityId) {
+        throw new Error(`[ECS] Malformed freeEntities ID ${freeId}: index ${idx} out of range [0..${snapshot.nextEntityId}).`);
+      }
+      if (gen < 1 || gen > MAX_GENERATION) {
+        throw new Error(`[ECS] Malformed freeEntities ID ${freeId}: generation ${gen} out of range [1..${MAX_GENERATION}].`);
+      }
+      if (snapshot.entityVersions[idx] !== gen) {
+        throw new Error(
+          `[ECS] Malformed freeEntities ID ${freeId}: generation ${gen} does not match entityVersions[${idx}] (${snapshot.entityVersions[idx]}).`
+        );
+      }
+      if (freeEntitiesSet.has(freeId)) {
+        throw new Error(`[ECS] Malformed freeEntities: duplicate free entity ID ${freeId}.`);
+      }
+      freeEntitiesSet.add(freeId);
+    }
+
+    const isValidSnapshotAllocatedEntity = (id: EntityId): boolean => {
+      if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) return false;
+      const idx = Math.floor(id / GENERATION_SHIFT);
+      const gen = id % GENERATION_SHIFT;
+      if (idx < 0 || idx >= snapshot.nextEntityId) return false;
+      if (gen < 1 || gen > MAX_GENERATION) return false;
+      if (snapshot.entityVersions[idx] !== gen) return false;
+      return !freeEntitiesSet.has(id);
+    };
+
+    // 3. Pre-validate and stage archetypes, masks, columns, and deserialized component values
+    interface StagedArchetype {
+      mask: bigint;
+      componentIds: ComponentId[];
+      entities: EntityId[];
+      columns: Map<ComponentId, unknown[]>;
+    }
+
+    const stagedArchetypes: StagedArchetype[] = [];
+    const allLiveEntities = new Set<EntityId>();
+    const seenArchetypeMasks = new Set<bigint>();
+
+    for (let archIdx = 0; archIdx < snapshot.archetypes.length; archIdx++) {
+      const archData = snapshot.archetypes[archIdx];
+      if (
+        !archData ||
+        typeof archData !== "object" ||
+        Array.isArray(archData) ||
+        typeof archData.mask !== "string" ||
+        !Array.isArray(archData.entities) ||
+        !archData.columns ||
+        typeof archData.columns !== "object" ||
+        Array.isArray(archData.columns)
+      ) {
+        throw new Error(`[ECS] Malformed archetype data at index ${archIdx} in snapshot.`);
+      }
+
+      // Validate mask string
+      if (!/^[0-9]+$/.test(archData.mask)) {
+        throw new Error(`[ECS] Malformed archetype mask: "${archData.mask}" is not a valid non-negative integer string.`);
+      }
+
+      let parsedMask: bigint;
+      try {
+        parsedMask = BigInt(archData.mask);
+      } catch {
+        throw new Error(`[ECS] Malformed archetype mask: "${archData.mask}" could not be parsed as BigInt.`);
+      }
+
+      if (parsedMask < 0n) {
+        throw new Error(`[ECS] Malformed archetype mask: mask must be non-negative.`);
+      }
+
+      if (seenArchetypeMasks.has(parsedMask)) {
+        throw new Error(`[ECS] Malformed snapshot: duplicate archetype mask ${parsedMask} at index ${archIdx}.`);
+      }
+      seenArchetypeMasks.add(parsedMask);
+
+      const rawColumnKeys = Object.keys(archData.columns);
+      const componentIds: ComponentId[] = [];
+      const seenComponentIds = new Set<ComponentId>();
+      let expectedMask = 0n;
+
+      for (const rawKey of rawColumnKeys) {
+        const compId = Number(rawKey);
+        if (!isValidComponentId(compId) || String(compId) !== rawKey) {
+          throw new Error(
+            `[ECS] Invalid Component ID: ${rawKey} in snapshot. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`
+          );
+        }
+        if (seenComponentIds.has(compId)) {
+          throw new Error(`[ECS] Duplicate component column ${compId} in archetype.`);
+        }
+        seenComponentIds.add(compId);
+        componentIds.push(compId);
+
+        if (compId < USER_COMPONENT_ID_START && !this.components.isRegistered(compId)) {
+          throw new Error(
+            `[ECS] Cannot load snapshot with unregistered reserved component ID: ${compId}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`
+          );
+        }
+
+        const rawColumn = archData.columns[compId];
+        if (!Array.isArray(rawColumn) || rawColumn.length !== archData.entities.length) {
+          throw new Error(
+            `[ECS] Malformed column data for component ${compId} in snapshot: column length must match entities length.`
+          );
+        }
+
+        expectedMask |= (1n << BigInt(compId));
+      }
+
+      if (parsedMask !== expectedMask) {
+        throw new Error(
+          `[ECS] Archetype mask mismatch: mask ${parsedMask} does not match component columns mask ${expectedMask}.`
+        );
+      }
+
+      // Validate entities in this archetype
+      for (let entIdx = 0; entIdx < archData.entities.length; entIdx++) {
+        const ent = archData.entities[entIdx];
+        if (!isValidSnapshotAllocatedEntity(ent)) {
+          throw new Error(
+            `[ECS] Malformed or invalid entity ID ${ent} in archetype mask ${parsedMask}.`
+          );
+        }
+        if (allLiveEntities.has(ent)) {
+          throw new Error(
+            `[ECS] Duplicate entity ID ${ent} found across snapshot archetypes.`
+          );
+        }
+        allLiveEntities.add(ent);
+      }
+
+      // Pre-deserialize all column values (if a custom deserializer throws, it fails before world mutation)
+      const stagedColumns = new Map<ComponentId, unknown[]>();
+      for (const compId of componentIds) {
+        const rawColumn = archData.columns[compId];
+        const decoded = rawColumn.map(v => this.components.deserializeValue(compId, v));
+
+        // Validate relationship component values if compId is explicitly registered as a relationship
+        if (this.relationships.isRegisteredRelation(compId)) {
+          for (let rowIdx = 0; rowIdx < decoded.length; rowIdx++) {
+            const relVal = decoded[rowIdx];
+            const subject = archData.entities[rowIdx];
+
+            if (typeof relVal === "number") {
+              if (!isValidSnapshotAllocatedEntity(relVal)) {
+                throw new Error(
+                  `[ECS] Malformed relationship in snapshot: component ${compId} on entity ${subject} contains invalid or unallocated target entity ID: ${relVal}.`
+                );
+              }
+            } else if (relVal instanceof Set) {
+              for (const target of relVal) {
+                if (typeof target !== "number" || !isValidSnapshotAllocatedEntity(target)) {
+                  throw new Error(
+                    `[ECS] Malformed relationship in snapshot: component ${compId} on entity ${subject} contains invalid or unallocated target in Set: ${String(target)}.`
+                  );
+                }
+              }
+            } else {
+              throw new Error(
+                `[ECS] Malformed relationship in snapshot: component ${compId} on entity ${subject} has unsupported value type (${typeof relVal}). Relationship values must be an EntityId number or Set<EntityId>.`
+              );
+            }
+          }
+        }
+
+        stagedColumns.set(compId, decoded);
+      }
+
+      stagedArchetypes.push({
+        mask: parsedMask,
+        componentIds,
+        entities: [...archData.entities],
+        columns: stagedColumns
+      });
+    }
+
+    // 4. Validate tags
+    const taggedEntities = new Set<EntityId>();
+    for (const [tag, ent] of Object.entries(snapshot.tags)) {
+      if (typeof tag !== "string" || tag.length === 0) {
+        throw new Error(`[ECS] Malformed tag: tag name must be a non-empty string.`);
+      }
+      if (!isValidSnapshotAllocatedEntity(ent)) {
+        throw new Error(`[ECS] Malformed tag: entity ID ${ent} for tag "${tag}" is invalid or unallocated.`);
+      }
+      if (taggedEntities.has(ent)) {
+        throw new Error(`[ECS] Malformed snapshot: entity ${ent} assigned to multiple tags.`);
+      }
+      taggedEntities.add(ent);
+    }
+
+    // 5. Validate groups
+    for (const [groupName, entities] of Object.entries(snapshot.groups)) {
+      if (typeof groupName !== "string" || groupName.length === 0) {
+        throw new Error(`[ECS] Malformed group: group name must be a non-empty string.`);
+      }
+      if (!Array.isArray(entities)) {
+        throw new Error(`[ECS] Malformed group "${groupName}": entities must be an array.`);
+      }
+      const groupEntitySet = new Set<EntityId>();
+      for (const ent of entities) {
+        if (!isValidSnapshotAllocatedEntity(ent)) {
+          throw new Error(`[ECS] Malformed group "${groupName}": entity ID ${ent} is invalid or unallocated.`);
+        }
+        if (groupEntitySet.has(ent)) {
+          throw new Error(`[ECS] Malformed group "${groupName}": duplicate entity ID ${ent}.`);
+        }
+        groupEntitySet.add(ent);
+      }
+    }
+
+    // =========================================================================
+    // Transactional Commit Phase: All validations passed, execute destructive load
+    // =========================================================================
     this.resetForLoad();
 
     this.entities.setNextEntityId(snapshot.nextEntityId);
     this.entities.loadVersions(snapshot.entityVersions);
     this.entities.loadFreeEntities(snapshot.freeEntities);
 
-    for (const archData of snapshot.archetypes) {
-      const mask = BigInt(archData.mask);
-      const componentIds = Object.keys(archData.columns).map(Number);
+    for (const staged of stagedArchetypes) {
+      const arch = this.components.getOrCreateArchetype(staged.mask, staged.componentIds);
+      arch.entities = staged.entities;
 
-      const arch = this.components.getOrCreateArchetype(mask, componentIds);
-      arch.entities = archData.entities;
-
-      for (const compId of componentIds) {
-        if (!isValidComponentId(compId)) {
-          throw new Error(`[ECS] Invalid Component ID: ${compId} in snapshot. Component IDs must be non-negative integers <= ${MAX_COMPONENT_ID}.`);
-        }
-        if (compId < USER_COMPONENT_ID_START && !this.components.isRegistered(compId)) {
-          throw new Error(`[ECS] Cannot load snapshot with unregistered reserved component ID: ${compId}. Component IDs 0..${USER_COMPONENT_ID_START - 1} are reserved for internal engine components.`);
-        }
-        const rawColumn = archData.columns[compId];
-        const decoded = rawColumn.map(v => this.components.deserializeValue(compId, v));
-        arch.columns.set(compId, decoded);
+      for (const compId of staged.componentIds) {
+        arch.columns.set(compId, staged.columns.get(compId)!);
         this.components.addRegisteredComponent(compId);
       }
 

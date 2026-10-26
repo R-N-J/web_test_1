@@ -327,9 +327,9 @@ These are supporting features, not prerequisites for core archetype correctness.
 - Forward and reverse relationship queries must agree.
 - The behavior of relationships when an entity is deleted must be explicitly specified.
 - **REL-001:** `RelationshipManager.registerRelation(componentId)` explicitly designates a component ID as a relationship type so reverse indexes can be accurately maintained and reconstructed.
-- **REL-002:** Built-in relationship IDs (e.g. `REL_MEMBER_OF`, `REL_TARGETS`) are registered during component bootstrap.
-- **REL-003:** Custom relationship IDs must be registered before `world.loadSnapshot()` or `RelationshipManager.rebuild()` restores state in a fresh world instance.
-- **REL-004:** Reverse index reconstruction and entity deletion cleanup strictly target registered relationship component IDs. Non-relationship numeric and `Set`-valued components are never inferred to be relationships from data types alone, preventing accidental corruption or deletion of unrelated entity component data.
+- **REL-002:** `registerEcsSerializers(world, userComponents)` (or `bootstrapEcs`) automatically registers entries in the supplied component mapping whose names begin with `"REL_"` (such as `REL_MEMBER_OF`, `REL_TARGETS`) for relationship tracking (`world.relationships.registerRelation(id)`) and configures them with `RelationshipSetSerializer`. This built-in convention supports both scalar `EntityId` numbers (1-to-1 relationships) and `Set<EntityId>` collections (1-to-Many relationships).
+- **REL-003:** Custom relationship component IDs whose mapping names do not begin with `"REL_"` must be registered explicitly through `world.relationships.registerRelation(id)` before `world.loadSnapshot()` or `RelationshipManager.rebuild()` restores state in a fresh world instance, and require an appropriate serializer (e.g. `RelationshipSetSerializer` or a custom `ComponentSerializer`) registered via `world.registerComponentSerializer(id, serializer)` when their values need non-JSON serialization.
+- **REL-004:** Reverse index reconstruction and entity deletion cleanup strictly target registered relationship component IDs. Ordinary numeric and `Set`-valued components are not relationships unless explicitly registered as such, preventing accidental corruption or deletion of unrelated entity component data.
 
 ## 12. Prefabs, assets, and dependency injection
 
@@ -377,11 +377,11 @@ Snapshots are a framework feature and must be validated separately from basic en
 
 - **SAV-001:** A snapshot contains the state that the persistence contract declares saveable.
 - **SAV-002:** Loading a valid snapshot reconstructs equivalent live entities, component membership, and component values.
-- **SAV-003:** Snapshot versions are checked and incompatible formats are rejected or migrated according to a documented policy.
-- **SAV-004:** Invalid snapshots produce clear errors.
-- **SAV-005:** A failed load must not leave the world in an undocumented partially restored state.
-- **SAV-006:** Entity IDs, internal entities, relationships, tags, groups, and singleton state must follow explicit persistence rules. Custom relationship component IDs must be registered on `RelationshipManager.registerRelation()` prior to snapshot restoration to allow safe reverse-index rebuilding.
-- **SAV-007:** Components containing `Map`, `Set`, or other non-JSON-native data require appropriate serializers or documented restrictions.
+- **SAV-003:** Snapshot versions are checked and incompatible formats are rejected or migrated according to a documented policy (`ECS_SNAPSHOT_VERSION = 2`).
+- **SAV-004:** Invalid snapshots produce clear errors before any world state mutation occurs.
+- **SAV-005:** Complete failure atomicity: `World.loadSnapshot()` operates via two-phase transactional restoration. Phase 1 validates the entire snapshot schema (version, nextEntityId, entityVersions bounds, freeEntities consistency, non-negative BigInt archetype masks, mask-to-column key correspondence, entity ID validity/uniqueness, reserved engine ID restrictions, column-to-entity length alignment, tag 1-to-1 mappings, and group entity lists), pre-deserializes all component columns, and validates staged registered relationship columns (verifying all single-target numbers and Set elements reference valid, allocated, non-free entity IDs and rejecting unsupported value types). If any schema validation, relationship check, or custom component deserializer throws, the restoration aborts immediately, leaving the existing live world completely intact and unmodified. Phase 2 executes destructive state clearing and commits the staged snapshot data.
+- **SAV-006:** Entity IDs, internal entities, relationships, tags, groups, and singleton state must follow explicit persistence rules. Entries in the supplied component mapping whose names begin with `"REL_"` are automatically registered for relationship tracking and snapshot serialization (`RelationshipSetSerializer`, supporting both scalar `EntityId` and `Set<EntityId>`). Custom relationship component IDs whose mapping names do not begin with `"REL_"` must be registered explicitly through `world.relationships.registerRelation(id)` and configured with appropriate serializers prior to snapshot restoration to allow safe reverse-index rebuilding.
+- **SAV-007:** Components containing `Map`, `Set`, or other non-JSON-native data require appropriate serializers or documented restrictions. Default deserialization deep-clones component values to guarantee complete memory isolation between snapshot data and restored live ECS storage. Ordinary numeric and `Set`-valued components are not relationships unless explicitly registered as such.
 
 Round-trip tests must compare meaningful world state rather than requiring identical internal archetype row positions.
 
@@ -489,7 +489,7 @@ The following decisions must be confirmed during implementation review:
 - The guarantees, if any, about query ordering.
 - Which state survives `world.clear()` and scene transitions.
 - Which managers, tags, groups, relationships, and singleton values are persisted in snapshots.
-- Whether snapshots are restored atomically or use another explicit failure policy.
+- Whether snapshots are restored atomically or use another explicit failure policy (Resolved: Two-phase transactional restoration guarantees complete failure atomicity; pre-validation and column deserialization must succeed before any live world state is cleared or mutated; invalid snapshots leave the previous world completely intact).
 
 Until these decisions are resolved, tests and documentation must not imply a stronger guarantee than the implementation provides.
 

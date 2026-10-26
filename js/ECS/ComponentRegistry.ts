@@ -10,7 +10,7 @@ import { InternalComponents, ENGINE_COMPONENT_ID_START, USER_COMPONENT_ID_START 
  * - EntityId (number) OR
  * - Set<EntityId>
  */
-const RelationshipSetSerializer: ComponentSerializer = {
+export const RelationshipSetSerializer: ComponentSerializer = {
   serialize(value: unknown): unknown {
     if (value instanceof Set) {
       return { __rogue1_ecs: "Set", values: Array.from(value) };
@@ -36,18 +36,12 @@ const RelationshipSetSerializer: ComponentSerializer = {
  * Register core engine serializers.
  */
 export function registerEcsSerializers(world: World, userComponents: Record<string, ComponentId>): void {
-  // We look for specific relationship IDs in the user component set if they exist.
-  // Using index access on the Record is safe and avoids 'any'.
-  const relMemberOf = userComponents["REL_MEMBER_OF"];
-  const relTargets = userComponents["REL_TARGETS"];
-
-  if (relMemberOf !== undefined) {
-    world.registerComponentSerializer(relMemberOf, RelationshipSetSerializer);
-    world.relationships.registerRelation(relMemberOf);
-  }
-  if (relTargets !== undefined) {
-    world.registerComponentSerializer(relTargets, RelationshipSetSerializer);
-    world.relationships.registerRelation(relTargets);
+  // Register relationship serializers and tracking for any relationship component IDs (e.g. REL_*)
+  for (const [name, id] of Object.entries(userComponents)) {
+    if (name.startsWith("REL_") || name === "REL_MEMBER_OF" || name === "REL_TARGETS") {
+      world.registerComponentSerializer(id, RelationshipSetSerializer);
+      world.relationships.registerRelation(id);
+    }
   }
 }
 

@@ -36,6 +36,13 @@ export class RelationshipManager {
   }
 
   /**
+   * Returns true if the component ID has been registered as a relationship.
+   */
+  public isRegisteredRelation(relationId: ComponentId): boolean {
+    return this.registeredRelations.has(relationId);
+  }
+
+  /**
    * Links a subject to a target.
    * @param exclusive If true, replaces existing target. If false, adds to a collection.
    */
