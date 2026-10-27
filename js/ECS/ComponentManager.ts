@@ -181,6 +181,9 @@ export class ComponentManager {
       return;
     }
     const oldLocation = this.entityManager.getLocation(entity);
+    if (oldLocation) {
+      this.entityManager.validateLocation(entity, oldLocation);
+    }
     const oldMask = oldLocation?.arch.mask ?? 0n;
     const dataToMigrate = new Map<ComponentId, unknown>();
 
@@ -194,6 +197,11 @@ export class ComponentManager {
       }
 
       const movedEntityId = arch.removeEntity(row);
+      if (movedEntityId === undefined) {
+        throw new Error(
+          `[ECS] Failed to remove entity ${entity} from archetype row ${row}.`
+        );
+      }
 
       if (movedEntityId !== entity) {
         const movedLoc = this.entityManager.getLocation(movedEntityId);
@@ -250,6 +258,9 @@ export class ComponentManager {
       return;
     }
     const oldLocation = this.entityManager.getLocation(entity);
+    if (oldLocation) {
+      this.entityManager.validateLocation(entity, oldLocation);
+    }
 
     // If the same archetype, this is NON-structural (no mask change).
     if (oldLocation && oldLocation.arch.mask === newMask) {
@@ -274,6 +285,11 @@ export class ComponentManager {
         }
       }
       const movedEntityId = arch.removeEntity(row);
+      if (movedEntityId === undefined) {
+        throw new Error(
+          `[ECS] Failed to remove entity ${entity} from archetype row ${row}.`
+        );
+      }
       if (movedEntityId !== entity) {
         const movedLoc = this.entityManager.getLocation(movedEntityId);
         if (movedLoc) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EntityManager, MAX_GENERATION } from "../ECS/EntityManager";
-import { Archetype } from "../ECS/Archetype";
+import { Archetype, ComponentId } from "../ECS/Archetype";
 
 /**
  * Basic tests for the EntityManager class.
@@ -17,7 +17,7 @@ export function testEntityManager() {
   assert.notStrictEqual(e1, e2, "e1 and e2 should be different");
 
   // Test: Location management
-  const arch = new Archetype(1n, [1]); // Dummy archetype with component ID 1
+  const arch = new Archetype(1n << 1n, [1]); // Dummy archetype with component ID 1
   em.setLocation(e1, arch, 0);
   const loc1 = em.getLocation(e1);
   assert.ok(loc1 !== undefined && loc1.arch === arch && loc1.row === 0, "e1 location should be set");
@@ -257,6 +257,145 @@ export function testEntityManager() {
   const postResetEntity = growEm.createEntity();
   assert.strictEqual(Math.floor(postResetEntity / 65536), 0, "First entity after hardReset() must allocate at index 0");
   assert.strictEqual(growEm.isValid(postResetEntity), true, "First entity after hardReset() must be valid");
+
+  // --- Tests: Location Integrity and Component Access Safety ---
+  {
+    interface PositionComp {
+      x: number;
+      y: number;
+    }
+    const C_POS: ComponentId = 100;
+    const C_VEL: ComponentId = 101;
+    const locEm = new EntityManager();
+    const eA = locEm.createEntity();
+    const eB = locEm.createEntity();
+
+    const testArch = new Archetype((1n << BigInt(C_POS)) | (1n << BigInt(C_VEL)), [C_POS, C_VEL]);
+    testArch.addEntity(eA, new Map<ComponentId, unknown>([
+      [C_POS, { x: 10, y: 20 }],
+      [C_VEL, { dx: 1, dy: 2 }]
+    ]));
+    testArch.addEntity(eB, new Map<ComponentId, unknown>([
+      [C_POS, { x: 50, y: 60 }],
+      [C_VEL, { dx: 5, dy: 6 }]
+    ]));
+
+    locEm.setLocation(eA, testArch, 0);
+    locEm.setLocation(eB, testArch, 1);
+
+    // Initial valid state check
+    assert.deepStrictEqual(locEm.getComponentValue(eA, C_POS), { x: 10, y: 20 });
+    assert.deepStrictEqual(locEm.getComponentValue(eB, C_POS), { x: 50, y: 60 });
+    assert.strictEqual(locEm.hasComponent(eA, C_POS), true);
+    assert.strictEqual(locEm.getMask(eA), testArch.mask);
+
+    // 1. Fractional row index
+    locEm.setLocation(eA, testArch, 0.5);
+    assert.throws(() => locEm.getComponentValue(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.setComponentValue(eA, C_POS, { x: 999, y: 999 }), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.updateComponentValue<PositionComp>(eA, C_POS, c => ({ ...c, x: 999 })), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.mutateComponent<PositionComp>(eA, C_POS, c => { c.x = 999; }), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.hasComponent(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.getMask(eA), /Inconsistent entity location for entity/);
+
+    // Verify storage was not modified
+    assert.deepStrictEqual(testArch.getValue(C_POS, 0), { x: 10, y: 20 });
+    assert.deepStrictEqual(testArch.getValue(C_POS, 1), { x: 50, y: 60 });
+
+    // 2. Negative row index
+    locEm.setLocation(eA, testArch, -1);
+    assert.throws(() => locEm.getComponentValue(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.setComponentValue(eA, C_POS, { x: 999, y: 999 }), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.updateComponentValue<PositionComp>(eA, C_POS, c => ({ ...c, x: 999 })), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.mutateComponent<PositionComp>(eA, C_POS, c => { c.x = 999; }), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.hasComponent(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.getMask(eA), /Inconsistent entity location for entity/);
+
+    // 3. Out-of-range row index
+    locEm.setLocation(eA, testArch, 2); // Length is 2, index 2 is out of range
+    assert.throws(() => locEm.getComponentValue(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.setComponentValue(eA, C_POS, { x: 999, y: 999 }), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.updateComponentValue<PositionComp>(eA, C_POS, c => ({ ...c, x: 999 })), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.mutateComponent<PositionComp>(eA, C_POS, c => { c.x = 999; }), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.hasComponent(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.getMask(eA), /Inconsistent entity location for entity/);
+
+    locEm.setLocation(eA, testArch, 999);
+    assert.throws(() => locEm.getComponentValue(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.setComponentValue(eA, C_POS, { x: 999, y: 999 }), /Inconsistent entity location for entity/);
+
+    // 4. Valid row that belongs to a different entity (Row 1 belongs to eB, not eA)
+    locEm.setLocation(eA, testArch, 1);
+    assert.throws(
+      () => locEm.getComponentValue(eA, C_POS),
+      /Inconsistent entity location for entity/,
+      "getComponentValue must not read another entity's row"
+    );
+    assert.throws(
+      () => locEm.setComponentValue(eA, C_POS, { x: 999, y: 999 }),
+      /Inconsistent entity location for entity/,
+      "setComponentValue must not overwrite another entity's row"
+    );
+    assert.throws(
+      () => locEm.updateComponentValue<PositionComp>(eA, C_POS, c => ({ ...c, x: 999 })),
+      /Inconsistent entity location for entity/,
+      "updateComponentValue must not update another entity's row"
+    );
+    assert.throws(
+      () => locEm.mutateComponent<PositionComp>(eA, C_POS, c => { c.x = 999; }),
+      /Inconsistent entity location for entity/,
+      "mutateComponent must not mutate another entity's row"
+    );
+    assert.throws(() => locEm.hasComponent(eA, C_POS), /Inconsistent entity location for entity/);
+    assert.throws(() => locEm.getMask(eA), /Inconsistent entity location for entity/);
+
+    // Verify eB's data at row 1 was completely untouched
+    assert.deepStrictEqual(locEm.getComponentValue(eB, C_POS), { x: 50, y: 60 });
+    assert.deepStrictEqual(testArch.getValue(C_POS, 1), { x: 50, y: 60 });
+    assert.deepStrictEqual(testArch.getValue(C_VEL, 1), { dx: 5, dy: 6 });
+
+    // 5. Valid component access continuing to work after restoring the correct location
+    locEm.setLocation(eA, testArch, 0);
+    assert.deepStrictEqual(locEm.getComponentValue(eA, C_POS), { x: 10, y: 20 });
+    assert.strictEqual(locEm.hasComponent(eA, C_POS), true);
+    assert.strictEqual(locEm.getMask(eA), testArch.mask);
+
+    // Modify eA and verify only eA is altered
+    assert.strictEqual(locEm.setComponentValue(eA, C_POS, { x: 15, y: 25 }), true);
+    assert.deepStrictEqual(locEm.getComponentValue(eA, C_POS), { x: 15, y: 25 });
+    assert.deepStrictEqual(locEm.getComponentValue(eB, C_POS), { x: 50, y: 60 });
+
+    assert.strictEqual(locEm.updateComponentValue<PositionComp>(eA, C_POS, c => ({ x: c.x + 5, y: c.y + 5 })), true);
+    assert.deepStrictEqual(locEm.getComponentValue(eA, C_POS), { x: 20, y: 30 });
+    assert.deepStrictEqual(locEm.getComponentValue(eB, C_POS), { x: 50, y: 60 });
+
+    assert.strictEqual(locEm.mutateComponent<PositionComp>(eA, C_POS, c => { c.x = 22; }), true);
+    assert.deepStrictEqual(locEm.getComponentValue(eA, C_POS), { x: 22, y: 30 });
+    assert.deepStrictEqual(locEm.getComponentValue(eB, C_POS), { x: 50, y: 60 });
+
+    // 6. Zero-component entities, missing components, and unallocated entities
+    const eZero = locEm.createEntity();
+    assert.strictEqual(locEm.getLocation(eZero), undefined);
+    assert.strictEqual(locEm.getComponentValue(eZero, C_POS), undefined);
+    assert.strictEqual(locEm.setComponentValue(eZero, C_POS, { x: 1, y: 1 }), false);
+    assert.strictEqual(locEm.updateComponentValue(eZero, C_POS, v => v), false);
+    assert.strictEqual(locEm.mutateComponent(eZero, C_POS, () => {}), false);
+    assert.strictEqual(locEm.hasComponent(eZero, C_POS), false);
+    assert.strictEqual(locEm.getMask(eZero), 0n);
+
+    // Missing component ID on positioned entity (e.g. component ID 999 not in archetype)
+    assert.strictEqual(locEm.getComponentValue(eA, 999), undefined);
+    assert.strictEqual(locEm.setComponentValue(eA, 999, 123), false);
+    assert.strictEqual(locEm.updateComponentValue(eA, 999, v => v), false);
+    assert.strictEqual(locEm.mutateComponent(eA, 999, () => {}), false);
+    assert.strictEqual(locEm.hasComponent(eA, 999), false);
+
+    // Unallocated entity ID
+    assert.strictEqual(locEm.getComponentValue(88888, C_POS), undefined);
+    assert.strictEqual(locEm.setComponentValue(88888, C_POS, { x: 1, y: 1 }), false);
+    assert.strictEqual(locEm.hasComponent(88888, C_POS), false);
+    assert.strictEqual(locEm.getMask(88888), 0n);
+  }
 
   console.log("EntityManager tests completed!");
 }

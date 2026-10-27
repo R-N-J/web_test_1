@@ -637,15 +637,26 @@ export class World {
       return;
     }
 
+    // Validate archetype location consistency before performing any mutations
+    const initialLoc = this.entities.getLocation(entity);
+    if (initialLoc) {
+      this.entities.validateLocation(entity, initialLoc);
+    }
+
     // 0. Clean up relationships pointing TO this entity
     this.relationships.cleanup(entity);
 
-    // 1. Clean up from Archetypes
+    // 1. Clean up from Archetypes (re-fetch location as cleanup may transmute self-referential relations)
     const loc = this.entities.getLocation(entity);
     const oldMask = loc?.arch.mask ?? 0n;
 
     if (loc) {
       const movedEntityId = loc.arch.removeEntity(loc.row);
+      if (movedEntityId === undefined) {
+        throw new Error(
+          `[ECS] Failed to remove entity ${entity} from archetype row ${loc.row}.`
+        );
+      }
 
       if (movedEntityId !== entity) {
         const movedLoc = this.entities.getLocation(movedEntityId);

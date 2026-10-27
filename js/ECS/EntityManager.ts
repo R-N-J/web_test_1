@@ -120,6 +120,26 @@ export class EntityManager {
     this.entityToLocation.delete(entity);
   }
 
+  /**
+   * Validates that an existing EntityLocation is internally consistent with archetype storage.
+   * Throws a descriptive error if storage corruption / location mismatch is detected.
+   */
+  public validateLocation(entity: EntityId, loc?: EntityLocation): void {
+    const targetLoc = loc ?? this.entityToLocation.get(entity);
+    if (!targetLoc) return;
+    const { arch, row } = targetLoc;
+    if (
+      typeof row !== "number" ||
+      !Number.isInteger(row) ||
+      row < 0 ||
+      row >= arch.entities.length ||
+      arch.entities[row] !== entity
+    ) {
+      throw new Error(
+        `[ECS] Inconsistent entity location for entity ${entity}: row ${row} does not match archetype storage.`
+      );
+    }
+  }
 
   /**
    * Safely retrieves a component value for an entity.
@@ -127,7 +147,9 @@ export class EntityManager {
    */
   public getComponentValue<T>(entity: EntityId, componentId: ComponentId): T | undefined {
     const loc = this.entityToLocation.get(entity);
-    if (!loc || !loc.arch.hasComponent(componentId)) return undefined;
+    if (!loc) return undefined;
+    this.validateLocation(entity, loc);
+    if (!loc.arch.hasComponent(componentId)) return undefined;
     return loc.arch.getValue<T>(componentId, loc.row);
   }
 
@@ -138,6 +160,7 @@ export class EntityManager {
   public setComponentValue<T>(entity: EntityId, componentId: ComponentId, value: T): boolean {
     const loc = this.entityToLocation.get(entity);
     if (!loc) return false;
+    this.validateLocation(entity, loc);
 
     const col = loc.arch.columns.get(componentId);
     if (!col) return false;
@@ -157,6 +180,7 @@ export class EntityManager {
   ): boolean {
     const loc = this.entityToLocation.get(entity);
     if (!loc) return false;
+    this.validateLocation(entity, loc);
 
     const col = loc.arch.columns.get(componentId);
     if (!col) return false;
@@ -177,6 +201,7 @@ export class EntityManager {
   ): boolean {
     const loc = this.entityToLocation.get(entity);
     if (!loc) return false;
+    this.validateLocation(entity, loc);
 
     const col = loc.arch.columns.get(componentId);
     if (!col) return false;
@@ -185,13 +210,14 @@ export class EntityManager {
     return true;
   }
 
-
   /**
    * Checks if an entity possesses a specific component.
    */
   public hasComponent(entity: EntityId, componentId: ComponentId): boolean {
     const loc = this.entityToLocation.get(entity);
-    return loc ? loc.arch.hasComponent(componentId) : false;
+    if (!loc) return false;
+    this.validateLocation(entity, loc);
+    return loc.arch.hasComponent(componentId);
   }
 
   /**
@@ -199,7 +225,9 @@ export class EntityManager {
    */
   public getMask(entity: EntityId): bigint {
     const loc = this.entityToLocation.get(entity);
-    return loc ? loc.arch.mask : 0n;
+    if (!loc) return 0n;
+    this.validateLocation(entity, loc);
+    return loc.arch.mask;
   }
 
 

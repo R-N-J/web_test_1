@@ -1,4 +1,5 @@
 import { testAspects } from "./Aspect.test";
+import { testArchetype } from "./Archetype.test";
 import { testBag } from "./Bag.test";
 import { testWorld } from "./World.test";
 import { testEntityManager } from "./EntityManager.test";
@@ -18,6 +19,7 @@ export function runAllTests() {
   console.log("=== Starting ECS Test Suite ===");
   try {
     testAspects();
+    testArchetype();
     testBag();
     testWorld();
     testEntityManager();
