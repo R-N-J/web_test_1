@@ -1,9 +1,9 @@
-import { BaseSystem, PassiveSystem } from "./System";
+import { PassiveSystem } from "./System";
 import { Subscribe, Inject } from "./Decorators";
 import { SceneManager } from "./SceneManager";
 import { StorageManager } from "./StorageManager";
 import { World } from "./World";
-import { Scene } from "./Scene"; // Import the Scene interface
+import { Scene } from "./Scene";
 import { TurnManager } from "./TurnManager";
 
 /**
@@ -11,14 +11,33 @@ import { TurnManager } from "./TurnManager";
  * Coordinates high-level game flow, winning, losing, and transitions.
  */
 export abstract class Director extends PassiveSystem {
-  @Inject()
-  protected scenes: SceneManager = undefined as any;
+  private _scenes?: SceneManager;
+  private _storage?: StorageManager;
+  private _turns?: TurnManager;
 
   @Inject()
-  protected storage: StorageManager = undefined as any;
+  protected set scenes(val: SceneManager) {
+    this._scenes = val;
+  }
+  protected get scenes(): SceneManager {
+    return this._scenes ?? this.world.scenes!;
+  }
 
   @Inject()
-  protected turns: TurnManager = undefined as any;
+  protected set storage(val: StorageManager) {
+    this._storage = val;
+  }
+  protected get storage(): StorageManager {
+    return this._storage ?? this.world.storage;
+  }
+
+  @Inject()
+  protected set turns(val: TurnManager) {
+    this._turns = val;
+  }
+  protected get turns(): TurnManager {
+    return this._turns ?? this.world.turns!;
+  }
 
   constructor(world: World) {
     super(world);
@@ -29,7 +48,6 @@ export abstract class Director extends PassiveSystem {
   /** Hook for subclasses to perform initial game setup. */
   protected onInitialize(): void {}
 
-
   /**
    * Standard logic for when a player dies.
    */
@@ -38,8 +56,8 @@ export abstract class Director extends PassiveSystem {
     console.log("[Director] Player has died. Transitioning to Game Over.");
     // 1. Perform any 'last rites' (save high score, etc)
     // 2. Switch scene
-    this.turns.pause();
-    this.world.scenes?.switchTo(this.getGameOverScene());
+    (this.turns ?? this.world.turns)?.pause();
+    (this.scenes ?? this.world.scenes)?.switchTo(this.getGameOverScene());
   }
 
   /**
@@ -48,8 +66,8 @@ export abstract class Director extends PassiveSystem {
   @Subscribe("EXIT_REACHED")
   public onExitReached(): void {
     console.log("[Director] Exit reached. Moving to next floor.");
-    this.storage.save("autosave"); // Auto-save on floor transition
-    this.world.scenes?.switchTo(this.getNextLevelScene());
+    (this.storage ?? this.world.storage)?.save("autosave"); // Auto-save on floor transition
+    (this.scenes ?? this.world.scenes)?.switchTo(this.getNextLevelScene());
   }
 
   /**
@@ -57,8 +75,8 @@ export abstract class Director extends PassiveSystem {
    * the game state is preserved.
    */
   public changeScene(nextScene: Scene, shouldSave = true): void {
-    if (shouldSave) this.storage.save("checkpoint");
-    this.world.scenes?.switchTo(nextScene);
+    if (shouldSave) (this.storage ?? this.world.storage)?.save("checkpoint");
+    (this.scenes ?? this.world.scenes)?.switchTo(nextScene);
   }
 
   // Abstract methods to be implemented by your specific game logic

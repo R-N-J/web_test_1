@@ -6,6 +6,9 @@ import { All, Inject, After, Before, Priority, Subscribe, Interval, Singleton } 
 import { Aspect } from "../ECS/Aspect";
 import { EntityId } from "../ECS/Archetype";
 import { InternalComponents, EngineStats } from "../ECS/InternalComponents";
+import { Director } from "../ECS/Director";
+import { Scene } from "../ECS/Scene";
+import { Engine } from "../ECS/Engine";
 
 // Component IDs
 const POSITION = 100;
@@ -1634,6 +1637,131 @@ export function testSystems() {
 
   passSys.customAction();
   assert.strictEqual(passSys.manualCalls, 1, "PassiveSystem responds to manual calls");
+
+  // ==========================================
+  // 12. Director Lifecycle, Injection, and Event-Driven Transitions
+  // ==========================================
+  {
+    const storageMap = new Map<string, string>();
+    const mockLocalStorage = {
+      getItem: (key: string) => storageMap.get(key) ?? null,
+      setItem: (key: string, value: string) => storageMap.set(key, String(value)),
+      removeItem: (key: string) => storageMap.delete(key),
+      clear: () => storageMap.clear(),
+      key: (i: number) => Array.from(storageMap.keys())[i] ?? null,
+      get length() { return storageMap.size; }
+    };
+    const prevLocalStorage = (globalThis as unknown as Record<string, unknown>).localStorage;
+    (globalThis as unknown as Record<string, unknown>).localStorage = mockLocalStorage;
+
+    try {
+      const dirWorld = new World();
+      const dirScheduler = new Scheduler(dirWorld);
+      dirWorld.setScheduler(dirScheduler);
+
+      class MockScene implements Scene {
+        constructor(public readonly name: string) {}
+        public entered = false;
+        public exited = false;
+        public onEnter(): void {
+          this.entered = true;
+        }
+        public onExit(): void {
+          this.exited = true;
+        }
+      }
+
+      const startScene = new MockScene("StartScene");
+      const gameOverScene = new MockScene("GameOverScene");
+      const nextLevelScene = new MockScene("NextLevelScene");
+      const customScene = new MockScene("CustomScene");
+
+      let initializedHookCalled = false;
+
+      class TestGameDirector extends Director {
+        public override onInitialize(): void {
+          initializedHookCalled = true;
+        }
+
+        // Expose injected fields for assertions
+        public getInjectedScenes() { return this.scenes; }
+        public getInjectedStorage() { return this.storage; }
+        public getInjectedTurns() { return this.turns; }
+
+        protected override getGameOverScene(): Scene {
+          return gameOverScene;
+        }
+
+        protected override getNextLevelScene(): Scene {
+          return nextLevelScene;
+        }
+      }
+
+      // 12.1: Constructor calls onInitialize()
+      const director = new TestGameDirector(dirWorld);
+      assert.strictEqual(initializedHookCalled, true, "Director constructor must invoke onInitialize()");
+
+      // 12.2: Scheduler registration injects scenes, storage, and turns
+      dirScheduler.add(director);
+      assert.strictEqual(director.getInjectedScenes(), dirWorld.scenes, "scenes should be injected");
+      assert.strictEqual(director.getInjectedStorage(), dirWorld.storage, "storage should be injected");
+      assert.strictEqual(director.getInjectedTurns(), dirWorld.turns, "turns should be injected");
+
+      // 12.3: Director is PassiveSystem and does not process entities on scheduler.update()
+      dirScheduler.update(1.0);
+
+      // Initial scene start
+      dirWorld.scenes!.switchTo(startScene);
+      assert.strictEqual(dirWorld.scenes!.getCurrentSceneName(), "StartScene");
+      assert.strictEqual(startScene.entered, true);
+
+      // 12.4: PLAYER_DIED event pauses turns and transitions to GameOverScene
+      assert.strictEqual(dirWorld.turns!.isPaused, false);
+      dirWorld.events.publish({ type: "PLAYER_DIED" });
+      assert.strictEqual(dirWorld.turns!.isPaused, true, "PLAYER_DIED must pause turn manager");
+      assert.strictEqual(dirWorld.scenes!.getCurrentSceneName(), "GameOverScene", "PLAYER_DIED must transition to GameOverScene");
+      assert.strictEqual(gameOverScene.entered, true);
+      assert.strictEqual(startScene.exited, true);
+
+      // 12.5: EXIT_REACHED event saves autosave snapshot and transitions to NextLevelScene
+      dirWorld.turns!.resume();
+      dirWorld.events.publish({ type: "EXIT_REACHED" });
+      assert.strictEqual(dirWorld.scenes!.getCurrentSceneName(), "NextLevelScene", "EXIT_REACHED must transition to NextLevelScene");
+      assert.strictEqual(nextLevelScene.entered, true);
+      assert.strictEqual(dirWorld.storage.exists("autosave"), true, "EXIT_REACHED must create autosave snapshot");
+
+      // 12.6: changeScene() with checkpoint saving vs without saving
+      director.changeScene(customScene, true);
+      assert.strictEqual(dirWorld.scenes!.getCurrentSceneName(), "CustomScene", "changeScene must switch to target scene");
+      assert.strictEqual(customScene.entered, true);
+      assert.strictEqual(dirWorld.storage.exists("checkpoint"), true, "changeScene(..., true) must create checkpoint save");
+
+      const directScene = new MockScene("DirectScene");
+      director.changeScene(directScene, false);
+      assert.strictEqual(dirWorld.scenes!.getCurrentSceneName(), "DirectScene", "changeScene must switch to direct scene");
+
+      // Clean up test saves from localStorage
+      dirWorld.storage.delete("autosave");
+      dirWorld.storage.delete("checkpoint");
+
+      // 12.7: Engine bootstrapping with Director
+      const engine = new Engine({
+        components: { POSITION, VELOCITY },
+        systems: [],
+        director: TestGameDirector,
+      });
+      assert.ok(engine.director instanceof TestGameDirector, "Engine must instantiate and register Director");
+      assert.strictEqual(engine.director.getInjectedScenes(), engine.world.scenes, "Engine must inject scenes into Director");
+      assert.strictEqual(engine.director.getInjectedStorage(), engine.world.storage, "Engine must inject storage into Director");
+      assert.strictEqual(engine.director.getInjectedTurns(), engine.world.turns, "Engine must inject turns into Director");
+    } finally {
+      if (prevLocalStorage !== undefined) {
+        (globalThis as unknown as Record<string, unknown>).localStorage = prevLocalStorage;
+      } else {
+        delete (globalThis as unknown as Record<string, unknown>).localStorage;
+      }
+    }
+  }
 
   console.log("Systems & Decorators tests completed!");
 }
